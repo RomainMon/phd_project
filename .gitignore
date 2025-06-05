@@ -1,0 +1,13 @@
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+.Rdata
+.httr-oauth
+.DS_Store
+.quarto
+README.Rmd
+data
+project_qgis_glt.qgz
+github-recovery-codes.txt
+phd_project.Rproj
