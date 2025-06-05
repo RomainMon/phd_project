@@ -7,7 +7,6 @@
 library(dplyr)
 library(tidyr)
 library(readxl)
-library(gtsummary)
 library(here)
 
 ### Import data (Censo agropecuario) ------
