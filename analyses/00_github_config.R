@@ -4,6 +4,8 @@
 install.packages("usethis")
 library(usethis)
 
+usethis::use_git()
+
 ## Open ~/.Renviron file ----
 usethis::edit_r_environ()
 # • Modify '~/.Renviron'
@@ -13,6 +15,9 @@ usethis::edit_r_environ()
 usethis::edit_r_profile()
 # • Modify '~/.Rprofile'
 # • Restart R for changes to take effect
+
+## Edit .gitignore file
+usethis::edit_git_ignore(scope = "project")
 
 
 # The .Renviron file is a good place to store secrets (API tokens, password, etc.). This file is read by at startup. To access these variables, you can use the function Sys.getenv("GITHUB_PAT").
