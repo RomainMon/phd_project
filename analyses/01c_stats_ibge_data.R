@@ -107,6 +107,20 @@ ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
   labs(x = "Proportion", y = "City", title = "Legal status of lands") +
   theme_minimal()
 
+## Compute means
+# Define the selected towns
+selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
+                    "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
+
+df_long %>%
+  dplyr::filter(City_name %in% selected_towns) %>%
+  dplyr::group_by(Category) %>%
+  dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
+  dplyr::mutate(
+    mean_proportion = N_cat / sum(N_cat) * 100
+  ) %>% 
+  dplyr::arrange(desc(mean_proportion))
+
 
 ###### Producer relationship with lands ----
 ## Plot counts
@@ -144,6 +158,19 @@ ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
   labs(x = "Proportion", y = "City", title = "Producer relationship with lands") +
   theme_minimal()
 
+## Compute means
+# Define the selected towns
+selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
+                   "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
+
+df_long %>%
+  dplyr::filter(City_name %in% selected_towns) %>%
+  dplyr::group_by(Category) %>%
+  dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
+  dplyr::mutate(
+    mean_proportion = N_cat / sum(N_cat) * 100
+  ) %>% 
+  dplyr::arrange(desc(mean_proportion))
 
 ##### tabela6754 ----
 # Replace NAs with 0
@@ -189,6 +216,19 @@ ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
   labs(x = "Proportion", y = "City", title = "Type of production on land (farm number)") +
   theme_minimal()
 
+## Compute means
+# Define the selected towns
+selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
+                   "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
+
+df_long %>%
+  dplyr::filter(City_name %in% selected_towns) %>%
+  dplyr::group_by(Category) %>%
+  dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
+  dplyr::mutate(
+    mean_proportion = N_cat / sum(N_cat) * 100
+  ) %>% 
+  dplyr::arrange(desc(mean_proportion))
 
 ###### Type of production on land (area) ----
 ## Plot counts
@@ -225,6 +265,19 @@ ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
   labs(x = "Proportion", y = "City", title = "Type of production on land (area)") +
   theme_minimal()
 
+## Compute means
+# Define the selected towns
+selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
+                   "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
+
+df_long %>%
+  dplyr::filter(City_name %in% selected_towns) %>%
+  dplyr::group_by(Category) %>%
+  dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
+  dplyr::mutate(
+    mean_proportion = N_cat / sum(N_cat) * 100
+  ) %>% 
+  dplyr::arrange(desc(mean_proportion))
 
 
 ##### tabela6755 ----
@@ -271,6 +324,20 @@ ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
   labs(x = "Proportion", y = "City", title = "Producer education (reading and writing)") +
   theme_minimal()
 
+## Compute means
+# Define the selected towns
+selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
+                   "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
+
+df_long %>%
+  dplyr::filter(City_name %in% selected_towns) %>%
+  dplyr::group_by(Category) %>%
+  dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
+  dplyr::mutate(
+    mean_proportion = N_cat / sum(N_cat) * 100
+  ) %>% 
+  dplyr::arrange(desc(mean_proportion))
+
 ###### Producer education ----
 ## Plot counts
 # Reshape (to long)
@@ -305,6 +372,20 @@ ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
             size = 3, color = "white", check_overlap = TRUE) +
   labs(x = "Proportion", y = "City", title = "Producer education") +
   theme_minimal()
+
+## Compute means
+# Define the selected towns
+selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
+                   "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
+
+df_long %>%
+  dplyr::filter(City_name %in% selected_towns) %>%
+  dplyr::group_by(Category) %>%
+  dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
+  dplyr::mutate(
+    mean_proportion = N_cat / sum(N_cat) * 100
+  ) %>% 
+  dplyr::arrange(desc(mean_proportion))
 
 ###### Producer age ----
 ## Plot counts
@@ -341,6 +422,19 @@ ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
   labs(x = "Proportion", y = "City", title = "Producer age") +
   theme_minimal()
 
+## Compute means
+# Define the selected towns
+selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
+                   "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
+
+df_long %>%
+  dplyr::filter(City_name %in% selected_towns) %>%
+  dplyr::group_by(Category) %>%
+  dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
+  dplyr::mutate(
+    mean_proportion = N_cat / sum(N_cat) * 100
+  ) %>% 
+  dplyr::arrange(desc(mean_proportion))
 
 
 ###### Producer genre ----
@@ -378,6 +472,19 @@ ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
   labs(x = "Proportion", y = "City", title = "Producer genre") +
   theme_minimal()
 
+## Compute means
+# Define the selected towns
+selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
+                   "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
+
+df_long %>%
+  dplyr::filter(City_name %in% selected_towns) %>%
+  dplyr::group_by(Category) %>%
+  dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
+  dplyr::mutate(
+    mean_proportion = N_cat / sum(N_cat) * 100
+  ) %>% 
+  dplyr::arrange(desc(mean_proportion))
 
 
 
@@ -425,6 +532,20 @@ ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
   labs(x = "Proportion", y = "City", title = "Technical orientation received on-farm") +
   theme_minimal()
 
+## Compute means
+# Define the selected towns
+selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
+                   "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
+
+df_long %>%
+  dplyr::filter(City_name %in% selected_towns) %>%
+  dplyr::group_by(Category) %>%
+  dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
+  dplyr::mutate(
+    mean_proportion = N_cat / sum(N_cat) * 100
+  ) %>% 
+  dplyr::arrange(desc(mean_proportion))
+
 ###### Origin of technical orientation received on-farm ----
 ## Plot counts
 # Reshape (to long)
@@ -460,6 +581,19 @@ ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
   labs(x = "Proportion", y = "City", title = "Origin of technical orientation received on-farm") +
   theme_minimal()
 
+## Compute means
+# Define the selected towns
+selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
+                   "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
+
+df_long %>%
+  dplyr::filter(City_name %in% selected_towns) %>%
+  dplyr::group_by(Category) %>%
+  dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
+  dplyr::mutate(
+    mean_proportion = N_cat / sum(N_cat) * 100
+  ) %>% 
+  dplyr::arrange(desc(mean_proportion))
 
 ##### tabela6769 ----
 # Replace NAs with 0
@@ -506,6 +640,21 @@ ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
   labs(x = "Proportion", y = "City", title = "Type of agricultural production (farm number)") +
   theme_minimal()
 
+## Compute means
+# Define the selected towns
+selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
+                   "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
+
+df_long %>%
+  dplyr::filter(City_name %in% selected_towns) %>%
+  dplyr::group_by(Category) %>%
+  dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
+  dplyr::mutate(
+    mean_proportion = N_cat / sum(N_cat) * 100
+  ) %>% 
+  dplyr::arrange(desc(mean_proportion)) %>% 
+  print(n=30)
+
 ###### Type of agricultural production (area) ----
 ## Plot counts
 # Reshape (to long)
@@ -542,6 +691,20 @@ ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
   labs(x = "Proportion", y = "City", title = "Type of agricultural production (area)") +
   theme_minimal()
 
+## Compute means
+# Define the selected towns
+selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
+                   "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
+
+df_long %>%
+  dplyr::filter(City_name %in% selected_towns) %>%
+  dplyr::group_by(Category) %>%
+  dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
+  dplyr::mutate(
+    mean_proportion = N_cat / sum(N_cat) * 100
+  ) %>% 
+  dplyr::arrange(desc(mean_proportion)) %>% 
+  print(n=30)
 
 ##### tabela6770 ----
 # Replace NAs with 0
@@ -587,6 +750,19 @@ ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
   labs(x = "Proportion", y = "City", title = "Legal status of the producer (farm number)") +
   theme_minimal()
 
+## Compute means
+# Define the selected towns
+selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
+                   "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
+
+df_long %>%
+  dplyr::filter(City_name %in% selected_towns) %>%
+  dplyr::group_by(Category) %>%
+  dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
+  dplyr::mutate(
+    mean_proportion = N_cat / sum(N_cat) * 100
+  ) %>% 
+  dplyr::arrange(desc(mean_proportion))
 
 ##### tabela6772 ----
 # Replace NAs with 0
@@ -633,6 +809,21 @@ ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
   theme_minimal()
 
 
+## Compute means
+# Define the selected towns
+selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
+                   "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
+
+df_long %>%
+  dplyr::filter(City_name %in% selected_towns) %>%
+  dplyr::group_by(Category) %>%
+  dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
+  dplyr::mutate(
+    mean_proportion = N_cat / sum(N_cat) * 100
+  ) %>% 
+  dplyr::arrange(desc(mean_proportion))
+
+
 ##### tabela6773 ----
 # Replace NAs with 0
 tabela6773 = tabela6773 %>%
@@ -677,6 +868,22 @@ ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
   labs(x = "Proportion", y = "City", title = "Home of the owner (farm number)") +
   theme_minimal()
 
+
+## Compute means
+# Define the selected towns
+selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
+                   "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
+
+df_long %>%
+  dplyr::filter(City_name %in% selected_towns) %>%
+  dplyr::group_by(Category) %>%
+  dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
+  dplyr::mutate(
+    mean_proportion = N_cat / sum(N_cat) * 100
+  ) %>% 
+  dplyr::arrange(desc(mean_proportion))
+
+
 ###### Farm aim (farm number) ----
 ## Plot counts
 # Reshape (to long)
@@ -711,6 +918,21 @@ ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
             size = 3, color = "white", check_overlap = TRUE) +
   labs(x = "Proportion", y = "City", title = "Farm aim (farm number)") +
   theme_minimal()
+
+
+## Compute means
+# Define the selected towns
+selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
+                   "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
+
+df_long %>%
+  dplyr::filter(City_name %in% selected_towns) %>%
+  dplyr::group_by(Category) %>%
+  dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
+  dplyr::mutate(
+    mean_proportion = N_cat / sum(N_cat) * 100
+  ) %>% 
+  dplyr::arrange(desc(mean_proportion))
 
 
 ##### tabela6774 ----
@@ -757,6 +979,20 @@ ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
   labs(x = "Proportion", y = "City", title = "Land owners and renters (farm number)") +
   theme_minimal()
 
+## Compute means
+# Define the selected towns
+selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
+                   "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
+
+df_long %>%
+  dplyr::filter(City_name %in% selected_towns) %>%
+  dplyr::group_by(Category) %>%
+  dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
+  dplyr::mutate(
+    mean_proportion = N_cat / sum(N_cat) * 100
+  ) %>% 
+  dplyr::arrange(desc(mean_proportion))
+
 ###### Type of land acquisition (farm number) ----
 ## Plot counts
 # Reshape (to long)
@@ -791,6 +1027,20 @@ ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
             size = 3, color = "white", check_overlap = TRUE) +
   labs(x = "Proportion", y = "City", title = "Type of land acquisition (farm number)") +
   theme_minimal()
+
+## Compute means
+# Define the selected towns
+selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
+                   "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
+
+df_long %>%
+  dplyr::filter(City_name %in% selected_towns) %>%
+  dplyr::group_by(Category) %>%
+  dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
+  dplyr::mutate(
+    mean_proportion = N_cat / sum(N_cat) * 100
+  ) %>% 
+  dplyr::arrange(desc(mean_proportion))
 
 ###### Type of land acquisition (without title) (farm number) ----
 ## Plot counts
@@ -827,6 +1077,19 @@ ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
   labs(x = "Proportion", y = "City", title = "Type of land acquisition (without title) (farm number)") +
   theme_minimal()
 
+## Compute means
+# Define the selected towns
+selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
+                   "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
+
+df_long %>%
+  dplyr::filter(City_name %in% selected_towns) %>%
+  dplyr::group_by(Category) %>%
+  dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
+  dplyr::mutate(
+    mean_proportion = N_cat / sum(N_cat) * 100
+  ) %>% 
+  dplyr::arrange(desc(mean_proportion))
 
 
 ##### tabela6836----
@@ -873,6 +1136,20 @@ ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
   labs(x = "Proportion", y = "City", title = "Type of forest product (farm number)") +
   theme_minimal()
 
+## Compute means
+# Define the selected towns
+selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
+                   "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
+
+df_long %>%
+  dplyr::filter(City_name %in% selected_towns) %>%
+  dplyr::group_by(Category) %>%
+  dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
+  dplyr::mutate(
+    mean_proportion = N_cat / sum(N_cat) * 100
+  ) %>% 
+  dplyr::arrange(desc(mean_proportion))
+
 ###### Type of forest production (tree units) ----
 ## Plot counts
 # Reshape (to long)
@@ -908,6 +1185,19 @@ ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
   labs(x = "Proportion", y = "City", title = "Type of forest product (tree units)") +
   theme_minimal()
 
+## Compute means
+# Define the selected towns
+selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
+                   "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
+
+df_long %>%
+  dplyr::filter(City_name %in% selected_towns) %>%
+  dplyr::group_by(Category) %>%
+  dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
+  dplyr::mutate(
+    mean_proportion = N_cat / sum(N_cat) * 100
+  ) %>% 
+  dplyr::arrange(desc(mean_proportion))
 
 ##### tabela6845----
 # Replace NAs with 0
@@ -953,6 +1243,19 @@ ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
   labs(x = "Proportion", y = "City", title = "Type of agricultural management (farm number)") +
   theme_minimal()
 
+## Compute means
+# Define the selected towns
+selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
+                   "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
+
+df_long %>%
+  dplyr::filter(City_name %in% selected_towns) %>%
+  dplyr::group_by(Category) %>%
+  dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
+  dplyr::mutate(
+    mean_proportion = N_cat / sum(N_cat) * 100
+  ) %>% 
+  dplyr::arrange(desc(mean_proportion))
 
 ##### tabela6879----
 # Replace NAs with 0
@@ -998,6 +1301,19 @@ ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
   labs(x = "Proportion", y = "City", title = "Farm value (farm number)") +
   theme_minimal()
 
+## Compute means
+# Define the selected towns
+selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
+                   "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
+
+df_long %>%
+  dplyr::filter(City_name %in% selected_towns) %>%
+  dplyr::group_by(Category) %>%
+  dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
+  dplyr::mutate(
+    mean_proportion = N_cat / sum(N_cat) * 100
+  ) %>% 
+  dplyr::arrange(desc(mean_proportion))
 
 ##### tabela6887----
 # Replace NAs with 0
@@ -1043,6 +1359,19 @@ ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
   labs(x = "Proportion", y = "City", title = "Family relationship with the staff employed (farm number)") +
   theme_minimal()
 
+## Compute means
+# Define the selected towns
+selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
+                   "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
+
+df_long %>%
+  dplyr::filter(City_name %in% selected_towns) %>%
+  dplyr::group_by(Category) %>%
+  dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
+  dplyr::mutate(
+    mean_proportion = N_cat / sum(N_cat) * 100
+  ) %>% 
+  dplyr::arrange(desc(mean_proportion))
 
 ###### Characteristics of family members employed (farm number) ----
 ## Plot counts
@@ -1079,6 +1408,19 @@ ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
   labs(x = "Proportion", y = "City", title = "Characteristics of family members employed (farm number)") +
   theme_minimal()
 
+## Compute means
+# Define the selected towns
+selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
+                   "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
+
+df_long %>%
+  dplyr::filter(City_name %in% selected_towns) %>%
+  dplyr::group_by(Category) %>%
+  dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
+  dplyr::mutate(
+    mean_proportion = N_cat / sum(N_cat) * 100
+  ) %>% 
+  dplyr::arrange(desc(mean_proportion))
 
 ###### Type of non-family staff employed (farm number) ----
 ## Plot counts
@@ -1115,7 +1457,19 @@ ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
   labs(x = "Proportion", y = "City", title = "Type of non-family staff employed (farm number)") +
   theme_minimal()
 
+## Compute means
+# Define the selected towns
+selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
+                   "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
 
+df_long %>%
+  dplyr::filter(City_name %in% selected_towns) %>%
+  dplyr::group_by(Category) %>%
+  dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
+  dplyr::mutate(
+    mean_proportion = N_cat / sum(N_cat) * 100
+  ) %>% 
+  dplyr::arrange(desc(mean_proportion))
 
 ##### tabela6907----
 # Replace NAs with 0
