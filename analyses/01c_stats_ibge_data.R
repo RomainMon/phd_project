@@ -1480,7 +1480,7 @@ tabela6907 = tabela6907 %>%
 # Info data (Sidra)
 # info_sidra(6907, wb = TRUE)
 
-###### Type of cattle (farm number) ----
+###### Type of livestock (farm number) ----
 ## Plot counts
 # Reshape (to long)
 df_long = tabela6907 %>% 
@@ -1496,7 +1496,7 @@ ggplot(df_long, aes(y = City_name, x = N, fill = Category)) +
             position = position_stack(vjust = 0.5),
             size = 3, color = "white",
             check_overlap = TRUE) +
-  labs(x = "N", y = "City", title = "Type of cattle (farm number)") +
+  labs(x = "N", y = "City", title = "Type of livestock (farm number)") +
   theme_minimal()
 
 ## Plot proportions
@@ -1512,11 +1512,24 @@ ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
   geom_text(aes(label = round(Proportion, 2)),
             position = position_stack(vjust = 0.5),
             size = 3, color = "white", check_overlap = TRUE) +
-  labs(x = "Proportion", y = "City", title = "Type of cattle (farm number)") +
+  labs(x = "Proportion", y = "City", title = "Type of livestock (farm number)") +
   theme_minimal()
 
+## Compute means
+# Define the selected towns
+selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
+                   "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
 
-###### Type of cattle (number of heads) ----
+df_long %>%
+  dplyr::filter(City_name %in% selected_towns) %>%
+  dplyr::group_by(Category) %>%
+  dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
+  dplyr::mutate(
+    mean_proportion = N_cat / sum(N_cat) * 100
+  ) %>% 
+  dplyr::arrange(desc(mean_proportion))
+
+###### Type of livestock (number of heads) ----
 ## Plot counts
 # Reshape (to long)
 df_long = tabela6907 %>% 
@@ -1532,7 +1545,7 @@ ggplot(df_long, aes(y = City_name, x = N, fill = Category)) +
             position = position_stack(vjust = 0.5),
             size = 3, color = "white",
             check_overlap = TRUE) +
-  labs(x = "N", y = "City", title = "Type of cattle (number of heads)") +
+  labs(x = "N", y = "City", title = "Type of livestock (number of heads)") +
   theme_minimal()
 
 ## Plot proportions
@@ -1548,10 +1561,22 @@ ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
   geom_text(aes(label = round(Proportion, 2)),
             position = position_stack(vjust = 0.5),
             size = 3, color = "white", check_overlap = TRUE) +
-  labs(x = "Proportion", y = "City", title = "Type of cattle (number of heads)") +
+  labs(x = "Proportion", y = "City", title = "Type of livestock (number of heads)") +
   theme_minimal()
 
+## Compute means
+# Define the selected towns
+selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
+                   "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
 
+df_long %>%
+  dplyr::filter(City_name %in% selected_towns) %>%
+  dplyr::group_by(Category) %>%
+  dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
+  dplyr::mutate(
+    mean_proportion = N_cat / sum(N_cat) * 100
+  ) %>% 
+  dplyr::arrange(desc(mean_proportion))
 
 ##### tabela6908----
 # Replace NAs with 0
@@ -1562,7 +1587,7 @@ tabela6908 = tabela6908 %>%
 # Info data (Sidra)
 # info_sidra(6908, wb = TRUE)
 
-###### Cattle farm size (farm number) ----
+###### Livestock farm size (farm number) ----
 ## Plot counts
 # Reshape (to long)
 df_long = tabela6908 %>% 
@@ -1578,7 +1603,7 @@ ggplot(df_long, aes(y = City_name, x = N, fill = Category)) +
             position = position_stack(vjust = 0.5),
             size = 3, color = "white",
             check_overlap = TRUE) +
-  labs(x = "N", y = "City", title = "Cattle farm size (farm number)") +
+  labs(x = "N", y = "City", title = "Livestock farm size (farm number)") +
   theme_minimal()
 
 ## Plot proportions
@@ -1594,10 +1619,22 @@ ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
   geom_text(aes(label = round(Proportion, 2)),
             position = position_stack(vjust = 0.5),
             size = 3, color = "white", check_overlap = TRUE) +
-  labs(x = "Proportion", y = "City", title = "Cattle farm size (farm number)") +
+  labs(x = "Proportion", y = "City", title = "Livestock farm size (farm number)") +
   theme_minimal()
 
+## Compute means
+# Define the selected towns
+selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
+                   "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
 
+df_long %>%
+  dplyr::filter(City_name %in% selected_towns) %>%
+  dplyr::group_by(Category) %>%
+  dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
+  dplyr::mutate(
+    mean_proportion = N_cat / sum(N_cat) * 100
+  ) %>% 
+  dplyr::arrange(desc(mean_proportion))
 
 ##### tabela6946----
 # Replace NAs with 0
@@ -1643,7 +1680,19 @@ ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
   labs(x = "Proportion", y = "City", title = "Forest production size (farm number)") +
   theme_minimal()
 
+## Compute means
+# Define the selected towns
+selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
+                   "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
 
+df_long %>%
+  dplyr::filter(City_name %in% selected_towns) %>%
+  dplyr::group_by(Category) %>%
+  dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
+  dplyr::mutate(
+    mean_proportion = N_cat / sum(N_cat) * 100
+  ) %>% 
+  dplyr::arrange(desc(mean_proportion))
 
 ##### tabela6947----
 # Replace NAs with 0
@@ -1689,7 +1738,19 @@ ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
   labs(x = "Proportion", y = "City", title = "Types of forest product (farm number)") +
   theme_minimal()
 
+## Compute means
+# Define the selected towns
+selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
+                   "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
 
+df_long %>%
+  dplyr::filter(City_name %in% selected_towns) %>%
+  dplyr::group_by(Category) %>%
+  dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
+  dplyr::mutate(
+    mean_proportion = N_cat / sum(N_cat) * 100
+  ) %>% 
+  dplyr::arrange(desc(mean_proportion))
 
 ##### tabela6955----
 # Replace NAs with 0
@@ -1735,6 +1796,20 @@ ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
   labs(x = "Proportion", y = "City", title = "Types of permanent crops (> 50 feet) (farm number)") +
   theme_minimal()
 
+## Compute means
+# Define the selected towns
+selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
+                   "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
+
+df_long %>%
+  dplyr::filter(City_name %in% selected_towns) %>%
+  dplyr::group_by(Category) %>%
+  dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
+  dplyr::mutate(
+    mean_proportion = N_cat / sum(N_cat) * 100
+  ) %>% 
+  dplyr::arrange(desc(mean_proportion)) %>% 
+  print(n=70)
 
 ###### Types of permanent crops (< 50 feet) (farm number) ----
 ## Plot counts
@@ -1771,3 +1846,804 @@ ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
   labs(x = "Proportion", y = "City", title = "Types of permanent crops (< 50 feet) (farm number)") +
   theme_minimal()
 
+## Compute means
+# Define the selected towns
+selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
+                   "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
+
+df_long %>%
+  dplyr::filter(City_name %in% selected_towns) %>%
+  dplyr::group_by(Category) %>%
+  dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
+  dplyr::mutate(
+    mean_proportion = N_cat / sum(N_cat) * 100
+  ) %>% 
+  dplyr::arrange(desc(mean_proportion)) %>% 
+  print(n=70)
+
+#### PAM ----
+
+##### tabela5457_1 ----
+# Replace NAs with 0
+tabela5457_1 = tabela5457_1 %>%
+  dplyr::mutate(across(where(is.logical), ~ as.numeric(.))) %>% 
+  dplyr::mutate(across(everything(), ~ replace_na(., 0)))
+
+# Info data (Sidra)
+# info_sidra(5457, wb = TRUE)
+
+###### Temporary and permanent crops (area planted) ----
+## Plot counts
+# Reshape (to long)
+df_long = tabela5457_1 %>% 
+  dplyr::select(c(City_name, Abacate_area_plant_ha:Uva_area_plant_ha)) %>% 
+  tidyr::pivot_longer(cols = -City_name, 
+                      names_to = "Category", 
+                      values_to = "N")
+
+# Plot
+ggplot(df_long, aes(y = City_name, x = N, fill = Category)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = round(N, 2)),
+            position = position_stack(vjust = 0.5),
+            size = 3, color = "white",
+            check_overlap = TRUE) +
+  labs(x = "N", y = "City", title = "Temporary and permanent crops (area planted, ha)") +
+  theme_minimal()
+
+## Plot proportions
+# Reshape (to long)
+df_long_prop = df_long %>%
+  group_by(City_name) %>%
+  mutate(Proportion = N / sum(N, na.rm = TRUE)) %>%
+  ungroup()
+
+# Plot
+ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = round(Proportion, 2)),
+            position = position_stack(vjust = 0.5),
+            size = 3, color = "white", check_overlap = TRUE) +
+  labs(x = "Proportion", y = "City", title = "Temporary and permanent crops (area planted, ha)") +
+  theme_minimal()
+
+## Compute means
+# Define the selected towns
+selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
+                   "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
+
+df_long %>%
+  dplyr::filter(City_name %in% selected_towns) %>%
+  dplyr::group_by(Category) %>%
+  dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
+  dplyr::mutate(
+    mean_proportion = N_cat / sum(N_cat) * 100
+  ) %>% 
+  dplyr::arrange(desc(mean_proportion)) %>% 
+  print(n=65)
+
+##### tabela5457_3 ----
+# Replace NAs with 0
+tabela5457_3 = tabela5457_3 %>%
+  dplyr::mutate(across(where(is.logical), ~ as.numeric(.))) %>% 
+  dplyr::mutate(across(everything(), ~ replace_na(., 0)))
+
+# Info data (Sidra)
+# info_sidra(5457, wb = TRUE)
+
+###### Temporary and permanent crops (area harvested) ----
+## Plot counts
+# Reshape (to long)
+df_long = tabela5457_3 %>% 
+  dplyr::select(c(City_name, Abacate_area_colh_ha:Uva_area_colh_ha)) %>% 
+  tidyr::pivot_longer(cols = -City_name, 
+                      names_to = "Category", 
+                      values_to = "N")
+
+# Plot
+ggplot(df_long, aes(y = City_name, x = N, fill = Category)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = round(N, 2)),
+            position = position_stack(vjust = 0.5),
+            size = 3, color = "white",
+            check_overlap = TRUE) +
+  labs(x = "N", y = "City", title = "Temporary and permanent crops (area harvested)") +
+  theme_minimal()
+
+## Plot proportions
+# Reshape (to long)
+df_long_prop = df_long %>%
+  group_by(City_name) %>%
+  mutate(Proportion = N / sum(N, na.rm = TRUE)) %>%
+  ungroup()
+
+# Plot
+ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = round(Proportion, 2)),
+            position = position_stack(vjust = 0.5),
+            size = 3, color = "white", check_overlap = TRUE) +
+  labs(x = "Proportion", y = "City", title = "Temporary and permanent crops (area harvested)") +
+  theme_minimal()
+
+## Compute means
+# Define the selected towns
+selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
+                   "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
+
+df_long %>%
+  dplyr::filter(City_name %in% selected_towns) %>%
+  dplyr::group_by(Category) %>%
+  dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
+  dplyr::mutate(
+    mean_proportion = N_cat / sum(N_cat) * 100
+  ) %>% 
+  dplyr::arrange(desc(mean_proportion)) %>% 
+  print(n=65)
+
+##### tabela5457_5 ----
+# Replace NAs with 0
+tabela5457_5 = tabela5457_5 %>%
+  dplyr::mutate(across(where(is.logical), ~ as.numeric(.))) %>% 
+  dplyr::mutate(across(everything(), ~ replace_na(., 0)))
+
+# Info data (Sidra)
+# info_sidra(5457, wb = TRUE)
+
+###### Temporary and permanent crops (quantity produced, tons) ----
+## Plot counts
+# Reshape (to long)
+df_long = tabela5457_5 %>% 
+  dplyr::select(c(City_name, Abacate_qt_prod_t:Uva_qt_prod_t)) %>% 
+  tidyr::pivot_longer(cols = -City_name, 
+                      names_to = "Category", 
+                      values_to = "N")
+
+# Plot
+ggplot(df_long, aes(y = City_name, x = N, fill = Category)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = round(N, 2)),
+            position = position_stack(vjust = 0.5),
+            size = 3, color = "white",
+            check_overlap = TRUE) +
+  labs(x = "N", y = "City", title = "Temporary and permanent crops (quantity produced, tons)") +
+  theme_minimal()
+
+## Plot proportions
+# Reshape (to long)
+df_long_prop = df_long %>%
+  group_by(City_name) %>%
+  mutate(Proportion = N / sum(N, na.rm = TRUE)) %>%
+  ungroup()
+
+# Plot
+ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = round(Proportion, 2)),
+            position = position_stack(vjust = 0.5),
+            size = 3, color = "white", check_overlap = TRUE) +
+  labs(x = "Proportion", y = "City", title = "Temporary and permanent crops (quantity produced, tons)") +
+  theme_minimal()
+
+## Compute means
+# Define the selected towns
+selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
+                   "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
+
+df_long %>%
+  dplyr::filter(City_name %in% selected_towns) %>%
+  dplyr::group_by(Category) %>%
+  dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
+  dplyr::mutate(
+    mean_proportion = N_cat / sum(N_cat) * 100
+  ) %>% 
+  dplyr::arrange(desc(mean_proportion)) %>% 
+  print(n=65)
+
+##### tabela5457_6 ----
+# Replace NAs with 0
+tabela5457_6 = tabela5457_6 %>%
+  dplyr::mutate(across(where(is.logical), ~ as.numeric(.))) %>% 
+  dplyr::mutate(across(everything(), ~ replace_na(., 0)))
+
+# Info data (Sidra)
+# info_sidra(5457, wb = TRUE)
+
+###### Temporary and permanent crops (average production yield, Kilograms per Hectare) ----
+## Plot counts
+# Reshape (to long)
+df_long = tabela5457_6 %>% 
+  dplyr::select(c(City_name, Abacate_rend:Uva_rend)) %>% 
+  tidyr::pivot_longer(cols = -City_name, 
+                      names_to = "Category", 
+                      values_to = "N")
+
+# Plot
+ggplot(df_long, aes(y = City_name, x = N, fill = Category)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = round(N, 2)),
+            position = position_stack(vjust = 0.5),
+            size = 3, color = "white",
+            check_overlap = TRUE) +
+  labs(x = "N", y = "City", title = "Temporary and permanent crops (average production yield, Kilograms per Hectare)") +
+  theme_minimal()
+
+## Plot proportions
+# Reshape (to long)
+df_long_prop = df_long %>%
+  group_by(City_name) %>%
+  mutate(Proportion = N / sum(N, na.rm = TRUE)) %>%
+  ungroup()
+
+# Plot
+ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = round(Proportion, 2)),
+            position = position_stack(vjust = 0.5),
+            size = 3, color = "white", check_overlap = TRUE) +
+  labs(x = "Proportion", y = "City", title = "Temporary and permanent crops (average production yield, Kilograms per Hectare)") +
+  theme_minimal()
+
+## Compute means
+# Define the selected towns
+selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
+                   "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
+
+df_long %>%
+  dplyr::filter(City_name %in% selected_towns) %>%
+  dplyr::group_by(Category) %>%
+  dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
+  dplyr::mutate(
+    mean_proportion = N_cat / sum(N_cat) * 100
+  ) %>% 
+  dplyr::arrange(desc(mean_proportion)) %>% 
+  print(n=65)
+
+##### tabela5457_7 ----
+# Replace NAs with 0
+tabela5457_7 = tabela5457_7 %>%
+  dplyr::mutate(across(where(is.logical), ~ as.numeric(.))) %>% 
+  dplyr::mutate(across(everything(), ~ replace_na(., 0)))
+
+# Info data (Sidra)
+# info_sidra(5457, wb = TRUE)
+
+###### Temporary and permanent crops (value of production, Thousand Reais) ----
+## Plot counts
+# Reshape (to long)
+df_long = tabela5457_7 %>% 
+  dplyr::select(c(City_name, Abacate_valor_reais:Uva_valor_reais)) %>% 
+  tidyr::pivot_longer(cols = -City_name, 
+                      names_to = "Category", 
+                      values_to = "N")
+
+# Plot
+ggplot(df_long, aes(y = City_name, x = N, fill = Category)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = round(N, 2)),
+            position = position_stack(vjust = 0.5),
+            size = 3, color = "white",
+            check_overlap = TRUE) +
+  labs(x = "N", y = "City", title = "Temporary and permanent crops (value of production, Thousand Reais)") +
+  theme_minimal()
+
+## Plot proportions
+# Reshape (to long)
+df_long_prop = df_long %>%
+  group_by(City_name) %>%
+  mutate(Proportion = N / sum(N, na.rm = TRUE)) %>%
+  ungroup()
+
+# Plot
+ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = round(Proportion, 2)),
+            position = position_stack(vjust = 0.5),
+            size = 3, color = "white", check_overlap = TRUE) +
+  labs(x = "Proportion", y = "City", title = "Temporary and permanent crops (value of production, Thousand Reais)") +
+  theme_minimal()
+
+## Compute means
+# Define the selected towns
+selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
+                   "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
+
+df_long %>%
+  dplyr::filter(City_name %in% selected_towns) %>%
+  dplyr::group_by(Category) %>%
+  dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
+  dplyr::mutate(
+    mean_proportion = N_cat / sum(N_cat) * 100
+  ) %>% 
+  dplyr::arrange(desc(mean_proportion)) %>% 
+  print(n=65)
+
+#### PPM ----
+
+##### tabela74_1 ----
+# Replace NAs with 0
+tabela74_1 = tabela74_1 %>%
+  dplyr::mutate(across(where(is.logical), ~ as.numeric(.))) %>% 
+  dplyr::mutate(across(everything(), ~ replace_na(., 0)))
+
+# Info data (Sidra)
+# info_sidra(74, wb = TRUE)
+
+###### Production of animal origin ----
+## Plot counts
+# Reshape (to long)
+df_long = tabela74_1 %>% 
+  dplyr::select(c(City_name, Leite_qt:La_qt)) %>% 
+  tidyr::pivot_longer(cols = -City_name, 
+                      names_to = "Category", 
+                      values_to = "N")
+
+# Plot
+ggplot(df_long, aes(y = City_name, x = N, fill = Category)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = round(N, 2)),
+            position = position_stack(vjust = 0.5),
+            size = 3, color = "white",
+            check_overlap = TRUE) +
+  labs(x = "N", y = "City", title = "Production of animal origin") +
+  theme_minimal()
+
+## Plot proportions
+# Reshape (to long)
+df_long_prop = df_long %>%
+  group_by(City_name) %>%
+  mutate(Proportion = N / sum(N, na.rm = TRUE)) %>%
+  ungroup()
+
+# Plot
+ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = round(Proportion, 2)),
+            position = position_stack(vjust = 0.5),
+            size = 3, color = "white", check_overlap = TRUE) +
+  labs(x = "Proportion", y = "City", title = "Production of animal origin") +
+  theme_minimal()
+
+## Compute means
+# Define the selected towns
+selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
+                   "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
+
+df_long %>%
+  dplyr::filter(City_name %in% selected_towns) %>%
+  dplyr::group_by(Category) %>%
+  dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
+  dplyr::mutate(
+    mean_proportion = N_cat / sum(N_cat) * 100
+  ) %>% 
+  dplyr::arrange(desc(mean_proportion))
+
+##### tabela74_2 ----
+# Replace NAs with 0
+tabela74_2 = tabela74_2 %>%
+  dplyr::mutate(across(where(is.logical), ~ as.numeric(.))) %>% 
+  dplyr::mutate(across(everything(), ~ replace_na(., 0)))
+
+# Info data (Sidra)
+# info_sidra(74, wb = TRUE)
+
+###### Production of animal origin ----
+## Plot counts
+# Reshape (to long)
+df_long = tabela74_2 %>% 
+  dplyr::select(c(City_name, Leite_valor_reais:La_valor_reais)) %>% 
+  tidyr::pivot_longer(cols = -City_name, 
+                      names_to = "Category", 
+                      values_to = "N")
+
+# Plot
+ggplot(df_long, aes(y = City_name, x = N, fill = Category)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = round(N, 2)),
+            position = position_stack(vjust = 0.5),
+            size = 3, color = "white",
+            check_overlap = TRUE) +
+  labs(x = "N", y = "City", title = "Production of animal origin (value, reais)") +
+  theme_minimal()
+
+## Plot proportions
+# Reshape (to long)
+df_long_prop = df_long %>%
+  group_by(City_name) %>%
+  mutate(Proportion = N / sum(N, na.rm = TRUE)) %>%
+  ungroup()
+
+# Plot
+ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = round(Proportion, 2)),
+            position = position_stack(vjust = 0.5),
+            size = 3, color = "white", check_overlap = TRUE) +
+  labs(x = "Proportion", y = "City", title = "Production of animal origin (value, reais)") +
+  theme_minimal()
+
+## Compute means
+# Define the selected towns
+selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
+                   "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
+
+df_long %>%
+  dplyr::filter(City_name %in% selected_towns) %>%
+  dplyr::group_by(Category) %>%
+  dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
+  dplyr::mutate(
+    mean_proportion = N_cat / sum(N_cat) * 100
+  ) %>% 
+  dplyr::arrange(desc(mean_proportion))
+
+##### tabela94----
+# Replace NAs with 0
+tabela94 = tabela94 %>%
+  dplyr::mutate(across(where(is.logical), ~ as.numeric(.))) %>% 
+  dplyr::mutate(across(everything(), ~ replace_na(., 0)))
+
+# Info data (Sidra)
+# info_sidra(94, wb = TRUE)
+
+###### Milking cows ----
+## Plot counts
+# Reshape (to long)
+df_long = tabela94 %>% 
+  dplyr::select(c(City_name, Vacas_ordenhadas)) %>% 
+  tidyr::pivot_longer(cols = -City_name, 
+                      names_to = "Category", 
+                      values_to = "N")
+
+# Plot
+ggplot(df_long, aes(y = City_name, x = N, fill = Category)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = round(N, 2)),
+            position = position_stack(vjust = 0.5),
+            size = 3, color = "white",
+            check_overlap = TRUE) +
+  labs(x = "N", y = "City", title = "Milking cows") +
+  theme_minimal()
+
+##### tabela3939----
+# Replace NAs with 0
+tabela3939 = tabela3939 %>%
+  dplyr::mutate(across(where(is.logical), ~ as.numeric(.))) %>% 
+  dplyr::mutate(across(everything(), ~ replace_na(., 0)))
+
+# Info data (Sidra)
+# info_sidra(3939, wb = TRUE)
+
+###### Herd numbers ----
+## Plot counts
+# Reshape (to long)
+df_long = tabela3939 %>% 
+  dplyr::select(c(City_name, Bovino:Codornas)) %>% 
+  tidyr::pivot_longer(cols = -City_name, 
+                      names_to = "Category", 
+                      values_to = "N")
+
+# Plot
+ggplot(df_long, aes(y = City_name, x = N, fill = Category)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = round(N, 2)),
+            position = position_stack(vjust = 0.5),
+            size = 3, color = "white",
+            check_overlap = TRUE) +
+  labs(x = "N", y = "City", title = "Herd numbers") +
+  theme_minimal()
+
+## Plot proportions
+# Reshape (to long)
+df_long_prop = df_long %>%
+  group_by(City_name) %>%
+  mutate(Proportion = N / sum(N, na.rm = TRUE)) %>%
+  ungroup()
+
+# Plot
+ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = round(Proportion, 2)),
+            position = position_stack(vjust = 0.5),
+            size = 3, color = "white", check_overlap = TRUE) +
+  labs(x = "Proportion", y = "City", title = "Herd numbers") +
+  theme_minimal()
+
+## Compute means
+# Define the selected towns
+selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
+                   "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
+
+df_long %>%
+  dplyr::filter(City_name %in% selected_towns) %>%
+  dplyr::group_by(Category) %>%
+  dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
+  dplyr::mutate(
+    mean_proportion = N_cat / sum(N_cat) * 100
+  ) %>% 
+  dplyr::arrange(desc(mean_proportion))
+
+#### Other socio-demographics ----
+POP2024     = readxl::read_excel(here::here("outputs", "data", "IBGE", "POP2024_clean.xlsx"))
+tabela5434  = readxl::read_excel(here::here("outputs", "data", "IBGE", "tabela5434_2024_clean.xlsx"))
+tabela8175  = readxl::read_excel(here::here("outputs", "data", "IBGE", "tabela8175_2022_clean.xlsx"))
+tabela8176  = readxl::read_excel(here::here("outputs", "data", "IBGE", "tabela8176_2022_clean.xlsx"))
+tabela9514  = readxl::read_excel(here::here("outputs", "data", "IBGE", "tabela9514_2022_clean.xlsx"))
+tabela9923  = readxl::read_excel(here::here("outputs", "data", "IBGE", "tabela9923_2022_clean.xlsx"))
+
+##### POP2024----
+# Replace NAs with 0
+POP2024 = POP2024 %>%
+  dplyr::mutate(across(where(is.logical), ~ as.numeric(.))) %>% 
+  dplyr::mutate(across(everything(), ~ replace_na(., 0)))
+
+# Compute proportions
+POP2024 %>% 
+  dplyr::mutate(proportion = Pop2024*100/sum(Pop2024)) %>% 
+  dplyr::arrange(desc(proportion))
+
+##### tabela5434----
+# Replace NAs with 0
+tabela5434 = tabela5434 %>%
+  dplyr::mutate(across(where(is.logical), ~ as.numeric(.))) %>% 
+  dplyr::mutate(across(everything(), ~ replace_na(., 0)))
+
+# Info data (Sidra)
+# info_sidra(5434, wb = TRUE)
+
+###### People aged 14 and over by activity group (thousand persons) ----
+# Reshape (to long)
+df_long = tabela5434 %>% 
+  dplyr::filter(UF=="Rio de Janeiro") %>% 
+  dplyr::select(c(UF, Pessoas_total, Agricultura_pecuaria:Atividades_mal_definidas)) %>% 
+  tidyr::pivot_longer(cols = -UF, 
+                      names_to = "Category", 
+                      values_to = "N")
+
+# Compute proportions
+df_long %>% 
+  dplyr::mutate(proportion = N*100/8326) %>% 
+  dplyr::arrange(desc(proportion))
+
+##### tabela8175 ----
+# Replace NAs with 0
+tabela8175 = tabela8175 %>%
+  dplyr::mutate(across(where(is.logical), ~ as.numeric(.))) %>% 
+  dplyr::mutate(across(everything(), ~ replace_na(., 0)))
+
+# Info data (Sidra)
+# info_sidra(8175, wb = TRUE)
+
+###### Indigenous population ----
+# Compute proportions
+tabela8175 %>% 
+  dplyr::mutate(proportion = Indigenas_total*100/sum(Indigenas_total)) %>% 
+  dplyr::arrange(desc(proportion))
+
+## Plot counts
+# Reshape (to long)
+df_long = tabela8175 %>% 
+  dplyr::select(c(City_name, Indigenas_homens:Indigenas_mulheres)) %>% 
+  tidyr::pivot_longer(cols = -City_name, 
+                      names_to = "Category", 
+                      values_to = "N")
+
+# Plot
+ggplot(df_long, aes(y = City_name, x = N, fill = Category)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = round(N, 2)),
+            position = position_stack(vjust = 0.5),
+            size = 3, color = "white",
+            check_overlap = TRUE) +
+  labs(x = "N", y = "City", title = "Indigenous people (by gender)") +
+  theme_minimal()
+
+## Plot proportions
+# Reshape (to long)
+df_long_prop = df_long %>%
+  group_by(City_name) %>%
+  mutate(Proportion = N / sum(N, na.rm = TRUE)) %>%
+  ungroup()
+
+# Plot
+ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = round(Proportion, 2)),
+            position = position_stack(vjust = 0.5),
+            size = 3, color = "white", check_overlap = TRUE) +
+  labs(x = "Proportion", y = "City", title = "Indigenous people (by gender)") +
+  theme_minimal()
+
+## Compute means
+# Define the selected towns
+selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
+                   "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
+
+df_long %>%
+  dplyr::filter(City_name %in% selected_towns) %>%
+  dplyr::group_by(Category) %>%
+  dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
+  dplyr::mutate(
+    mean_proportion = N_cat / sum(N_cat) * 100
+  ) %>% 
+  dplyr::arrange(desc(mean_proportion))
+
+##### tabela8176 ----
+# Replace NAs with 0
+tabela8176 = tabela8176 %>%
+  dplyr::mutate(across(where(is.logical), ~ as.numeric(.))) %>% 
+  dplyr::mutate(across(everything(), ~ replace_na(., 0)))
+
+# Info data (Sidra)
+# info_sidra(8176, wb = TRUE)
+
+###### Quilombolas ----
+# Compute proportions
+tabela8176 %>% 
+  dplyr::mutate(proportion = Quilombolas_total*100/sum(Quilombolas_total)) %>% 
+  dplyr::arrange(desc(proportion))
+
+## Plot counts
+# Reshape (to long)
+df_long = tabela8176 %>% 
+  dplyr::select(c(City_name, Quilombolas_homens:Quilombolas_mulheres)) %>% 
+  tidyr::pivot_longer(cols = -City_name, 
+                      names_to = "Category", 
+                      values_to = "N")
+
+# Plot
+ggplot(df_long, aes(y = City_name, x = N, fill = Category)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = round(N, 2)),
+            position = position_stack(vjust = 0.5),
+            size = 3, color = "white",
+            check_overlap = TRUE) +
+  labs(x = "N", y = "City", title = "Quilombolas (by gender)") +
+  theme_minimal()
+
+## Plot proportions
+# Reshape (to long)
+df_long_prop = df_long %>%
+  group_by(City_name) %>%
+  mutate(Proportion = N / sum(N, na.rm = TRUE)) %>%
+  ungroup()
+
+# Plot
+ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = round(Proportion, 2)),
+            position = position_stack(vjust = 0.5),
+            size = 3, color = "white", check_overlap = TRUE) +
+  labs(x = "Proportion", y = "City", title = "Quilombolas (by gender)") +
+  theme_minimal()
+
+## Compute means
+# Define the selected towns
+selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
+                   "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
+
+df_long %>%
+  dplyr::filter(City_name %in% selected_towns) %>%
+  dplyr::group_by(Category) %>%
+  dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
+  dplyr::mutate(
+    mean_proportion = N_cat / sum(N_cat) * 100
+  ) %>% 
+  dplyr::arrange(desc(mean_proportion))
+
+##### tabela9514 ----
+# Replace NAs with 0
+tabela9514 = tabela9514 %>%
+  dplyr::mutate(across(where(is.logical), ~ as.numeric(.))) %>% 
+  dplyr::mutate(across(everything(), ~ replace_na(., 0)))
+
+# Info data (Sidra)
+# info_sidra(9514, wb = TRUE)
+
+###### Number of inhabitants by age ----
+## Plot counts
+# Reshape (to long)
+df_long = tabela9514 %>% 
+  dplyr::select(c(City_name, Pessoas_0_4_anos:Pessoas_mais_100_anos)) %>% 
+  tidyr::pivot_longer(cols = -City_name, 
+                      names_to = "Category", 
+                      values_to = "N")
+
+# Plot
+ggplot(df_long, aes(y = City_name, x = N, fill = Category)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = round(N, 2)),
+            position = position_stack(vjust = 0.5),
+            size = 3, color = "white",
+            check_overlap = TRUE) +
+  labs(x = "N", y = "City", title = "Number of inhabitants by age category") +
+  theme_minimal()
+
+## Plot proportions
+# Reshape (to long)
+df_long_prop = df_long %>%
+  group_by(City_name) %>%
+  mutate(Proportion = N / sum(N, na.rm = TRUE)) %>%
+  ungroup()
+
+# Plot
+ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = round(Proportion, 2)),
+            position = position_stack(vjust = 0.5),
+            size = 3, color = "white", check_overlap = TRUE) +
+  labs(x = "Proportion", y = "City", title = "Number of inhabitants by age category") +
+  theme_minimal()
+
+## Compute means
+# Define the selected towns
+selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
+                   "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
+
+df_long %>%
+  dplyr::filter(City_name %in% selected_towns) %>%
+  dplyr::group_by(Category) %>%
+  dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
+  dplyr::mutate(
+    mean_proportion = N_cat / sum(N_cat) * 100
+  ) %>% 
+  dplyr::arrange(desc(mean_proportion)) %>% 
+  print(n=21)
+
+##### tabela9923 ----
+# Replace NAs with 0
+tabela9923 = tabela9923 %>%
+  dplyr::mutate(across(where(is.logical), ~ as.numeric(.))) %>% 
+  dplyr::mutate(across(everything(), ~ replace_na(., 0)))
+
+# Info data (Sidra)
+# info_sidra(9923, wb = TRUE)
+
+###### Number of inhabitants by residence location (rural or urban) ----
+## Plot counts
+# Reshape (to long)
+df_long = tabela9923 %>% 
+  dplyr::select(c(City_name, Populacao_urbana:Populacao_rural)) %>% 
+  tidyr::pivot_longer(cols = -City_name, 
+                      names_to = "Category", 
+                      values_to = "N")
+
+# Plot
+ggplot(df_long, aes(y = City_name, x = N, fill = Category)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = round(N, 2)),
+            position = position_stack(vjust = 0.5),
+            size = 3, color = "white",
+            check_overlap = TRUE) +
+  labs(x = "N", y = "City", title = "Number of inhabitants by residence location (rural or urban)") +
+  theme_minimal()
+
+## Plot proportions
+# Reshape (to long)
+df_long_prop = df_long %>%
+  group_by(City_name) %>%
+  mutate(Proportion = N / sum(N, na.rm = TRUE)) %>%
+  ungroup()
+
+# Plot
+ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = round(Proportion, 2)),
+            position = position_stack(vjust = 0.5),
+            size = 3, color = "white", check_overlap = TRUE) +
+  labs(x = "Proportion", y = "City", title = "Number of inhabitants by residence location (rural or urban)") +
+  theme_minimal()
+
+## Compute means
+# Define the selected towns
+selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
+                   "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
+
+df_long %>%
+  dplyr::filter(City_name %in% selected_towns) %>%
+  dplyr::group_by(Category) %>%
+  dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
+  dplyr::mutate(
+    mean_proportion = N_cat / sum(N_cat) * 100
+  ) %>% 
+  dplyr::arrange(desc(mean_proportion)) %>% 
+  print(n=21)
