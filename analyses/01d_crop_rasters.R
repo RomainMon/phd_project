@@ -1,6 +1,6 @@
 #------------------------------------------------#
 # Author: Romain Monassier
-# Objective: Compute landscape metrics
+# Objective: Crop and reproject rasters with a mask
 #------------------------------------------------#
 
 ### Load packages ------
@@ -76,13 +76,3 @@ for (i in seq_along(rasters_reprojected)) {
   # Write raster to file
   writeRaster(r, output_path, overwrite = TRUE)
 }
-
-### Compute landscape metrics ---------
-# NB: All functions in landscapemetrics start with lsm_ (for landscape metrics). The second part of the name specifies the level (patch - p, class - c or landscape - l)
-
-## Convert your  raster to a categorical raster and focus on value = 3 ("Forest formation" in the 9th MapBiomas collection)
-# NB: landscapemetrics works on categorical rasters where classes are integers
-
-## Summary statistics at the landscape scale
-
-## Summary statistics at the patch level
