@@ -8,7 +8,6 @@ library(dplyr)
 library(tidyr)
 library(here)
 library(ggplot2)
-library(landscapemetrics)
 library(terra)
 
 ### Import data -------
