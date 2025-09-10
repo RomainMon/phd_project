@@ -15,20 +15,29 @@ library(terra)
 base_path <- here("data", "geo", "MapBiomas", "colecao_9") 
 raster_files <- list.files(base_path, pattern = "\\.tif$", full.names = TRUE)                  
 rasters <- lapply(raster_files, terra::rast)
-# Shapefile
+## Shapefiles
+# Import the region shapefile 
 base_path <- here("data", "geo", "IBGE", "admin", "BR_UF_2023")
 region = vect(file.path(base_path, "RJ_state.shp"))
+# Import the Sao Joao Watershed basin shapefile
+base_path <- here("data", "geo", "AMLD", "hidrografia") 
+watershed = vect(file.path(base_path, "Rio_Sao_Joao_Watershed.shp"))
+
 
 ### Quick check -------
 crs(rasters[[1]])
-crs(region)
 ext(rasters[[1]])
-ext(region)
 plot(rasters[[1]])  # plot the first layer
+crs(region)
+ext(region)
 plot(region)
+crs(watershed)
+ext(watershed)
+plot(watershed)
 
 ### Crop rasters ------
 
+#### With the region ------
 ## Reproject shapefile to match raster CRS
 region <- project(region, crs(rasters[[1]]))
 
@@ -46,6 +55,24 @@ rasters_cropped <- lapply(rasters, function(r) {
 # Check one
 plot(rasters_cropped[[1]])
 plot(region, add = TRUE, border = "red")
+
+#### With the watershed ------
+## Reproject shapefile to match raster CRS
+watershed <- project(watershed, crs(rasters[[1]]))
+
+## Quick check
+crs(watershed)
+
+## Using the SJ watershed boundaries as a layer
+rasters_cropped <- lapply(rasters, function(r) {
+  r_cropped <- crop(r, watershed) # crop returns a geographic subset of an object as specified by an Extent object
+  r_masked <- mask(r_cropped, watershed) # create a new Raster object that has the same values as x, except for the cells that are NA in a 'mask' (either a Raster or a Spatial object)
+  return(r_masked)
+})
+
+# Check one
+plot(rasters_cropped[[1]])
+plot(watershed, add = TRUE, border = "red")
 
 ### Reproject --------
 # Target CRS
@@ -69,7 +96,7 @@ for (i in seq_along(rasters_reprojected)) {
   r <- rasters_reprojected[[i]]
   
   # Construct a filename using the original raster name
-  file_name <- paste0(names(r)[1], "_RJ_state_31983.tif")
+  file_name <- paste0(names(r)[1], "_SJ_watershed_31983.tif")
   output_path <- file.path(output_dir, file_name)
   
   # Write raster to file
