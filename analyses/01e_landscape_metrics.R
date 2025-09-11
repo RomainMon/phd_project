@@ -1,6 +1,6 @@
 #------------------------------------------------#
 # Author: Romain Monassier
-# Objective: Crop and reproject rasters with a mask
+# Objective: Compute landscape metrics on land use rasters
 #------------------------------------------------#
 
 ### Load packages ------
@@ -12,12 +12,13 @@ library(landscapemetrics)
 library(terra)
 library(purrr)
 library(stringr)
+library(ggplot2)
 
 ### Import data -------
 ## Rasters
-base_path <- here("outputs", "data", "MapBiomas")
+base_path <- here("outputs", "data", "MapBiomas", "Mask_sampling_bbox")
 raster_files <- list.files(base_path,
-                           pattern = "_SJ_watershed_31983\\.tif$",
+                           pattern = "\\.tif$",
                            full.names = TRUE)
 rasters <- lapply(raster_files, terra::rast)
 
@@ -28,7 +29,6 @@ plot(rasters[[1]])  # plot the first layer
 
 ### Compute landscape metrics ---------
 # NB: All functions in landscapemetrics start with lsm_ (for landscape metrics). The second part of the name specifies the level (patch - p, class - c or landscape - l)
-# NB: landscapemetrics works on categorical rasters where classes are integers. Therefore, we need to convert the raster to a categorical raster
 
 #### At the class scale  ---------
 
@@ -38,7 +38,9 @@ plot(rasters[[1]])  # plot the first layer
 
 # Pick the last raster (2023)
 last_raster <- rasters[[length(rasters)]]
+landscapemetrics::show_patches(last_raster, class="3", directions=8, labels=FALSE)
 
+# NB: landscapemetrics works on categorical rasters where classes are integers. Therefore, we need to convert the raster to a categorical raster
 # Check
 check_landscape(last_raster)
 
@@ -46,24 +48,21 @@ check_landscape(last_raster)
 last_raster[last_raster == 0] <- NA
 plot(last_raster)
 
-# Compute class-level metrics
-metrics_list <- list(
-  area_mn = lsm_c_area_mn(landscape = last_raster, directions = 8),
-  area_sd = lsm_c_area_sd(landscape = last_raster, directions = 8),
-  ca      = lsm_c_ca(landscape = last_raster, directions = 8),
-  pland   = lsm_c_pland(landscape = last_raster, directions = 8)
-)
+# Compute metrics
+class_metrics <- landscapemetrics::calculate_lsm(landscape = last_raster, directions = 8, 
+                                                what = c("lsm_c_area_mn",
+                                                         "lsm_c_area_sd",
+                                                         "lsm_c_ca",
+                                                         "lsm_c_pland"))
 
-# Combine into one wide dataframe
-metrics_all_classes <- metrics_list %>%
-  imap(~ .x %>% select(class, value) %>% rename(!!.y := value)) %>%  # rename value to metric name
-  purrr::reduce(left_join, by = "class")  %>%                               # join all metrics by class
+# Round
+class_metrics <- class_metrics %>% 
   dplyr::mutate(across(where(is.numeric), ~ round(.x, 2)))
 
 # Extract year from filename (first 4-digit number)
 last_file   <- raster_files[length(raster_files)]
-year <- str_extract(basename(last_file), "\\d{4}")
-metrics_all_classes <- metrics_all_classes %>%
+year <- stringr::str_extract(basename(last_file), "\\d{4}")
+class_metrics <- class_metrics %>%
   dplyr::mutate(year = year)
 
 ######  For one class ---------
@@ -73,45 +72,132 @@ metrics_all_classes <- metrics_all_classes %>%
 forest_class <- mask(last_raster, last_raster != 3, maskvalues = TRUE)
 plot(forest_class, col="darkgreen")
 
+# NB: landscapemetrics works on categorical rasters where classes are integers. Therefore, we need to convert the raster to a categorical raster
 # Check
 check_landscape(forest_class)
 
-# Compute the metrics
-metrics_list <- list(
-  division = lsm_c_division(landscape = forest_class, directions = 8),
-  np = lsm_c_np(landscape = forest_class, directions = 8),
-  pd = lsm_c_pd(landscape = forest_class, directions = 8)
-)
+# Compute metrics
+forest_metrics <- landscapemetrics::calculate_lsm(landscape = forest_class, directions = 8, 
+                                                       what = c("lsm_c_division",
+                                                                "lsm_c_np",
+                                                                "lsm_c_pd"))
 
-# Combine into one dataframe
-metrics_forest <- metrics_list %>%
-  dplyr::bind_rows(.id = "metric_name") %>%
-  dplyr::select(metric_name, class, value) %>%
-  tidyr::pivot_wider(names_from = metric_name, values_from = value) %>% 
-  dplyr::mutate(across(where(is.numeric), ~ round(.x, 2))) %>% 
-  dplyr::left_join(metrics_all_classes) # Join the other metrics computed at the class level
+# Round
+forest_metrics <- forest_metrics %>% 
+  dplyr::mutate(across(where(is.numeric), ~ round(.x, 2)))
 
 # Add year column
 last_file   <- raster_files[length(raster_files)]
 year <- str_extract(basename(last_file), "\\d{4}")
-metrics_forest <- metrics_forest %>%
+forest_metrics <- forest_metrics %>%
   dplyr::mutate(year = year)
 
+##### On all rasters ---------
+
+###### For all classes -------
+# Function to compute class-level metrics for all classes
+compute_class_metrics <- function(r_file) {
+  
+  # Read raster
+  r <- terra::rast(r_file)
+  
+  # Remove class 0
+  r[r == 0] <- NA
+  
+  # Compute metrics
+  metrics <- landscapemetrics::calculate_lsm(landscape = r, directions = 8, 
+                                                         what = c("lsm_c_ca",
+                                                                  "lsm_c_pland"))
+  
+  # Round
+  metrics <- metrics %>%
+    dplyr::mutate(dplyr::across(where(is.numeric), ~ round(.x, 2)))
+  
+  # Extract year from filename
+  year <- stringr::str_extract(basename(r_file), "\\d{4}")
+  metrics <- metrics %>%
+    dplyr::mutate(year = year, .before = 1)
+  
+  return(metrics)
+}
+
+# Apply to all raster files
+class_metrics <- purrr::map_dfr(raster_files, compute_class_metrics)
+
+# To wide format
+class_metrics = class_metrics %>% 
+  tidyr::pivot_wider(
+  names_from = metric,  # the column whose values will become new column names
+  values_from = value   # the column containing the values
+)
+# Remove columns
+class_metrics = class_metrics %>% 
+  dplyr::select(-c(id,layer))
+
+##### For one class only -----
+# Function to compute class-level metrics for one class only
+compute_one_class_metrics <- function(r_file, class_value) {
+  
+  # Read raster
+  r <- terra::rast(r_file)
+  
+  # Remove class 0
+  r[r == 0] <- NA
+  
+  # Mask all other classes except the requested one
+  r <- terra::mask(r, r != class_value, maskvalues = TRUE)
+  
+  # Compute metrics
+  metrics <- landscapemetrics::calculate_lsm(
+    landscape = r, 
+    directions = 8, 
+    what = c("lsm_c_area_mn",
+             "lsm_c_area_sd",
+             "lsm_c_ca",
+             "lsm_c_ai",
+             "lsm_c_np")
+  )
+  
+  # Round numeric values
+  metrics <- metrics %>%
+    dplyr::mutate(dplyr::across(where(is.numeric), ~ round(.x, 2)))
+  
+  # Extract year from filename
+  year <- stringr::str_extract(basename(r_file), "\\d{4}")
+  metrics <- metrics %>%
+    dplyr::mutate(year = year, .before = 1)
+  
+  return(metrics)
+}
+
+
+## For forest only (class 3)
+forest_class_metrics <- purrr::map_dfr(raster_files, ~ compute_one_class_metrics(.x, class_value = 3))
+
+# To wide format
+forest_class_metrics = forest_class_metrics %>% 
+  tidyr::pivot_wider(
+    names_from = metric,  # the column whose values will become new column names
+    values_from = value   # the column containing the values
+  )
+# Remove columns
+forest_class_metrics = forest_class_metrics %>% 
+  dplyr::select(-c(id,layer))
 
 #### At the patch level   ---------
-# Compute the metrics
-metrics_list <- list(
-  area = lsm_p_area(landscape = forest_class, directions = 8),
-  cai = lsm_p_cai(landscape = forest_class, directions = 8),
-  enn = lsm_p_enn(landscape = forest_class, directions = 8),
-  para = lsm_p_para(landscape = forest_class, directions = 8)
-  )
 
-# Combine into one dataframe
-# Reshape into wide dataframe (one row per patch)
-forest_patch_metrics <- metrics_list %>%
-  imap(~ .x %>% 
-         select(id, class, value) %>% 
-         rename(!!.y := value)) %>% 
-  purrr::reduce(left_join, by = c("id", "class")) %>%
-  dplyr::mutate(across(where(is.numeric), ~ round(.x, 2)))
+##### On a single raster   ---------
+
+# Pick the last raster (2023)
+last_raster <- rasters[[length(rasters)]]
+
+# Get forest patches
+forest_patches <- landscapemetrics::get_patches(last_raster, class = 3, directions = 8) 
+forest_patches = forest_patches$layer_1$class_3 # Convert to SpatRaster
+forest_patches_metrics = landscapemetrics::spatialize_lsm(forest_patches, directions = 8, 
+                                                          what = c("lsm_p_area", "lsm_p_cai", "lsm_p_enn", "lsm_p_para"))
+
+#### Export datasets ------
+base_path = here("outputs", "data", "landscapemetrics")
+write.csv(class_metrics, file = file.path(base_path, "class_metrics_bbox_1989_2023.csv"), row.names = FALSE)
+write.csv(forest_class_metrics, file = file.path(base_path, "forest_class_metrics_bbox_1989_2023.csv"), row.names=FALSE)
