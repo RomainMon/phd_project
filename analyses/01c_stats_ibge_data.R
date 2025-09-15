@@ -10,6 +10,7 @@ library(readxl)
 library(here)
 library(sidrar)
 library(ggplot2)
+library(purrr)
 
 ### Import data -------
 # Censo agropecuario
@@ -59,6 +60,20 @@ tabela8176  = readxl::read_excel(here::here("outputs", "data", "IBGE", "tabela81
 tabela9514  = readxl::read_excel(here::here("outputs", "data", "IBGE", "tabela9514_2022_clean.xlsx"))
 tabela9923  = readxl::read_excel(here::here("outputs", "data", "IBGE", "tabela9923_2022_clean.xlsx"))
 
+### Filter ------
+# The filter to apply
+to_remove <- c("Saquarema (RJ)", "Saquarema")
+
+df_names <- ls()[sapply(ls(), function(x) is.data.frame(get(x)))]
+dfs <- mget(df_names, envir = .GlobalEnv)
+
+dfs_filtered <- map(dfs, ~ {
+  if ("City_name" %in% names(.x)) {
+    filter(.x, !(as.character(City_name) %in% to_remove))
+  } else .x
+})
+
+list2env(dfs_filtered, envir = .GlobalEnv)
 
 ### Statistical summary ------
 #### Censo agropecuario ----
@@ -108,12 +123,7 @@ ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
   theme_minimal()
 
 ## Compute means
-# Define the selected towns
-selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
-                    "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
-
 df_long %>%
-  dplyr::filter(City_name %in% selected_towns) %>%
   dplyr::group_by(Category) %>%
   dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
   dplyr::mutate(
@@ -159,12 +169,7 @@ ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
   theme_minimal()
 
 ## Compute means
-# Define the selected towns
-selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
-                   "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
-
 df_long %>%
-  dplyr::filter(City_name %in% selected_towns) %>%
   dplyr::group_by(Category) %>%
   dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
   dplyr::mutate(
@@ -217,12 +222,7 @@ ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
   theme_minimal()
 
 ## Compute means
-# Define the selected towns
-selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
-                   "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
-
 df_long %>%
-  dplyr::filter(City_name %in% selected_towns) %>%
   dplyr::group_by(Category) %>%
   dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
   dplyr::mutate(
@@ -266,12 +266,7 @@ ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
   theme_minimal()
 
 ## Compute means
-# Define the selected towns
-selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
-                   "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
-
 df_long %>%
-  dplyr::filter(City_name %in% selected_towns) %>%
   dplyr::group_by(Category) %>%
   dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
   dplyr::mutate(
@@ -325,12 +320,7 @@ ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
   theme_minimal()
 
 ## Compute means
-# Define the selected towns
-selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
-                   "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
-
 df_long %>%
-  dplyr::filter(City_name %in% selected_towns) %>%
   dplyr::group_by(Category) %>%
   dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
   dplyr::mutate(
@@ -374,12 +364,7 @@ ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
   theme_minimal()
 
 ## Compute means
-# Define the selected towns
-selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
-                   "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
-
 df_long %>%
-  dplyr::filter(City_name %in% selected_towns) %>%
   dplyr::group_by(Category) %>%
   dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
   dplyr::mutate(
@@ -423,12 +408,7 @@ ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
   theme_minimal()
 
 ## Compute means
-# Define the selected towns
-selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
-                   "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
-
 df_long %>%
-  dplyr::filter(City_name %in% selected_towns) %>%
   dplyr::group_by(Category) %>%
   dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
   dplyr::mutate(
@@ -473,12 +453,7 @@ ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
   theme_minimal()
 
 ## Compute means
-# Define the selected towns
-selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
-                   "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
-
 df_long %>%
-  dplyr::filter(City_name %in% selected_towns) %>%
   dplyr::group_by(Category) %>%
   dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
   dplyr::mutate(
@@ -533,12 +508,7 @@ ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
   theme_minimal()
 
 ## Compute means
-# Define the selected towns
-selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
-                   "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
-
 df_long %>%
-  dplyr::filter(City_name %in% selected_towns) %>%
   dplyr::group_by(Category) %>%
   dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
   dplyr::mutate(
@@ -582,12 +552,7 @@ ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
   theme_minimal()
 
 ## Compute means
-# Define the selected towns
-selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
-                   "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
-
 df_long %>%
-  dplyr::filter(City_name %in% selected_towns) %>%
   dplyr::group_by(Category) %>%
   dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
   dplyr::mutate(
@@ -641,12 +606,7 @@ ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
   theme_minimal()
 
 ## Compute means
-# Define the selected towns
-selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
-                   "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
-
 df_long %>%
-  dplyr::filter(City_name %in% selected_towns) %>%
   dplyr::group_by(Category) %>%
   dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
   dplyr::mutate(
@@ -692,12 +652,7 @@ ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
   theme_minimal()
 
 ## Compute means
-# Define the selected towns
-selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
-                   "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
-
 df_long %>%
-  dplyr::filter(City_name %in% selected_towns) %>%
   dplyr::group_by(Category) %>%
   dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
   dplyr::mutate(
@@ -751,12 +706,7 @@ ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
   theme_minimal()
 
 ## Compute means
-# Define the selected towns
-selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
-                   "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
-
 df_long %>%
-  dplyr::filter(City_name %in% selected_towns) %>%
   dplyr::group_by(Category) %>%
   dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
   dplyr::mutate(
@@ -810,12 +760,7 @@ ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
 
 
 ## Compute means
-# Define the selected towns
-selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
-                   "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
-
 df_long %>%
-  dplyr::filter(City_name %in% selected_towns) %>%
   dplyr::group_by(Category) %>%
   dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
   dplyr::mutate(
@@ -870,12 +815,7 @@ ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
 
 
 ## Compute means
-# Define the selected towns
-selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
-                   "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
-
 df_long %>%
-  dplyr::filter(City_name %in% selected_towns) %>%
   dplyr::group_by(Category) %>%
   dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
   dplyr::mutate(
@@ -921,12 +861,7 @@ ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
 
 
 ## Compute means
-# Define the selected towns
-selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
-                   "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
-
 df_long %>%
-  dplyr::filter(City_name %in% selected_towns) %>%
   dplyr::group_by(Category) %>%
   dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
   dplyr::mutate(
@@ -980,12 +915,7 @@ ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
   theme_minimal()
 
 ## Compute means
-# Define the selected towns
-selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
-                   "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
-
 df_long %>%
-  dplyr::filter(City_name %in% selected_towns) %>%
   dplyr::group_by(Category) %>%
   dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
   dplyr::mutate(
@@ -1029,12 +959,7 @@ ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
   theme_minimal()
 
 ## Compute means
-# Define the selected towns
-selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
-                   "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
-
 df_long %>%
-  dplyr::filter(City_name %in% selected_towns) %>%
   dplyr::group_by(Category) %>%
   dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
   dplyr::mutate(
@@ -1078,12 +1003,7 @@ ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
   theme_minimal()
 
 ## Compute means
-# Define the selected towns
-selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
-                   "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
-
 df_long %>%
-  dplyr::filter(City_name %in% selected_towns) %>%
   dplyr::group_by(Category) %>%
   dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
   dplyr::mutate(
@@ -1137,12 +1057,7 @@ ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
   theme_minimal()
 
 ## Compute means
-# Define the selected towns
-selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
-                   "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
-
 df_long %>%
-  dplyr::filter(City_name %in% selected_towns) %>%
   dplyr::group_by(Category) %>%
   dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
   dplyr::mutate(
@@ -1186,12 +1101,7 @@ ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
   theme_minimal()
 
 ## Compute means
-# Define the selected towns
-selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
-                   "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
-
 df_long %>%
-  dplyr::filter(City_name %in% selected_towns) %>%
   dplyr::group_by(Category) %>%
   dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
   dplyr::mutate(
@@ -1244,12 +1154,7 @@ ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
   theme_minimal()
 
 ## Compute means
-# Define the selected towns
-selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
-                   "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
-
 df_long %>%
-  dplyr::filter(City_name %in% selected_towns) %>%
   dplyr::group_by(Category) %>%
   dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
   dplyr::mutate(
@@ -1302,12 +1207,7 @@ ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
   theme_minimal()
 
 ## Compute means
-# Define the selected towns
-selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
-                   "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
-
 df_long %>%
-  dplyr::filter(City_name %in% selected_towns) %>%
   dplyr::group_by(Category) %>%
   dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
   dplyr::mutate(
@@ -1360,12 +1260,7 @@ ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
   theme_minimal()
 
 ## Compute means
-# Define the selected towns
-selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
-                   "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
-
 df_long %>%
-  dplyr::filter(City_name %in% selected_towns) %>%
   dplyr::group_by(Category) %>%
   dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
   dplyr::mutate(
@@ -1409,12 +1304,7 @@ ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
   theme_minimal()
 
 ## Compute means
-# Define the selected towns
-selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
-                   "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
-
 df_long %>%
-  dplyr::filter(City_name %in% selected_towns) %>%
   dplyr::group_by(Category) %>%
   dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
   dplyr::mutate(
@@ -1458,12 +1348,7 @@ ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
   theme_minimal()
 
 ## Compute means
-# Define the selected towns
-selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
-                   "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
-
 df_long %>%
-  dplyr::filter(City_name %in% selected_towns) %>%
   dplyr::group_by(Category) %>%
   dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
   dplyr::mutate(
@@ -1516,12 +1401,7 @@ ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
   theme_minimal()
 
 ## Compute means
-# Define the selected towns
-selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
-                   "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
-
 df_long %>%
-  dplyr::filter(City_name %in% selected_towns) %>%
   dplyr::group_by(Category) %>%
   dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
   dplyr::mutate(
@@ -1565,12 +1445,7 @@ ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
   theme_minimal()
 
 ## Compute means
-# Define the selected towns
-selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
-                   "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
-
 df_long %>%
-  dplyr::filter(City_name %in% selected_towns) %>%
   dplyr::group_by(Category) %>%
   dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
   dplyr::mutate(
@@ -1623,12 +1498,7 @@ ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
   theme_minimal()
 
 ## Compute means
-# Define the selected towns
-selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
-                   "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
-
 df_long %>%
-  dplyr::filter(City_name %in% selected_towns) %>%
   dplyr::group_by(Category) %>%
   dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
   dplyr::mutate(
@@ -1681,12 +1551,7 @@ ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
   theme_minimal()
 
 ## Compute means
-# Define the selected towns
-selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
-                   "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
-
 df_long %>%
-  dplyr::filter(City_name %in% selected_towns) %>%
   dplyr::group_by(Category) %>%
   dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
   dplyr::mutate(
@@ -1739,12 +1604,7 @@ ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
   theme_minimal()
 
 ## Compute means
-# Define the selected towns
-selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
-                   "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
-
 df_long %>%
-  dplyr::filter(City_name %in% selected_towns) %>%
   dplyr::group_by(Category) %>%
   dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
   dplyr::mutate(
@@ -1797,12 +1657,7 @@ ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
   theme_minimal()
 
 ## Compute means
-# Define the selected towns
-selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
-                   "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
-
 df_long %>%
-  dplyr::filter(City_name %in% selected_towns) %>%
   dplyr::group_by(Category) %>%
   dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
   dplyr::mutate(
@@ -1847,12 +1702,7 @@ ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
   theme_minimal()
 
 ## Compute means
-# Define the selected towns
-selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
-                   "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
-
 df_long %>%
-  dplyr::filter(City_name %in% selected_towns) %>%
   dplyr::group_by(Category) %>%
   dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
   dplyr::mutate(
@@ -1908,12 +1758,7 @@ ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
   theme_minimal()
 
 ## Compute means
-# Define the selected towns
-selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
-                   "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
-
 df_long %>%
-  dplyr::filter(City_name %in% selected_towns) %>%
   dplyr::group_by(Category) %>%
   dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
   dplyr::mutate(
@@ -1967,12 +1812,7 @@ ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
   theme_minimal()
 
 ## Compute means
-# Define the selected towns
-selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
-                   "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
-
 df_long %>%
-  dplyr::filter(City_name %in% selected_towns) %>%
   dplyr::group_by(Category) %>%
   dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
   dplyr::mutate(
@@ -2026,12 +1866,7 @@ ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
   theme_minimal()
 
 ## Compute means
-# Define the selected towns
-selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
-                   "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
-
 df_long %>%
-  dplyr::filter(City_name %in% selected_towns) %>%
   dplyr::group_by(Category) %>%
   dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
   dplyr::mutate(
@@ -2085,12 +1920,7 @@ ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
   theme_minimal()
 
 ## Compute means
-# Define the selected towns
-selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
-                   "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
-
 df_long %>%
-  dplyr::filter(City_name %in% selected_towns) %>%
   dplyr::group_by(Category) %>%
   dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
   dplyr::mutate(
@@ -2144,12 +1974,7 @@ ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
   theme_minimal()
 
 ## Compute means
-# Define the selected towns
-selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
-                   "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
-
 df_long %>%
-  dplyr::filter(City_name %in% selected_towns) %>%
   dplyr::group_by(Category) %>%
   dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
   dplyr::mutate(
@@ -2205,12 +2030,7 @@ ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
   theme_minimal()
 
 ## Compute means
-# Define the selected towns
-selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
-                   "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
-
 df_long %>%
-  dplyr::filter(City_name %in% selected_towns) %>%
   dplyr::group_by(Category) %>%
   dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
   dplyr::mutate(
@@ -2263,12 +2083,7 @@ ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
   theme_minimal()
 
 ## Compute means
-# Define the selected towns
-selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
-                   "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
-
 df_long %>%
-  dplyr::filter(City_name %in% selected_towns) %>%
   dplyr::group_by(Category) %>%
   dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
   dplyr::mutate(
@@ -2349,12 +2164,7 @@ ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
   theme_minimal()
 
 ## Compute means
-# Define the selected towns
-selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
-                   "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
-
 df_long %>%
-  dplyr::filter(City_name %in% selected_towns) %>%
   dplyr::group_by(Category) %>%
   dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
   dplyr::mutate(
@@ -2363,12 +2173,6 @@ df_long %>%
   dplyr::arrange(desc(mean_proportion))
 
 #### Other socio-demographics ----
-POP2024     = readxl::read_excel(here::here("outputs", "data", "IBGE", "POP2024_clean.xlsx"))
-tabela5434  = readxl::read_excel(here::here("outputs", "data", "IBGE", "tabela5434_2024_clean.xlsx"))
-tabela8175  = readxl::read_excel(here::here("outputs", "data", "IBGE", "tabela8175_2022_clean.xlsx"))
-tabela8176  = readxl::read_excel(here::here("outputs", "data", "IBGE", "tabela8176_2022_clean.xlsx"))
-tabela9514  = readxl::read_excel(here::here("outputs", "data", "IBGE", "tabela9514_2022_clean.xlsx"))
-tabela9923  = readxl::read_excel(here::here("outputs", "data", "IBGE", "tabela9923_2022_clean.xlsx"))
 
 ##### POP2024----
 # Replace NAs with 0
@@ -2454,12 +2258,7 @@ ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
   theme_minimal()
 
 ## Compute means
-# Define the selected towns
-selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
-                   "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
-
 df_long %>%
-  dplyr::filter(City_name %in% selected_towns) %>%
   dplyr::group_by(Category) %>%
   dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
   dplyr::mutate(
@@ -2517,12 +2316,7 @@ ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
   theme_minimal()
 
 ## Compute means
-# Define the selected towns
-selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
-                   "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
-
 df_long %>%
-  dplyr::filter(City_name %in% selected_towns) %>%
   dplyr::group_by(Category) %>%
   dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
   dplyr::mutate(
@@ -2575,12 +2369,7 @@ ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
   theme_minimal()
 
 ## Compute means
-# Define the selected towns
-selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
-                   "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
-
 df_long %>%
-  dplyr::filter(City_name %in% selected_towns) %>%
   dplyr::group_by(Category) %>%
   dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
   dplyr::mutate(
@@ -2634,12 +2423,7 @@ ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
   theme_minimal()
 
 ## Compute means
-# Define the selected towns
-selected_towns = c("Araruama (RJ)", "Cabo Frio (RJ)", "Cachoeiras de Macacu (RJ)", 
-                   "Casimiro de Abreu (RJ)", "Rio Bonito (RJ)", "Silva Jardim (RJ)")
-
 df_long %>%
-  dplyr::filter(City_name %in% selected_towns) %>%
   dplyr::group_by(Category) %>%
   dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
   dplyr::mutate(
