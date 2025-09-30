@@ -13,6 +13,7 @@ library(terra)
 library(purrr)
 library(stringr)
 library(ggplot2)
+library(raster)
 
 ### Import data -------
 ## Rasters
@@ -22,10 +23,74 @@ raster_files <- list.files(base_path,
                            full.names = TRUE)
 rasters <- lapply(raster_files, terra::rast)
 
+## Vectors
+roads = vect(here("data", "geo", "OSM", "work", "Highway_OSM_clean.shp"))
+
 ### Quick check -------
 crs(rasters[[1]])
 ext(rasters[[1]])
 plot(rasters[[1]])  # plot the first layer
+plot(roads, col="white", add=TRUE)
+
+
+### Create forest patches ---------
+#### Define forest as habitat -------
+# Define groups
+# NB: to see what codes refer to, check the "Codigos-da-legenda-colecao-9" file
+forest <- c(3, 4, 5, 6, 49)
+notforest <- c(11, 12, 32, 29, 50, 23)
+agri <- c(15, 18, 19, 39, 20, 40, 62, 41, 36, 46, 47, 35, 48, 9, 21)
+water <- c(26, 33, 31)
+artificial <- c(24, 30, 25)
+
+# Function to reclassify a single raster
+reclass_fun <- function(xx) {
+  xx[xx == 0] <- NA
+  xx[xx %in% forest]    <- 1
+  xx[xx %in% notforest] <- 2
+  xx[xx %in% agri]      <- 3
+  xx[xx %in% water]     <- 4
+  xx[xx %in% artificial] <- 5
+  return(xx)
+}
+
+# Apply to all rasters
+rasters_reclass <- lapply(seq_along(rasters), function(i) {
+  message("Reclassifying SpatRaster ", i)
+  app(rasters[[i]], fun = reclass_fun)
+})
+
+# Check
+plot(rasters_reclass[[1]])
+plot(rasters_reclass[[35]])
+
+# The following section is based on Mailys Queru's work
+#### Dilatation-erosion --------
+dilatation_erosion <- function(raster, seuil) {
+  # All cells different than 1 become NA
+  habitat <- app(raster, fun = function(v) ifelse(v == 1, 1, NA))
+  
+  # Distance to habitat
+  dist_hab <- distance(habitat)
+  
+  # Threshold distance and set 0 to NA
+  dist_hab_thresh <- app(dist_hab, fun = function(v) ifelse(v > seuil, 1, NA))
+  
+  # Distance to non-habitat
+  dist_nonhab <- distance(dist_hab_thresh)
+  
+  # Final threshold
+  final_rast <- dist_nonhab > seuil
+  
+  return(final_rast)
+}
+
+seuil = 100 # Here, we define the buffer width (dilatation length) (in meters)
+raster_dilat = dilatation_erosion(rasters_reclass[[1]], seuil)
+plot(raster_dilat)
+
+##### Exclusion of linear features ------
+
 
 ### Compute landscape metrics ---------
 # NB: All functions in landscapemetrics start with lsm_ (for landscape metrics). The second part of the name specifies the level (patch - p, class - c or landscape - l)
@@ -38,7 +103,6 @@ plot(rasters[[1]])  # plot the first layer
 
 # Pick the last raster (2023)
 last_raster <- rasters[[length(rasters)]]
-landscapemetrics::show_patches(last_raster, class="3", directions=8, labels=FALSE)
 
 # NB: landscapemetrics works on categorical rasters where classes are integers. Therefore, we need to convert the raster to a categorical raster
 # Check

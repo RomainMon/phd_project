@@ -1,0 +1,388 @@
+---
+title: "Landscape processing"
+author: "Aurore Ponchon"
+date: "25/08/2023"
+output: html_document
+---
+
+```{r setup, include=TRUE}
+# Packages
+library(tidyverse)
+library(here)
+library(raster)
+library(terra)
+library(maptools)
+library(fields)
+library(sp)
+library(rgdal)
+library(landscapemetrics)
+library(rgeos) 
+library(gridExtra)
+library(dplyr)
+library(sf)
+library(fasterize)
+
+##############################################
+## STEP 1 : LANDSCAPE PRE-PROCESSING ##
+##############################################
+id_paysage = "1990"
+
+## Import the working data/raster (tree density from Copernicus)
+for_den = rast("D:/STAGE MODELISATION/Carto/Automatisation_traitement_carto_R/Inputs/forest_density100.tif")
+
+
+## Import data/shp (study area)
+area = vect("D:/STAGE MODELISATION/Carto/Automatisation_traitement_carto_R/Inputs/Zone_etude_C.shp")
+area = ext(area)
+
+
+## Import data/shp (roads) and subset the study area
+roads = vect("D:/STAGE MODELISATION/Carto/Automatisation_traitement_carto_R/Inputs/routes.shp")
+roads_crop = crop(x=roads, y=ext(area))
+
+
+## Subset the study area
+for_den_crop = crop(x=for_den, y=ext(area), mask=TRUE)
+plot(for_den_crop, main = "ETAPE 1 : Occupation du sol dans le paysage C")
+
+
+
+
+##### 2) Définition des métadonnées des fichiers 
+
+resolution = res(for_den_crop)[1]
+nb_cell_paysage = ncell(for_den_crop)
+nb_lignes = nb_colonnes = sqrt(nb_cell_paysage)
+cell_size = resolution * resolution
+aire_tot = (nb_cell_paysage*resolution)^2
+
+
+
+##### 3) Définition de la couche "habitat"
+
+#PARAMETRE : 
+densite_limite_habitat = 30
+
+#On ne conserve que les cellules pour lesquelles la densité est supérieure à 30%
+habitat_30 = for_den_crop>densite_limite_habitat
+legende <- c("Matrice", "Habitat")
+couleurs <- c("#E2DEDE", "#0E9813")
+plot(habitat_30, 
+     type = "classes", 
+     levels = legende,
+     col = couleurs, 
+     plg = list(cex = 0.7),
+     main = "ETAPE 3 : discretisation de l'habitat (>30% d'arbres)"
+)
+
+
+
+##### 4) Dilatation - Erosion
+
+# Importation de la fonction
+source("D:/STAGE MODELISATION/Carto/Automatisation_traitement_carto_R/Fonctions/fct_dilatation_erosion.R")
+
+# Définition des paramètres
+working_directory = getwd()
+file = "habitat_30_C.tif"
+
+seuil = 100
+dilatation_erosion_paysage = dilatation_erosion(working_directory,file,seuil)
+plot(dilatation_erosion_paysage, 
+     type = "classes", 
+     main = "ETAPE 4 : Paysage C après dilatation - erosion",
+     levels = legende,
+     col = couleurs, 
+     plg = list(cex = 0.7)
+)
+
+
+
+
+##### 5) Exclusion des routes avant définition des patchs
+dilatation_erosion_paysage_sans_routes = mask(dilatation_erosion_paysage,roads, inverse=TRUE)
+plot(dilatation_erosion_paysage_sans_routes, 
+     type = "classes", 
+     main = "ETAPE 5 : Paysage C après exclusion des routes",
+     levels = c("Matrice", "Habitat","Routes"),
+     col = c("#E2DEDE", "#0E9813","#FFFFFF"), 
+     plg = list(cex = 0.7)
+)
+
+
+
+
+##### 6) Définition des patchs - region group
+
+if (minmax(dilatation_erosion_paysage_sans_routes, compute=FALSE)[1]==1) { 
+  #Si la valeur la plus petite est 1, on repasse en 0
+  dilatation_erosion_paysage_sans_routes = dilatation_erosion_paysage_sans_routes-1
+}
+patchs = patches(dilatation_erosion_paysage_sans_routes,directions = 8, zeroAsNA=TRUE, allowGaps=FALSE)
+
+# Affichage des patchs
+plot(patchs,  
+     main = "ETAPE 6 : Affichage des patchs du paysage C, toutes tailles confondues"
+)
+#freq_patchs = freq(patchs)
+#View(freq_patchs)
+
+#Récupérer la surface de chaque patch
+taille_patchs <- zonal(cellSize(x=patchs, unit="m"), patchs, sum, as.raster=TRUE)
+seuil_mini = 22500 #m²
+seuil_maxi = 250000 #m² = 25ha
+
+## Ne garder que les patchs dont la surface est inférieure à la surface minimum, pour le fichier de couts
+patchs_inf_seuil_mini <- ifel(taille_patchs > seuil_mini, NA, patchs)
+plot(patchs_inf_seuil_mini, 
+     main = "ETAPE 6 : Affichage des patchs de taille inférieur à la valeur minimale"
+)
+#Vérification à l'aide du tableau de fréuence qu'on sélectionne les bons patchs OK: max(freq(patchs_inf_seuil_mini)[3])
+#On remplace toutes les valeurs non nulles (=habitat) par 1
+patchs_inf_seuil_mini[patchs_inf_seuil_mini > 0] <- 1
+
+
+
+## Création d'un raster avec les patchs dont la surface est comprise entre min et max
+patchs_superieur_seuil_mini <- ifel(taille_patchs < seuil_mini, NA, patchs)
+patchs_taille_ok <- ifel(taille_patchs > seuil_maxi, NA, patchs_superieur_seuil_mini)
+
+plot(patchs_taille_ok, 
+     main = "ETAPE 6 : Affichage des patchs de taille correcte"
+)
+
+#Vérification à l'aide du tableau de fréuence qu'on sélectionne les bons patchs OK: 
+#min(freq(patchs_taille_ok)[3])
+#max(freq(patchs_taille_ok)[3])
+id_max = minmax(patchs_taille_ok, compute=TRUE)[2]
+
+
+## Création d'un raster avec les patchs dont la surface est supérieure au max --> tessalation
+patchs_superieur_seuil_maxi <- ifel(taille_patchs < seuil_maxi, NA, patchs)
+
+plot(patchs_superieur_seuil_maxi, 
+     main = "ETAPE 6 : Affichage des patchs de taille supérieure à la valeur maximale"
+)
+
+#Vérification à l'aide du tableau de fréuence qu'on sélectionne les bons patchs OK: 
+#min(freq(patchs_superieur_seuil_maxi)[3])
+
+
+#Affichage de l'histogramme de la taille de chacun des patchs : 
+taille_patches_m2 = freq(patchs)[3]*cell_size
+hist(taille_patches_m2$count)
+
+
+##### 7) Tessalation sur les patchs trop grands - tirage aléatoire
+
+# Importation de la fonction
+source("D:/STAGE MODELISATION/Carto/Automatisation_traitement_carto_R/Fonctions/fct_tessalation.R")
+
+# Définition des paramètres
+r=patchs_superieur_seuil_maxi
+n = 1100
+
+# Tirage des points aléatoires
+points_aleatoire = tirage_pts_aleatoires(r,n)
+
+#Tesselation
+x = points_aleatoire[,1]
+y = points_aleatoire[,2]
+tesselation_aleatoire <- deldir(x, y)
+
+
+#Définition des nouveaux patchs
+new_patchs_aleatoire = decoupage_patchs(tesselation_aleatoire,id_max)
+
+par(mfrow=c(1,1))
+plot(new_patchs_aleatoire, 
+     main = "ETAPE 7 : Découpage des grands patchs après tesselation aléatoire"
+)
+
+#Vérification que la taille des patchs correspond bien à ce qui était attendu
+val = verif_decoupage(new_patchs_aleatoire)
+
+
+##### 7bis) Tessalation sur les patchs trop grands - tirage regulier
+
+# Définition des paramètres
+r=patchs_superieur_seuil_maxi
+n = 1800
+
+# Tirage des points réguliers
+par(mfrow=c(1,1))
+points_regulier = tirage_pts_reguliers(r,n)
+
+#Tesselation
+x = points_regulier[,1]
+y = points_regulier[,2]
+tesselation_regulier <- deldir(x, y)
+
+#Définition des nouveaux patchs
+new_patchs_regulier = decoupage_patchs(tesselation_regulier,id_max)
+
+plot(new_patchs_regulier, 
+     main = "ETAPE 7 : Découpage des grands patchs après tesselation regulière"
+)
+
+#Vérification que la taille des patchs correspond bien à ce qui était attendu
+val = verif_decoupage(new_patchs_regulier)
+
+
+
+##### 8) Regroupement des patchs de taille OK et des patchs découpés précédement
+mosaic_raster_aleatoire <- mosaic(new_patchs_aleatoire, patchs_taille_ok)
+plot(mosaic_raster_aleatoire, 
+     main = "ETAPE 8 : Patchs du paysage C susceptibles de constituer de l'habitat pour l'écureuil roux - tesselation aléatoire"
+)
+
+
+mosaic_raster_regulier <- mosaic(new_patchs_regulier, patchs_taille_ok)
+plot(mosaic_raster_regulier, 
+     main = "ETAPE 8 : Patchs du paysage C susceptibles de constituer de l'habitat pour l'écureuil roux - tesselation régulière"
+)
+
+
+
+#############################################
+## PARTIE II : DEFINITION DES COUTS DE DEP ##
+#############################################
+
+par(mfrow=c(1,1))
+##### 1) Ouverture des fichiers
+
+## Importation de l'habitat
+
+habitat = rast("D:/STAGE MODELISATION/Carto/Automatisation_traitement_carto_R/PROCEDURE_APPLIQUEE/patchs_aleatoires_C.tif")
+habitat[habitat > 0] <- 2
+
+
+## Importation des patchs de passage
+
+step_stone = rast("D:/STAGE MODELISATION/Carto/Automatisation_traitement_carto_R/PROCEDURE_APPLIQUEE/patchs_inf_22500_C.tif")
+step_stone[step_stone > 0] <- 2
+
+
+## Combinaison de l'habitat et des patchs de passage
+habitat_step_stone <- mosaic(habitat, step_stone)
+
+
+##Importation des routes
+
+#area = vect("D:/STAGE MODELISATION/Carto/Automatisation_traitement_carto_R/Inputs/Zone_etude_C.shp")
+#area = ext(area)
+
+#roads = vect("D:/STAGE MODELISATION/Carto/Automatisation_traitement_carto_R/Inputs/routes.shp")
+#roads = crop(x=roads, y=ext(area))
+
+
+## Création du raster des routes
+roads[,1] = 1:nrow(data.frame(roads))
+names(roads)[1]="id"
+
+roads_raster <- rasterize(roads, habitat*0, field = "id")
+roads_raster[roads_raster > 0] <- 4
+
+
+## Définition des zones qui aident au déplacement
+sol = rast("D:/STAGE MODELISATION/Carto/Automatisation_traitement_carto_R/PROCEDURE_APPLIQUEE/forest_density_C.tif")
+
+densite_limite_aide_dep = 10
+
+
+#On ne conserve que les cellules pour lesquelles la densité est supérieure à 10%
+aide_deplacement = densite_limite_aide_dep < sol 
+aide_deplacement[aide_deplacement == 1] <- 3
+
+
+##### 2) Combinaison des différentes couches qui forment le paysage : habitat, route, aide
+paysage <- mosaic(aide_deplacement, habitat_step_stone,fun="min")
+paysage_complet <- mosaic(paysage, roads_raster,fun="max")
+paysage_complet[paysage_complet == 0] <- 1
+
+plot(paysage_complet, 
+     type = "classes", 
+     levels = c("Matrice", "Habitat","Aide au déplacement","Route"),
+     col = c("#E2DEDE", "#1A5B10","#83DE75","#9A1313"), 
+     plg = list(cex = 0.7),
+     main = "Paysage C classé"
+)
+
+
+
+##### 3) Création du fichier de cout
+
+# On duplique la matrice du paysage pour pouvoir l'utiliser
+couts = matrix(paysage_complet,nrow=nrow(paysage_complet))
+
+# On définie les couts que l'on souhaite attribuer à chaque classe
+cout_habitat = 1
+cout_aide = 1
+cout_route = 100
+cout_matrice = 10
+
+
+# On attribue les couts (précédment déterminés) à chaque case de la matrice
+couts[couts == 1] <- cout_matrice
+couts[couts == 2] <- cout_habitat
+couts[couts == 3] <- cout_aide
+couts[couts == 4] <- cout_route
+#View(couts)
+
+
+# On convertit la matrice en raster en prenant la trasnposée!), et on l'enregistre
+couts = t(couts)
+raster_couts = rast(couts)
+
+plot(raster_couts, 
+     type = "classes", 
+     levels = c("1", "10","100"),
+      col = c( "#1A5B10","#E2DEDE","#9A1313"), 
+     plg = list(cex = 0.7),
+     main = "Carte des couts de déplacement dans le paysage C"
+)
+     
+
+
+
+
+
+#######################################################
+## PARTIE III : CREATION DU FICHIER D'INITIALISATION ##
+#######################################################
+
+
+##### 1) Importation des fichiers 
+
+## Import de la carte des patchs 
+patchs = rast("D:/STAGE MODELISATION/Carto/Automatisation_traitement_carto_R/PROCEDURE_APPLIQUEE/patchs_aleatoires_C.tif")
+plot(patchs)
+#View(freq(patchs))
+
+
+## Import de la carte des présences
+presence = vect("D:/STAGE MODELISATION/Carto/Automatisation_traitement_carto_R/Inputs/pts_presence_C.shp")
+plot(presence, add=TRUE)
+
+#Vérification du nombre de points 
+presence_C <- grep("C", presence$num_pt, ignore.case = TRUE)
+nb_points = nrow(data.frame(presence_C)) # Savoir combien de points de présence se trouvent dans la zone C
+
+
+
+##### 2) Ne garder que les points qui sont dans les patchs d'habitat 
+
+patch_presence = mask(patchs,presence)
+patch_presence[patch_presence > 0 ]  <- 1
+
+plot(patch_presence)
+nb_patchs = nrow(data.frame(patch_presence)) #Savoir combien de patchs ont au moins un indiv à t=0
+
+
+##############################################
+## PARTIE IIV : CREATION DES FICHIERS TEXTS ##
+##############################################
+
+## Se référer au code R pour cette partie 
+
+```
