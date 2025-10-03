@@ -25,19 +25,24 @@ rasters = lapply(raster_files, terra::rast)
 
 ## Vectors
 roads = vect(here("data", "geo", "OSM", "work", "Highway_OSM_clean.shp"))
+power_lines = vect(here("data", "geo", "OSM", "work", "Power_line_OSM_clean.shp"))
+pipelines = vect(here("data", "geo", "OSM", "work", "Pipelines_OSM_clean.shp"))
+bridges = vect(here("data", "geo", "AMLD", "Passagens_ARTERIS", "work", "road_overpasses_clean.shp"))
+plantios = vect(here("data", "geo", "AMLD", "plantios", "work", "plantios_clean.shp"))
+
 
 ### Quick check -------
 crs(rasters[[1]])
+crs(roads)
+crs(power_lines)
+crs(pipelines)
+crs(bridges)
+crs(plantios)
 ext(rasters[[1]])
 plot(rasters[[1]])  # plot the first layer
 plot(roads, col="white", add=TRUE)
 
-
-##### Exclusion of linear features ------
-
-
-### Create forest patches ---------
-#### Define forest as habitat -------
+### Reclassify rasters ---------
 # Define groups
 # NB: to see what codes refer to, check the "Codigos-da-legenda-colecao-9" file
 forest = c(3, 4, 5, 6, 49)
@@ -92,8 +97,15 @@ seuil = 100 # Here, we define the buffer width (dilatation length) (in meters)
 raster_dilat = dilatation_erosion(rasters_reclass[[1]], seuil) # We apply the function
 plot(raster_dilat, col=c("gray","darkgreen"))
 
+### Add plantios -----
 
-#### Distinction between corridors and patches -----
+
+
+
+
+
+
+### Identify forest corridors -----
 
 ###### Matrix vs forest --------
 # Forest habitat
@@ -258,8 +270,27 @@ final_raster[!is.na(corridors)] = 6
 # Quick check
 plot(rasters_reclass[[1]], col=c("#32a65e", "#ad975a", "#FFFFB2", "#0000FF", "#d4271e"), main="Landscape before patch and corridor identification")
 plot(final_raster, col=c("#32a65e", "#ad975a", "#FFFFB2", "#0000FF", "#d4271e", "#FA6FFC"), main="Final landscape")
+plot(roads, col="black", lwd=1.5, add=TRUE)
+plot(power_lines, col="red", lwd=2, add=TRUE)
+plot(pipelines, col="purple", lwd=3, add=TRUE)
+plot(bridges, col="brown", lwd=4, add=TRUE)
 
 
+### Exclusion of linear features ------
+##### Power lines ---------
+# Create a buffer around power lines
+power_lines_buffer = terra::buffer(power_lines, width = 50)
+
+# Rasterize the buffer to match your raster
+# Here we assign value "2" to cells overlapping the buffer
+power_lines_raster = terra::rasterize(power_lines_buffer, final_raster, field=2, background=NA)
+
+# Overlay raster on the existing raster
+# Replace NA cells in final_raster with values from power_lines_raster
+final_raster_updated = cover(power_lines_raster, final_raster)
+
+# Quick plot to check
+plot(final_raster_updated, col=c("#32a65e", "#ad975a", "#FFFFB2", "#0000FF", "#d4271e", "#FA6FFC"), main="Landscape with power line buffers")
 
 # ###### LCPs--------
 # # LCP with gdistance
