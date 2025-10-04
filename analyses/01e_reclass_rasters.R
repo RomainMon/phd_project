@@ -106,7 +106,7 @@ rasters_with_plantios = lapply(seq_along(rasters_reclass), function(i) {
 
 # Quick check
 year_sel = 2004 # choose a year to check
-buff = 500
+buff = 200
 
 # Select plantios
 pl = plantios_valid[plantios_valid$date_refor == year_sel, ]
@@ -360,6 +360,126 @@ final_raster_updated = cover(power_lines_raster, final_raster)
 
 # Quick plot to check
 plot(final_raster_updated, col=c("#32a65e", "#ad975a", "#FFFFB2", "#0000FF", "#d4271e", "#FA6FFC"), main="Landscape with power line buffers")
+
+##### Other linear features ---------
+# Function to reclass the raster according to the creation date of the infrastructure
+apply_linear_feature = function(rasters, years, feature, buffer_width, value=5) {
+  
+  # Check that date_crea exists
+  if (!"date_crea" %in% names(feature)) {
+    stop("The raster does not have a 'date_crea' variable")
+  }
+  
+  # Loop
+  lapply(seq_along(rasters), function(i) {
+    r = rasters[[i]]
+    yr = years[i]
+    
+    # Filter linear features built before this year
+    feat_valid = feature[feature$date_crea <= yr, ]
+    
+    if (nrow(feat_valid) > 0) {
+      # Buffer
+      feat_buff = terra::buffer(feat_valid, width = buffer_width)
+      
+      # Rasterize the buffer
+      feat_rast = terra::rasterize(feat_buff, r, field=value, background=NA)
+      
+      # Replace tge value
+      r = cover(feat_rast, r)
+    }
+    
+    return(r)
+  })
+}
+
+# Applications
+rasters_with_roads = apply_linear_feature(rasters_with_plantios, years, roads, buffer_width=15, value=5)
+rasters_with_pipelines = apply_linear_feature(rasters_with_roads, years, pipelines, buffer_width=15, value=2)
+rasters_with_bridges = apply_linear_feature(rasters_with_pipelines, years, bridges, buffer_width=10, value=6)
+
+## Quick check
+# Roads
+year_sel = 2004 # choose a year to check
+buff = 500
+
+# Select features
+feat = roads[roads$date_crea == year_sel, ]
+
+if (nrow(pl) > 0) {
+  
+  # Get indices for year-1, year, year+1 if they exist in your raster list
+  years_to_plot = c(year_sel - 1, year_sel, year_sel + 1)
+  idx = match(years_to_plot, years)  # find matching raster indices
+  
+  # Keep only years that exist in your data
+  valid = !is.na(idx)
+  years_to_plot = years_to_plot[valid]
+  idx = idx[valid]
+  
+  # Define zoom extent
+  ext_zoom = ext(feat) + buff
+  
+  # Plot
+  par(mfrow=c(1, length(idx)))
+  
+  for (j in seq_along(idx)) {
+    yr = years_to_plot[j]
+    r = rasters_with_bridges[[idx[j]]]  # use the "after" rasters with plantios
+    
+    r_zoom = crop(r, ext_zoom)
+    plot(r_zoom, col=c("#32a65e", "#ad975a", "#FFFFB2", "#0000FF", "#d4271e"),
+         main=as.character(yr))
+    plot(feat, border="black", lwd=1, add=TRUE)
+  }
+  
+  par(mfrow=c(1,1))  # reset layout
+  
+} else {
+  message("No features with date = ", year_sel)
+}
+
+# Road overpasses
+year_sel = 2019 # choose a year to check
+buff = 500
+
+# Select features
+feat = bridges[bridges$date_crea == year_sel, ]
+
+if (nrow(pl) > 0) {
+  
+  # Get indices for year-1, year, year+1 if they exist in your raster list
+  years_to_plot = c(year_sel - 1, year_sel, year_sel + 1)
+  idx = match(years_to_plot, years)  # find matching raster indices
+  
+  # Keep only years that exist in your data
+  valid = !is.na(idx)
+  years_to_plot = years_to_plot[valid]
+  idx = idx[valid]
+  
+  # Define zoom extent
+  ext_zoom = ext(feat) + buff
+  
+  # Plot
+  par(mfrow=c(1, length(idx)))
+  
+  for (j in seq_along(idx)) {
+    yr = years_to_plot[j]
+    r = rasters_with_bridges[[idx[j]]]  # use the "after" rasters with plantios
+    
+    r_zoom = crop(r, ext_zoom)
+    plot(r_zoom, col=c("#32a65e", "#ad975a", "#FFFFB2", "#0000FF", "#d4271e", "chartreu"),
+         main=as.character(yr))
+    plot(feat, border="black", lwd=1, add=TRUE)
+  }
+  
+  par(mfrow=c(1,1))  # reset layout
+  
+} else {
+  message("No features with date = ", year_sel)
+}
+
+
 
 # ###### LCPs--------
 # # LCP with gdistance
