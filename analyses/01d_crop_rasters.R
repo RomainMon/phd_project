@@ -145,7 +145,7 @@ for (i in seq_along(rasters_reprojected)) {
   r <- rasters_reprojected[[i]]
   
   # Construct a filename using the original raster name
-  file_name <- paste0(names(r)[1], "_sampling_bbox_31983.tif")
+  file_name <- paste0(names(r)[1], "_sampling_bbox.tif")
   output_path <- file.path(output_dir, file_name)
   
   # Write raster to file

@@ -43,7 +43,8 @@ plot(rasters[[1]])  # plot the first layer
 plot(roads, col="white", add=TRUE)
 
 ### Reclassify rasters ---------
-# Define groups
+
+#### Land use categories ------
 # NB: to see what codes refer to, check the "Codigos-da-legenda-colecao-9" file
 forest = c(3, 4, 5, 6, 49)
 notforest = c(11, 12, 32, 29, 50, 23)
@@ -72,8 +73,82 @@ rasters_reclass <- lapply(seq_along(rasters), function(i) {
 plot(rasters_reclass[[1]], col=c("#32a65e", "#ad975a", "#FFFFB2", "#0000FF", "#d4271e"))
 plot(rasters_reclass[[35]], col=c("#32a65e", "#ad975a", "#FFFFB2", "#0000FF", "#d4271e"))
 
-# The following section is based on Mailys Queru's work
+
+#### Overlay plantios on rasters depending on the reforestation year -----
+# Extract the years from filenames
+years = as.numeric(gsub("\\D", "", basename(raster_files))) 
+
+# Ensure rasters_reclass and years are aligned
+stopifnot(length(rasters_reclass) == length(years))
+
+# Remove plantios without reforestation years
+plantios_valid = plantios[!is.na(plantios$date_refor), ]
+plantios_valid$date_refor
+
+# Loop over rasters and overwrite values with plantios
+rasters_with_plantios = lapply(seq_along(rasters_reclass), function(i) {
+  r = rasters_reclass[[i]]
+  yr = years[i]
+  
+  # Filter plantios that are planted in or before this year
+  pl = plantios_valid[plantios_valid$date_refor <= yr, ]
+  
+  if (nrow(pl) > 0) {
+    # Rasterize plantios: forest = 1 inside polygons
+    pl_rast = terra::rasterize(pl, r, field=1, background=NA)
+    
+    # Overwrite r values with forest where plantios occur
+    r = cover(pl_rast, r)
+  }
+  
+  return(r)
+})
+
+# Quick check
+year_sel = 2004 # choose a year to check
+buff = 500
+
+# Select plantios
+pl = plantios_valid[plantios_valid$date_refor == year_sel, ]
+plot(pl)
+
+if (nrow(pl) > 0) {
+  
+  # Get indices for year-1, year, year+1 if they exist in your raster list
+  years_to_plot = c(year_sel - 1, year_sel, year_sel + 1)
+  idx = match(years_to_plot, years)  # find matching raster indices
+  
+  # Keep only years that exist in your data
+  valid = !is.na(idx)
+  years_to_plot = years_to_plot[valid]
+  idx = idx[valid]
+  
+  # Define zoom extent
+  ext_zoom = ext(pl) + buff
+  
+  # Plot
+  par(mfrow=c(1, length(idx)))
+  
+  for (j in seq_along(idx)) {
+    yr = years_to_plot[j]
+    r = rasters_with_plantios[[idx[j]]]  # use the "after" rasters with plantios
+    
+    r_zoom = crop(r, ext_zoom)
+    plot(r_zoom, col=c("#32a65e", "#ad975a", "#FFFFB2", "#0000FF", "#d4271e"),
+         main=as.character(yr))
+    plot(pl, border="black", lwd=2, add=TRUE)
+  }
+  
+  par(mfrow=c(1,1))  # reset layout
+  
+} else {
+  message("No plantios with date_refor = ", year_sel)
+}
+
+
+
 #### Dilatation-erosion --------
+# The following section is based on Mailys Queru's work
 dilatation_erosion = function(raster, seuil) {
   # All cells different than 1 become NA
   habitat = app(raster, fun = function(v) ifelse(v == 1, 1, NA))
@@ -94,14 +169,8 @@ dilatation_erosion = function(raster, seuil) {
 }
 
 seuil = 100 # Here, we define the buffer width (dilatation length) (in meters)
-raster_dilat = dilatation_erosion(rasters_reclass[[1]], seuil) # We apply the function
+raster_dilat = dilatation_erosion(rasters_with_plantios[[1]], seuil) # We apply the function
 plot(raster_dilat, col=c("gray","darkgreen"))
-
-### Add plantios -----
-
-
-
-
 
 
 
