@@ -7,7 +7,6 @@
 library(dplyr)
 library(tidyr)
 library(here)
-library(ggplot2)
 library(terra)
 library(purrr)
 library(stringr)
@@ -22,8 +21,47 @@ raster_files = list.files(base_path, pattern = "\\.tif$", full.names = TRUE)
 rasters = lapply(raster_files, terra::rast)
 years = as.numeric(gsub("\\D", "", basename(raster_files))) # Extract raster years using their file names (i.e., they have to be named as following: raster_YYYY.tif)
 
+## Vectors
+plantios = vect(here("data", "geo", "AMLD", "plantios", "work", "plantios_clean.shp"))
 
 ### MSPA with GuidosToolBox --------
+
+#### Remove small forest patches (before MSPA) --------
+# -> By removing small patches, we ensure that MSPA identifies corridors between large habitat patches
+# Here, the minimum patch size must be defined (in ha) (argument "min_area_ha")
+reclass_small_patches = function(r, min_area_ha) {
+  # Identify habitat (value = 1)
+  core = terra::ifel(r == 1, 1, NA)
+  non_core = terra::mask(r, core, inverse = TRUE)
+  
+  # Compute patch size
+  core_patches = terra::patches(core, directions = 8)
+  cs = terra::cellSize(core_patches, unit = "m") # Cell size in map units
+  patch_area = terra::zonal(cs, core_patches, fun = "sum", as.raster = TRUE) / 10000 # area in ha
+  
+  # Identify large patches
+  large_core = core_patches
+  large_core[patch_area < min_area_ha] = NA
+  large_core_mask = !is.na(large_core)
+  
+  # Identify small patches
+  small_core = !large_core_mask & !is.na(core)
+  
+  # Update the input raster
+  r[small_core] = 2 # Value to give to small patches
+  
+  return(r)
+}
+
+## Apply to all rasters
+rasters_large_patches = lapply(seq_along(rasters), function(i) {
+  message("Processing raster for year: ", years[i])
+  reclass_small_patches(rasters[[i]], min_area_ha = 10)
+})
+
+# Quick check
+plot(rasters[[1]])
+plot(rasters_large_patches[[1]])
 
 #### Reclass for MSPA ----
 # -> GTB requires a 8-byte type formatted input mask (.tif) with 0 = missing data, 1 = background, 2 = habitat
@@ -46,18 +84,19 @@ reclass_for_mspa <- function(xx) {
   return(xx)
 }
 
-rasters_for_mspa <- lapply(rasters, reclass_for_mspa)
+## Apply to all rasters
+rasters_for_mspa <- lapply(rasters_large_patches, reclass_for_mspa)
 
 #### Export all reclassed rasters ----
 # Define output folder
-output_dir <- here("outputs", "data", "MapBiomas", "MSPA")
+out_dir_preMSPA <- here("outputs", "data", "MapBiomas", "MSPA", "preMSPA")
 
 # Export loop
 for(i in seq_along(rasters_for_mspa)) {
   year <- years[i]
   r_mspa <- rasters_for_mspa[[i]]
   
-  out_file <- file.path(output_dir, paste0("raster_for_mspa_", year, ".tif"))
+  out_file <- file.path(out_dir_preMSPA, paste0("raster_for_mspa_", year, ".tif"))
   
   terra::writeRaster(
     r_mspa,
@@ -74,31 +113,134 @@ for(i in seq_along(rasters_for_mspa)) {
 
 
 #### Run MSPA -----
-# Open GLT > File > Batch Process > PAttern > Morphological > MSPA
-# Default parameters are connectivity = 8 (or 4), edge width = 1, transition = on (i.e., bridges connect core areas, if 0 they connect edges), intext = on (distinguished internal from external features)
-# The foreground area of a binary image is divided into seven visually distinguished MSPA classes: Core, Islet, Perforation, Edge, Loop, Bridge, and Branch (23 classes in the output raster)
+# Open GLT > File > Batch Process > Pattern > Morphological > MSPA
+# Default parameters are connectivity = 8 (or 4), edge width = 1, transition = on (i.e., bridges connect core areas, if "off" they connect edges), intext = on (distinguished internal from external features)
+# The foreground area of a binary image is divided into seven visually distinguished MSPA classes: Core, Islet, Perforation, Edge, Loop, Bridge, and Branch (up to 23 classes in the output raster depending on the intext parameter)
+# Parameters = 8, 1, 0, 0
+# Check in QGIS
+
 
 #### Reclass MSPA rasters -----
 ##### Rename and import GTB outputs -----
 # Path to your files
-output_dir <- here("outputs", "data", "MapBiomas", "MSPA", "batch_MSPA")
+mspa_path <- here("outputs", "data", "MapBiomas", "MSPA", "batch_MSPA")
 
 # List all raster files (assuming .tif)
-raster_files <- list.files(output_dir, pattern = "\\.tif$", full.names = TRUE)
+mspa_files <- list.files(mspa_path, pattern = "\\.tif$", full.names = TRUE)
+mspa_files <- mspa_files[order(mspa_files)]
 
-# Rename files by removing "for_" and "_8_1_1_1"
-new_names <- gsub("for_", "", raster_files)
+# Rename files by removing text strings
+new_names <- gsub("for_", "", mspa_files)
 new_names <- gsub("_8_1_0_0", "", new_names)
 
 # Actually rename the files
-file.rename(raster_files, new_names)
+file.rename(mspa_files, new_names)
 
 # Import rasters
 rasters_mspa <- lapply(new_names, terra::rast)
 unique(values(rasters_mspa[[1]]))
 plot(rasters_mspa[[1]])
 
-##### Reclass --------
+
+##### Mask MapBiomas rasters with MSPA --------
+# -> Here, we mask MapBiomas rasters with the outcome of the MSPA analysis in GuidosToolBox
+# (i) We reclass cells as corridors (value = 33) and (ii) we also reclass nearby 1 cells ("branches") as corridors (33)
+
+mask_with_mspa <- function(landuse, mspa) {
+  # Ensure same extent/resolution
+  if(!terra::compareGeom(landuse, mspa, stopOnError = FALSE)) {
+    mspa <- terra::resample(mspa, landuse, method = "near")
+  }
+  
+  # Create a mask for MSPA value == 33
+  mask_33 <- mspa == 33
+  
+  # Replace values in original raster where mask_33 == TRUE
+  landuse[mask_33] <- 33
+  
+  # Spread 33 to adjacent cells with value 1
+  # Define a 3x3 matrix for 8-neighbor adjacency
+  w <- matrix(1, nrow = 3, ncol = 3)
+  
+  # Count number of adjacent 33 cells
+  neighbors_33 <- terra::focal(mask_33, w = w, fun = max, na.policy = "omit", pad = TRUE)
+  
+  # Update landuse cells: if cell == 1 and has any 33 neighbor, assign 33
+  landuse[landuse == 1 & neighbors_33 == 1] <- 33
+  
+  return(landuse)
+}
+
+## Apply to all rasters
+rasters_reclass_w_mspa <- map2(rasters, rasters_mspa, mask_with_mspa)
+
+# Quick check
+plot(rasters_reclass_w_mspa[[35]])
+
+
+#### Add corridors unmarked as corridors by MSPA -----
+# -> Here, we overlay plantios on MSPA rasters and assign value 33 where there is an intersection with the plantio AND the raster year is equal or after date_refor
+add_plantios_ids <- function(raster, year, plantios, ids, value) {
+  # Keep only plantios with selected ids and valid reforestation year
+  plantios_valid <- plantios[plantios$id %in% ids & !is.na(plantios$date_refor) & plantios$date_refor <= year, ]
+  
+  if (nrow(plantios_valid) > 0) {
+    # Rasterize plantios: assign 'value' inside polygons, NA elsewhere
+    pl_rast <- terra::rasterize(plantios_valid, raster, field = value, background = NA)
+    
+    # Update only raster cells where plantio exists
+    raster[!is.na(pl_rast)] <- value
+  }
+  
+  return(raster)
+}
+
+# Wrap
+rasters_reclass_w_mspa2 <- lapply(seq_along(rasters_reclass_w_mspa), function(i) {
+  message("Overlaying plantios on raster for year: ", years[i])
+  add_plantios_ids(rasters_reclass_w_mspa[[i]], years[i], plantios, ids = 36, value = 33)
+})
+
+# Check
+year_to_check <- 2016
+r_index <- which(years == year_to_check)
+r_check <- rasters_reclass_w_mspa2[[r_index]]
+
+# Subset plantios with the selected IDs
+plantios_selected <- plantios[plantios$id %in% 36, ]
+
+# Get the extent of the plantios to zoom in
+zoom_extent <- terra::ext(plantios_selected)
+
+# Plot the raster zoomed to the plantios extent
+plot(r_check, main = paste("Raster with plantios overlay - Year", year_to_check),
+     col = rainbow(6), ext = zoom_extent)
+
+# Overlay the plantios polygons
+plot(plantios_selected, border = "black", add = TRUE)
+
+
+#### Export MSPA final rasters -----
+output_mspa_final_path = here("outputs", "data", "MapBiomas", "MSPA", "reclass_w_MSPA") # Define the output folder
+for (i in seq_along(rasters_reclass_w_mspa2)) {
+  year <- years[i]
+  out_file <- file.path(output_mspa_final_path, paste0("raster_reclass_w_MSPA_", year, ".tif"))
+  
+  writeRaster(
+    rasters_reclass_w_mspa2[[i]],
+    filename = out_file,
+    overwrite = TRUE,
+    wopt = list(
+      datatype = "INT2U",  # allows value 33
+      gdal = c("COMPRESS=LZW")
+    )
+  )
+  
+  message("Saved masked raster: ", out_file)
+}
+
+
+
 
 
 ### Own version (imperfect) -----

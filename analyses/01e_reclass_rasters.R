@@ -7,7 +7,6 @@
 library(dplyr)
 library(tidyr)
 library(here)
-library(ggplot2)
 library(terra)
 library(purrr)
 library(stringr)
