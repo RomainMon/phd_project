@@ -17,7 +17,7 @@ library(sf)
 base_path = here("outputs", "data", "MapBiomas", "MSPA", "reclass_w_mspa")
 raster_files = list.files(base_path, pattern = "\\.tif$", full.names = TRUE)
 rasters = lapply(raster_files, terra::rast)
-years <- stringr::str_extract(basename(raster_files), "\\d{4}")
+years = stringr::str_extract(basename(raster_files), "\\d{4}")
 plot(rasters[[1]], col=c("#32a65e", "#ad975a", "#FFFFB2", "#0000FF", "#d4271e", "chartreuse"))
 
 ### Download Makurhini
@@ -27,20 +27,20 @@ plot(rasters[[1]], col=c("#32a65e", "#ad975a", "#FFFFB2", "#0000FF", "#d4271e", 
 
 ### Merge classes -----
 # Function to merge classes
-merge_classes <- function(r, year, x, y, i) {
+merge_classes = function(r, year, x, y, i) {
   message("Preprocessing raster for year: ", year)
   
   # Remove class 0 (no data)
-  r[r == 0] <- NA
+  r[r == 0] = NA
   
   # Merge classes x and y into class i
-  r[r %in% c(x, y)] <- i
+  r[r %in% c(x, y)] = i
   
   return(r)
 }
 
 # Apply on all rasters
-rasters_merged <- purrr::map2(
+rasters_merged = purrr::map2(
   rasters,
   years,
   ~ merge_classes(.x, .y, x = 1, y = 33, i = 1)
@@ -61,21 +61,21 @@ check_landscape(rasters_merged[[1]])
 
 ##### For all classes -------
 # Function to compute class-level metrics for all classes
-compute_class_metrics <- function(r, year) {
+compute_class_metrics = function(r, year) {
   message("Processing raster for year: ", year)
   
   # Remove class 0
-  r[r == 0] <- NA
+  r[r == 0] = NA
   
   # Compute metrics
-  metrics <- landscapemetrics::calculate_lsm(
+  metrics = landscapemetrics::calculate_lsm(
     landscape = r,
     directions = 8,
-    what = c("lsm_c_ca", "lsm_c_pland") # Define landscape metrics here
+    what = c("lsm_c_ca", "lsm_c_pland", "lsm_c_ed") # Define landscape metrics here
   )
   
   # Round
-  metrics <- metrics %>%
+  metrics = metrics %>%
     dplyr::mutate(dplyr::across(where(is.numeric), ~ round(.x, 2)),
                   year = year, .before = 1)
   
@@ -99,20 +99,20 @@ class_metrics = class_metrics %>%
 
 ##### For one class only -----
 # Function to compute class-level metrics for one class only
-compute_one_class_metrics <- function(r, year, class_value, metrics_to_compute) {
+compute_one_class_metrics = function(r, year, class_value, metrics_to_compute) {
   
   message("Processing raster for year: ", year)
   
   # Remove class 0
-  r[r == 0] <- NA
+  r[r == 0] = NA
   
   # Mask all other classes except the requested one
-  r <- terra::mask(r, r != class_value, maskvalues = TRUE)
+  r = terra::mask(r, r != class_value, maskvalues = TRUE)
   
   # Compute metrics
-  metrics <- landscapemetrics::calculate_lsm(
+  metrics = landscapemetrics::calculate_lsm(
     landscape = r, 
-    directions = 8, 
+    directions = 8,
     what = metrics_to_compute
   ) %>%
     dplyr::mutate(
@@ -125,65 +125,65 @@ compute_one_class_metrics <- function(r, year, class_value, metrics_to_compute) 
 }
 
 # On forests (core area + corridors)
-forest_class_metrics <- purrr::map2_dfr(
+forest_class_metrics = purrr::map2_dfr(
   rasters_merged,
   years,
-  ~ compute_one_class_metrics(.x, .y, class_value = 1, metrics_to_compute = c("lsm_c_area_mn",
-                                                                              "lsm_c_area_sd",
-                                                                              "lsm_c_ca",
+  ~ compute_one_class_metrics(.x, .y, class_value = 1, metrics_to_compute = c("lsm_c_ca",
                                                                               "lsm_c_ai",
+                                                                              "lsm_c_area_mn",
+                                                                              "lsm_c_area_sd",
+                                                                              "lsm_c_pd",
                                                                               "lsm_c_np"))
 )
 
 # On forests (core area)
-forest_core_metrics <- purrr::map2_dfr(
+forest_core_metrics = purrr::map2_dfr(
   rasters,
   years,
-  ~ compute_one_class_metrics(.x, .y, class_value = 1, metrics_to_compute = c("lsm_c_np"))
+  ~ compute_one_class_metrics(.x, .y, class_value = 1, metrics_to_compute = c("lsm_c_ca",
+                                                                              "lsm_c_ai",
+                                                                              "lsm_c_area_mn",
+                                                                              "lsm_c_area_sd",
+                                                                              "lsm_c_pd",
+                                                                              "lsm_c_np"))
 )
 
 # On forests (corridors)
 forest_corridors_metrics <- purrr::map2_dfr(
   rasters,
   years,
-  ~ compute_one_class_metrics(.x, .y, class_value = 33, metrics_to_compute = c("lsm_c_np"))
+  ~ compute_one_class_metrics(.x, .y, class_value = 33, metrics_to_compute = c("lsm_c_ca",
+                                                                               "lsm_c_ai",
+                                                                               "lsm_c_area_mn",
+                                                                               "lsm_c_area_sd",
+                                                                               "lsm_c_pd",
+                                                                               "lsm_c_np"))
 )
 
 # To wide format
-forest_class_metrics <- forest_class_metrics %>%
+forest_class_metrics = forest_class_metrics %>%
   tidyr::pivot_wider(names_from = metric, values_from = value) %>%
   dplyr::select(-c(id, layer)) %>%
   dplyr::mutate(type = "forest_all", .before = 1)
 
-forest_core_metrics <- forest_core_metrics %>%
+forest_core_metrics = forest_core_metrics %>%
   tidyr::pivot_wider(names_from = metric, values_from = value) %>%
   dplyr::select(-c(id, layer)) %>%
   dplyr::mutate(type = "forest_core", .before = 1)
 
-forest_corridors_metrics <- forest_corridors_metrics %>%
+forest_corridors_metrics = forest_corridors_metrics %>%
   tidyr::pivot_wider(names_from = metric, values_from = value) %>%
   dplyr::select(-c(id, layer)) %>%
   dplyr::mutate(type = "forest_corridor", .before = 1)
-
-# Merge all three data frames
-forest_metrics_final <- dplyr::bind_rows(
-  forest_class_metrics,
-  forest_core_metrics,
-  forest_corridors_metrics
-)
 
 #### Using Makurhini ---------
 # NB: Makurhini works on SF polygons
 
 # 1. Transform forests cells as patches
-# Specify raster indices and corresponding years
-raster_indices <- c(1, 17, 35)
-selected_years <- c("1989", "2006", "2023")
-
 # Function to extract patches and convert to sf
-extract_patches_sf <- function(r, class_value = 1) {
+extract_patches_sf = function(r, class_value) {
   # Extract patches
-  patches <- landscapemetrics::get_patches(
+  patches = landscapemetrics::get_patches(
     landscape = r,
     class = class_value,
     directions = 8,
@@ -191,59 +191,160 @@ extract_patches_sf <- function(r, class_value = 1) {
   )
   
   # Get the raster with patch IDs
-  patch_raster <- patches[[1]][[1]]  # layer_1$class_1 equivalent
-  patch_raster[is.na(patch_raster)] <- NA
+  patch_raster = patches[[1]][[1]]  # layer_1$class_1 equivalent
+  patch_raster[is.na(patch_raster)] = NA
   
   # Polygonize patches (dissolve identical patch IDs)
-  patches_vect <- terra::as.polygons(patch_raster, dissolve = TRUE, na.rm = TRUE)
+  patches_vect = terra::as.polygons(patch_raster, dissolve = TRUE, na.rm = TRUE)
   
   # Add patch ID column
-  patches_vect$patch_id <- seq_len(nrow(patches_vect))
+  patches_vect$patch_id = seq_len(nrow(patches_vect))
   
   # Convert to sf
-  patches_sf <- sf::st_as_sf(patches_vect)
+  patches_sf = sf::st_as_sf(patches_vect)
   
   return(patches_sf)
 }
 
-# Apply to selected rasters and create a named list
-list_forest_patches <- purrr::map(raster_indices, ~ extract_patches_sf(rasters[[.x]]))
-names(list_forest_patches) <- selected_years
+# Apply to rasters and create a named list
+list_forest_patches = purrr::imap(rasters_merged, ~{
+  message("Processing raster: ", .y)
+  extract_patches_sf(.x, class_value = 1)
+})
+names(list_forest_patches) = years
+names(list_forest_patches)
+
+# Check CRS consistency
+unique(sapply(list_forest_patches, \(x) st_crs(x)$epsg))
+
+# Check for NULLs
+any(sapply(list_forest_patches, is.null))
 
 # Check format
 lapply(list_forest_patches, class)  # should all be "sf" "data.frame"
 
-
 # 2. Compute metrics
 
 ## Compute study area extent
-# Suppose r is your raster
-r <- rasters[[1]]
+r = rasters_merged[[1]]
 
 # Compute area per cell in m²
-cell_areas_m2 <- terra::cellSize(r, unit = "m")  # returns SpatRaster of cell areas
+cell_areas_m2 = terra::cellSize(r, unit = "m")  # returns SpatRaster of cell areas
 
 # Sum all non-NA cells to get total area
-total_area_m2 <- sum(values(cell_areas_m2), na.rm = TRUE)
+total_area_m2 = sum(values(cell_areas_m2), na.rm = TRUE)
 
 # Convert to hectares
-total_area_ha <- total_area_m2 / 10000
+total_area_ha = total_area_m2 / 10000
 
 ## Compute ECA
-dECA <- Makurhini::MK_dECA(
-  nodes= list_forest_patches, 
+# NB: computing ECA on all rasters makes the computer crash
+# Subsets of rasters
+list_forest_patches_1 = list_forest_patches[1:7]   # 1989–1995
+list_forest_patches_2 = list_forest_patches[8:14]  # 1996–2002
+list_forest_patches_3 = list_forest_patches[15:21] # 2003–2009
+list_forest_patches_4 = list_forest_patches[22:28] # 2010–2016
+list_forest_patches_5 = list_forest_patches[29:35] # 2017–2023
+
+# Compute ECA
+dECA1 = Makurhini::MK_dECA(
+  nodes= list_forest_patches_1, 
   attribute = NULL, 
   area_unit = "ha",
   distance = list(type= "centroid"), 
   metric = "PC",
   probability = 0.05,
   distance_thresholds = 8000,
-  LA = total_area_ha, 
-  plot= c("1989", "2006", "2023"))
-dECA
-dECA$dECA_table
-dECA$dECA_plot
+  LA = total_area_ha,
+  plot=names(list_forest_patches_1)
+  )
+dECA2 = Makurhini::MK_dECA(
+  nodes= list_forest_patches_2, 
+  attribute = NULL, 
+  area_unit = "ha",
+  distance = list(type= "centroid"), 
+  metric = "PC",
+  probability = 0.05,
+  distance_thresholds = 8000,
+  LA = total_area_ha,
+  plot=names(list_forest_patches_2)
+)
+dECA3 = Makurhini::MK_dECA(
+  nodes= list_forest_patches_3, 
+  attribute = NULL, 
+  area_unit = "ha",
+  distance = list(type= "centroid"), 
+  metric = "PC",
+  probability = 0.05,
+  distance_thresholds = 8000,
+  LA = total_area_ha,
+  plot=names(list_forest_patches_3)
+)
+dECA4 = Makurhini::MK_dECA(
+  nodes= list_forest_patches_4, 
+  attribute = NULL, 
+  area_unit = "ha",
+  distance = list(type= "centroid"), 
+  metric = "PC",
+  probability = 0.05,
+  distance_thresholds = 8000,
+  LA = total_area_ha,
+  plot=names(list_forest_patches_4)
+)
+dECA5 = Makurhini::MK_dECA(
+  nodes= list_forest_patches_5, 
+  attribute = NULL, 
+  area_unit = "ha",
+  distance = list(type= "centroid"), 
+  metric = "PC",
+  probability = 0.05,
+  distance_thresholds = 8000,
+  LA = total_area_ha,
+  plot=names(list_forest_patches_5)
+)
 
+# Combine ECA tables
+ECA_total = dplyr::bind_rows(
+  dECA1$dECA_table,
+  dECA2$dECA_table,
+  dECA3$dECA_table,
+  dECA4$dECA_table,
+  dECA5$dECA_table
+)
+
+
+
+### Prepare tables -----------
+# 1. Landscape metrics for forest class (overall)
+forest_class_metrics_ED = forest_class_metrics %>% 
+  dplyr::left_join(dplyr::select(class_metrics, c(year, class, ed, pland)), by=c("year", "class"))
+# Compute the forest fragmentation index (Ma et al. 2025, Nat Comm)
+forest_class_metrics_ED = forest_class_metrics_ED %>% 
+  dplyr::mutate(
+    # Normalize each variable (min–max scaling)
+    norm_ED = (ed - min(ed, na.rm = TRUE)) / (max(ed, na.rm = TRUE) - min(ed, na.rm = TRUE)),
+    norm_PD = (pd - min(pd, na.rm = TRUE)) / (max(pd, na.rm = TRUE) - min(pd, na.rm = TRUE)),
+    norm_area_mn = 1 - (area_mn - min(area_mn, na.rm = TRUE)) / 
+      (max(area_mn, na.rm = TRUE) - min(area_mn, na.rm = TRUE)),
+    # Composite fragmentation index
+    FFI = (norm_ED + norm_PD + norm_area_mn) / 3
+  )
+forest_class_metrics_ECA = dplyr::left_join(forest_class_metrics_ED, ECA_total, by=c("year"="Time"))
+
+
+# 2. Landscape metrics for forest core and corridor
+# Prepare the core metrics
+forest_core_metrics_prefixed = forest_core_metrics %>%
+  dplyr::rename_with(~ paste0("core_", .x), -c(year, type))  # keep year/type unchanged
+
+# Prepare the corridor metrics
+forest_corridors_metrics_prefixed = forest_corridors_metrics %>%
+  dplyr::rename_with(~ paste0("corr_", .x), -c(year, type))  # keep year/type unchanged
+
+# Join by year
+forest_core_corridor_metrics = forest_core_metrics_prefixed %>%
+  dplyr::full_join(forest_corridors_metrics_prefixed, by = "year") %>% 
+  dplyr::select(-c(type.x, type.y))
 
 
 ### Compute patch-level metrics   ---------
