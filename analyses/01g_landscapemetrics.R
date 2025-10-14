@@ -16,11 +16,27 @@ library(sf)
 ### Import rasters (with corridors) -------
 base_path = here("outputs", "data", "MapBiomas", "MSPA", "reclass_w_mspa")
 raster_files = list.files(base_path, pattern = "\\.tif$", full.names = TRUE)
-rasters = lapply(raster_files, terra::rast)
-years = stringr::str_extract(basename(raster_files), "\\d{4}")
+
+# Extract years
+years = stringr::str_extract(basename(raster_files), "(?<!\\d)\\d{4}(?!\\d)")
+# Create a dataframe to link files and years
+raster_df = data.frame(file = raster_files, year = as.numeric(years)) %>%
+  dplyr::arrange(year)
+# Load rasters in chronological order
+rasters = lapply(raster_df$file, terra::rast)
+years = raster_df$year
+# Check
+for (i in seq_along(rasters)) {
+  cat("Year", years[i], " → raster name:", basename(raster_df$file[i]), "\n")
+}
 plot(rasters[[1]], col=c("#32a65e", "#ad975a", "#FFFFB2", "#0000FF", "#d4271e", "chartreuse"))
 
-### Download Makurhini
+
+### Import vectors -----
+regions = terra::vect(here("data", "geo", "APonchon", "GLT", "RegionsName.shp"))
+regions = terra::project(regions, "EPSG:31983")
+
+### Download Makurhini -----
 # library(devtools)
 # library(remotes)
 # install_github("connectscape/Makurhini", dependencies = TRUE, upgrade = "never")
@@ -49,11 +65,11 @@ plot(rasters_merged[[1]], col=c("#32a65e", "#ad975a", "#FFFFB2", "#0000FF", "#d4
 unique(values(rasters_merged[[1]]))
 
 
-
-
 ### Compute class-level landscape metrics ---------
 # NB: All functions in landscapemetrics start with lsm_ (for landscape metrics). The second part of the name specifies the level (patch - p, class - c or landscape - l)
 # landscapemetrics works on categorical rasters where classes are integers. check_landscape() verifies if the landscapes are in good format
+
+# Check landscape validity (for landscape metrics)
 check_landscape(rasters[[1]])
 check_landscape(rasters_merged[[1]])
 
@@ -309,27 +325,29 @@ ECA_total = dplyr::bind_rows(
   dECA2$dECA_table,
   dECA3$dECA_table,
   dECA4$dECA_table,
-  dECA5$dECA_table
-)
-
+  dECA5$dECA_table) %>%
+  dplyr::mutate(Time = as.numeric(as.character(Time)))
 
 
 ### Prepare tables -----------
 # 1. Landscape metrics for forest class (overall)
 forest_class_metrics_ED = forest_class_metrics %>% 
   dplyr::left_join(dplyr::select(class_metrics, c(year, class, ed, pland)), by=c("year", "class"))
+
 # Compute the forest fragmentation index (Ma et al. 2025, Nat Comm)
+# To replicate Ma et al. (2023) index, one must: normalize each metric using min–max scaling, invert MPA’s direction (1-MPA), average the three normalized components equally.
 forest_class_metrics_ED = forest_class_metrics_ED %>% 
   dplyr::mutate(
     # Normalize each variable (min–max scaling)
-    norm_ED = (ed - min(ed, na.rm = TRUE)) / (max(ed, na.rm = TRUE) - min(ed, na.rm = TRUE)),
-    norm_PD = (pd - min(pd, na.rm = TRUE)) / (max(pd, na.rm = TRUE) - min(pd, na.rm = TRUE)),
-    norm_area_mn = 1 - (area_mn - min(area_mn, na.rm = TRUE)) / 
-      (max(area_mn, na.rm = TRUE) - min(area_mn, na.rm = TRUE)),
+    ed_norm = (ed - min(ed, na.rm = TRUE)) / (max(ed, na.rm = TRUE) - min(ed, na.rm = TRUE)),
+    pd_norm = (pd - min(pd, na.rm = TRUE)) / (max(pd, na.rm = TRUE) - min(pd, na.rm = TRUE)),
+    area_mn_norm = 1 - (area_mn - min(area_mn, na.rm = TRUE)) / (max(area_mn, na.rm = TRUE) - min(area_mn, na.rm = TRUE)),
     # Composite fragmentation index
-    FFI = (norm_ED + norm_PD + norm_area_mn) / 3
+    FFI = (ed_norm + pd_norm + area_mn_norm) / 3
   )
-forest_class_metrics_ECA = dplyr::left_join(forest_class_metrics_ED, ECA_total, by=c("year"="Time"))
+
+# Merge with ECA
+forest_class_metrics_final = dplyr::left_join(forest_class_metrics_ED, ECA_total, by=c("year"="Time"))
 
 
 # 2. Landscape metrics for forest core and corridor
@@ -342,48 +360,109 @@ forest_corridors_metrics_prefixed = forest_corridors_metrics %>%
   dplyr::rename_with(~ paste0("corr_", .x), -c(year, type))  # keep year/type unchanged
 
 # Join by year
-forest_core_corridor_metrics = forest_core_metrics_prefixed %>%
+forest_core_corridor_metrics_final = forest_core_metrics_prefixed %>%
   dplyr::full_join(forest_corridors_metrics_prefixed, by = "year") %>% 
   dplyr::select(-c(type.x, type.y))
 
 
+
+### Transition matrix -----
+# Here, we compute a transition matrix on the rasters to identify the changes in land use across the landscape and through time
+
+#### On all rasters (year-to-year changes) ----
+transition_matrix = lapply(1:(length(rasters_merged) - 1), function(i) {
+  # Display progress message
+  message("Computing transition matrix: ", years[i], " → ", years[i + 1])
+  # Compute crosstab between consecutive years
+  t = terra::crosstab(c(rasters_merged[[i]], rasters_merged[[i + 1]]))
+  # Return list with metadata and table
+  list(year_from = years[i], year_to = years[i + 1], table = t)
+})
+transition_matrix[[1]]
+
+#### On selected years -------
+# Pick evenly spaced years (5 breaks here)
+years_selected = c(1989, 2000, 2012, 2023)
+
+# Match raster indices corresponding to these years
+idx_selected = match(years_selected, years)
+
+# Pixel area
+pixel_area_m2 = terra::res(rasters_merged[[1]])[1] * terra::res(rasters_merged[[1]])[2]
+
+# Compute contingency tables between selected years
+contingency_list = lapply(1:(length(idx_selected) - 1), function(i) {
+  from_year = years_selected[i]
+  to_year   = years_selected[i + 1]
+  
+  message("Computing contingency table: ", from_year, " → ", to_year)
+  
+  # Crosstab between rasters
+  tab = terra::crosstab(c(rasters_merged[[idx_selected[i]]],
+                           rasters_merged[[idx_selected[i + 1]]]))
+  
+  df = as.data.frame(tab)
+  colnames(df) = c("from", "to", "n_pixels")
+  
+  df = df %>%
+    dplyr::mutate(
+      year_from = from_year,
+      year_to = to_year,
+      area_m2 = round(n_pixels * pixel_area_m2, 2),
+      area_ha = round(area_m2 / 10000, 2),
+      perc = round(100 * n_pixels / sum(n_pixels), 2)
+    )
+  df
+})
+
+# Combine all results
+contingency_all = dplyr::bind_rows(contingency_list)
+head(contingency_all)
+
+
 ### Compute patch-level metrics   ---------
-compute_patch_metrics <- function(r, year, class_value, metrics_to_compute) {
-  message("Processing raster for year: ", year, " (class ", class_value, ")")
+# Function to compute patch metrics on filtered patches (intersecting the entities in "vect")
+compute_patch_metrics_filtered = function(raster, class_value, metrics, vect) {
+  # Extract patches for the specified class
+  patches = landscapemetrics::get_patches(raster, class = class_value, directions = 8)
+  patches_rast = patches[[1]][[1]] # layer_1$class_X
   
-  # Get patches
-  patches <- landscapemetrics::get_patches(r, class = class_value, directions = 8)
+  # Identify which patch IDs intersect the vector file
+  patch_ids = unique(terra::extract(patches_rast, vect)[, 2])
+  patch_ids = patch_ids[!is.na(patch_ids)]
   
-  # Convert to SpatRaster
-  patch_rast <- patches[[1]][[1]]  # layer_1$class_X
-  patch_rast[is.na(patch_rast)] <- NA
+  # Keep full patches that intersect
+  patches_keep = patches_rast
+  patches_keep[!patches_keep %in% patch_ids] = NA
   
-  # Compute landscape metrics
-  metrics <- landscapemetrics::spatialize_lsm(
-    landscape = patch_rast,
+  # Compute patch-level metrics
+  metrics_result = landscapemetrics::spatialize_lsm(
+    landscape = patches_keep,
     directions = 8,
-    what = metrics_to_compute
+    what = metrics
   )
   
-  # Add the year
-  metrics <- metrics %>% mutate(year = year, .before = 1)
-  
-  return(metrics)
+  return(metrics_result)
 }
 
-# Metrics on forest patches
-forest_patch_metrics <- purrr::map2(
-  rasters,
-  years,
-  ~ compute_patch_metrics(.x, .y, class_value = 1, metrics_to_compute = c("lsm_p_area", "lsm_p_shape"))
-)
+#### On core forest -------
+list_patch_metrics = purrr::imap(rasters, ~{
+  message("Processing raster: ", years[.y])
+  compute_patch_metrics_filtered(
+    raster = .x,
+    class_value = 1,
+    metrics = c("lsm_p_area", "lsm_p_shape"),
+    vect = regions
+  )
+})
 
-# Combine
-forest_patch_metrics_df <- bind_rows(forest_patch_metrics_list)
+# Assign names for clarity
+names(list_patch_metrics) = years
 
 
-
-#### Export datasets ------
+### Export datasets ------
 base_path = here("outputs", "data", "landscapemetrics")
 write.csv(class_metrics, file = file.path(base_path, "class_metrics_bbox_1989_2023.csv"), row.names = FALSE)
-write.csv(forest_metrics_final, file = file.path(base_path, "forest_class_metrics_bbox_1989_2023.csv"), row.names=FALSE)
+write.csv(forest_class_metrics_final, file = file.path(base_path, "forest_class_metrics_bbox_1989_2023.csv"), row.names=FALSE)
+write.csv(forest_core_corridor_metrics_final, file = file.path(base_path, "forest_core_corridors_metrics_bbox_1989_2023.csv"), row.names=FALSE)
+write.csv(contingency_all, file = file.path(base_path, "transition_matrix_bbox_1989_2023.csv"), row.names=FALSE)

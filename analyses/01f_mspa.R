@@ -18,8 +18,19 @@ library(sf)
 ## Rasters
 base_path = here("outputs", "data", "MapBiomas", "Rasters_reclass")
 raster_files = list.files(base_path, pattern = "\\.tif$", full.names = TRUE)
-rasters = lapply(raster_files, terra::rast)
-years = as.numeric(gsub("\\D", "", basename(raster_files))) # Extract raster years using their file names (i.e., they have to be named as following: raster_YYYY.tif)
+
+# Extract years
+years = stringr::str_extract(basename(raster_files), "(?<!\\d)\\d{4}(?!\\d)")
+# Create a dataframe to link files and years
+raster_df = data.frame(file = raster_files, year = as.numeric(years)) %>%
+  dplyr::arrange(year)
+# Load rasters in chronological order
+rasters = lapply(raster_df$file, terra::rast)
+years = raster_df$year
+# Check
+for (i in seq_along(rasters)) {
+  cat("Year", years[i], " → raster name:", basename(raster_df$file[i]), "\n")
+}
 
 ## Vectors
 plantios = vect(here("data", "geo", "AMLD", "plantios", "work", "plantios_clean.shp"))
@@ -61,7 +72,7 @@ rasters_large_patches = lapply(seq_along(rasters), function(i) {
 
 # Quick check
 plot(rasters[[1]])
-plot(rasters_large_patches[[1]])
+plot(rasters_large_patches[[1]]) # At first sight, nothing changed, but look carefully: tiny patches are reclassified!
 
 #### Reclass for MSPA ----
 # -> GTB requires a 8-byte type formatted input mask (.tif) with 0 = missing data, 1 = background, 2 = habitat
@@ -116,30 +127,50 @@ for(i in seq_along(rasters_for_mspa)) {
 # Open GLT > File > Batch Process > Pattern > Morphological > MSPA
 # Default parameters are connectivity = 8 (or 4), edge width = 1, transition = on (i.e., bridges connect core areas, if "off" they connect edges), intext = on (distinguished internal from external features)
 # The foreground area of a binary image is divided into seven visually distinguished MSPA classes: Core, Islet, Perforation, Edge, Loop, Bridge, and Branch (up to 23 classes in the output raster depending on the intext parameter)
-# Parameters = 8, 1, 0, 0
+# Parameters = 8, 1, 0 ("off"), 0 ("off")
 # Check in QGIS
 
 
 #### Reclass MSPA rasters -----
 ##### Rename and import GTB outputs -----
-# Path to your files
+# Path to files
 mspa_path <- here("outputs", "data", "MapBiomas", "MSPA", "batch_MSPA")
 
-# List all raster files (assuming .tif)
+# List all MSPA raster files
 mspa_files <- list.files(mspa_path, pattern = "\\.tif$", full.names = TRUE)
-mspa_files <- mspa_files[order(mspa_files)]
 
-# Rename files by removing text strings
-new_names <- gsub("for_", "", mspa_files)
-new_names <- gsub("_8_1_0_0", "", new_names)
+# Extract years safely from filenames
+# Use strict regex: 4 consecutive digits not part of a longer number
+mspa_years <- stringr::str_extract(basename(mspa_files), "(?<!\\d)\\d{4}(?!\\d)")
 
-# Actually rename the files
-file.rename(mspa_files, new_names)
+# Create dataframe linking files and extracted years
+mspa_df = data.frame(file = mspa_files, year = as.numeric(mspa_years)) %>%
+  dplyr::arrange(year)
 
-# Import rasters
-rasters_mspa <- lapply(new_names, terra::rast)
+# Rename files by removing unwanted text
+mspa_df <- mspa_df %>%
+  dplyr::mutate(
+    new_name = gsub("for_", "", file),
+    new_name = gsub("_8_1_0_0", "", new_name)
+  )
+
+# Actually rename files on disk
+file.rename(mspa_df$file, mspa_df$new_name)
+
+# Update paths and years after renaming
+mspa_df$file <- mspa_df$new_name
+
+# Load rasters in chronological order
+rasters_mspa <- lapply(mspa_df$file, terra::rast)t
 unique(values(rasters_mspa[[1]]))
 plot(rasters_mspa[[1]])
+mspa_years <- mspa_df$year
+
+# Quick visual check
+for (i in seq_along(mspa_df$file)) {
+  cat("Year", mspa_years[i], "→", basename(mspa_df$file[i]), "\n")
+}
+
 
 
 ##### Mask MapBiomas rasters with MSPA --------
@@ -197,13 +228,13 @@ add_plantios_ids <- function(raster, year, plantios, ids, value) {
 
 # Wrap
 rasters_reclass_w_mspa2 <- lapply(seq_along(rasters_reclass_w_mspa), function(i) {
-  message("Overlaying plantios on raster for year: ", years[i])
-  add_plantios_ids(rasters_reclass_w_mspa[[i]], years[i], plantios, ids = 36, value = 33)
+  message("Overlaying plantios on raster for year: ", mspa_years[i])
+  add_plantios_ids(rasters_reclass_w_mspa[[i]], mspa_years[i], plantios, ids = 36, value = 33)
 })
 
 # Check
 year_to_check <- 2016
-r_index <- which(years == year_to_check)
+r_index <- which(mspa_years == year_to_check)
 r_check <- rasters_reclass_w_mspa2[[r_index]]
 
 # Subset plantios with the selected IDs
@@ -223,7 +254,7 @@ plot(plantios_selected, border = "black", add = TRUE)
 #### Export MSPA final rasters -----
 output_mspa_final_path = here("outputs", "data", "MapBiomas", "MSPA", "reclass_w_MSPA") # Define the output folder
 for (i in seq_along(rasters_reclass_w_mspa2)) {
-  year <- years[i]
+  year <- mspa_years[i]
   out_file <- file.path(output_mspa_final_path, paste0("raster_reclass_w_MSPA_", year, ".tif"))
   
   writeRaster(

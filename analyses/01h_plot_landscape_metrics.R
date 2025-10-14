@@ -98,3 +98,81 @@ ggplot(data, aes(x = year, y = value, color = metric)) +
     legend.position = "none"
   )
 
+
+# # Plot
+# ggplot(forest_class_metrics_ED, aes(x = as.numeric(year), y = FFI)) +
+#   geom_line(color = "darkgreen", linewidth = 1) +
+#   geom_point(color = "forestgreen", size = 3) +
+#   labs(
+#     title = "Temporal Evolution of the Forest Fragmentation Index (FFI)",
+#     x = "Year",
+#     y = "FFI (normalized 0–1)"
+#   ) +
+#   theme_minimal(base_size = 14)
+# 
+# # Compute scaling factor for np (to align visually with FFI)
+# scale_factor = max(forest_class_metrics_ED$np, na.rm = TRUE)
+# # Plot
+# ggplot(forest_class_metrics_ED, aes(x = as.numeric(year))) +
+#   # FFI (solid)
+#   geom_line(aes(y = FFI, color = "FFI"), linewidth = 1) +
+#   geom_point(aes(y = FFI, color = "FFI"), size = 3) +
+#   # np (dashed)
+#   geom_line(aes(y = np / scale_factor, color = "Number of patches (NP)"),
+#             linetype = "dashed", linewidth = 1) +
+#   geom_point(aes(y = np / scale_factor, color = "Number of patches (NP)"),
+#              size = 2, shape = 1) +
+#   # Dual Y axes
+#   scale_y_continuous(
+#     name = "FFI (normalized 0–1)",
+#     sec.axis = sec_axis(~ . * scale_factor, name = "Number of patches (NP)")
+#   ) +
+#   # Colors and legend
+#   scale_color_manual(
+#     name = "",
+#     values = c("FFI" = "darkgreen", "Number of patches (NP)" = "black"),
+#     guide = guide_legend(override.aes = list(linetype = c("solid", "dashed")))
+#   ) +
+#   labs(
+#     title = "Temporal Evolution of Forest Fragmentation Index (FFI) and Number of Forest Patches",
+#     x = "Year"
+#   ) +
+#   theme_minimal(base_size = 14) +
+#   theme(
+#     legend.position = "top",
+#     axis.title.y.left = element_text(color = "darkgreen"),
+#     axis.title.y.right = element_text(color = "black")
+#   )
+# 
+# 
+# # Compute scaling factor to align pland with FFI visually
+# scale_factor = max(forest_class_metrics_ED$pland, na.rm = TRUE)
+# ggplot(forest_class_metrics_ED, aes(x = as.numeric(year))) +
+#   # FFI line
+#   geom_line(aes(y = FFI, color = "FFI"), linewidth = 1) +
+#   geom_point(aes(y = FFI, color = "FFI"), size = 3) +
+#   # pland line (scaled to same range as FFI for plotting)
+#   geom_line(aes(y = pland / scale_factor, color = "Forest cover (%)"), 
+#             linetype = "dashed", linewidth = 1) +
+#   geom_point(aes(y = pland / scale_factor, color = "Forest cover (%)"), size = 2, shape = 1) +
+#   # Axes and legend
+#   scale_y_continuous(
+#     name = "FFI (normalized 0–1)",
+#     sec.axis = sec_axis(~ . * scale_factor, name = "Forest cover (%)")
+#   ) +
+#   scale_color_manual(
+#     name = "",
+#     values = c("FFI" = "darkgreen", "Forest cover (%)" = "black"),
+#     guide = guide_legend(override.aes = list(linetype = c("solid", "dashed")))
+#   ) +
+#   labs(
+#     title = "Temporal Evolution of Forest Fragmentation Index (FFI) and Forest Cover",
+#     x = "Year"
+#   ) +
+#   theme_minimal(base_size = 14) +
+#   theme(
+#     legend.position = "top",
+#     axis.title.y.right = element_text(color = "black"),
+#     axis.title.y.left = element_text(color = "darkgreen")
+#   )
+

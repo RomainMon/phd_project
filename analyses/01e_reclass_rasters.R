@@ -18,9 +18,19 @@ library(sf)
 ## Rasters
 base_path = here("outputs", "data", "MapBiomas", "Mask_sampling_bbox")
 raster_files = list.files(base_path, pattern = "\\.tif$", full.names = TRUE)
-rasters = lapply(raster_files, terra::rast)
-years = as.numeric(gsub("\\D", "", basename(raster_files))) # Extract raster years using their file names (i.e., they have to be named as following: raster_YYYY.tif)
-stopifnot(length(rasters) == length(years))
+
+# Extract years
+years = stringr::str_extract(basename(raster_files), "(?<!\\d)\\d{4}(?!\\d)")
+# Create a dataframe to link files and years
+raster_df = data.frame(file = raster_files, year = as.numeric(years)) %>%
+  dplyr::arrange(year)
+# Load rasters in chronological order
+rasters = lapply(raster_df$file, terra::rast)
+years = raster_df$year
+# Check
+for (i in seq_along(rasters)) {
+  cat("Year", years[i], " → raster name:", basename(raster_df$file[i]), "\n")
+}
 
 ## Vectors
 roads = vect(here("data", "geo", "OSM", "work", "Highway_OSM_clean.shp"))
@@ -146,7 +156,7 @@ plot(rasters_reclass[[1]], col=c("#32a65e", "#ad975a", "#FFFFB2", "#0000FF", "#d
 
 ##### Step 2 – Add plantios ------
 message("Step 2: Adding plantios to rasters...")
-rasters_plantios <- map2(rasters_reclass, years, function(r, yr) {
+rasters_plantios <- purrr::map2(rasters_reclass, years, function(r, yr) {
   message("  - Adding plantios for year ", yr)
   add_plantios(r, yr, plantios)
 })
@@ -188,7 +198,7 @@ plot(rasters_dilate[[1]], main=paste0("After dilatation–Erosion ", years[1]), 
 
 #### Step 4 – Apply linear features on top of raster layers -----
 message("Step 4: Applying linear features...")
-rasters_final <- map2(rasters_dilate, years, function(r, yr) {
+rasters_final <- purrr::map2(rasters_dilate, years, function(r, yr) {
   message("  - Applying linear features for year ", yr)
   r_lin <- r
   r_lin <- apply_linear_feature_single(r_lin, yr, roads, buffer_width = 20, value = 5, use_date = TRUE)
