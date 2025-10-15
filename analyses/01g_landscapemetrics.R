@@ -370,54 +370,41 @@ forest_core_corridor_metrics_final = forest_core_metrics_prefixed %>%
 # Here, we compute a transition matrix on the rasters to identify the changes in land use across the landscape and through time
 
 #### On all rasters (year-to-year changes) ----
-transition_matrix = lapply(1:(length(rasters_merged) - 1), function(i) {
-  # Display progress message
-  message("Computing transition matrix: ", years[i], " → ", years[i + 1])
-  # Compute crosstab between consecutive years
-  t = terra::crosstab(c(rasters_merged[[i]], rasters_merged[[i + 1]]))
-  # Return list with metadata and table
-  list(year_from = years[i], year_to = years[i + 1], table = t)
-})
-transition_matrix[[1]]
+# transition_matrix = lapply(1:(length(rasters_merged) - 1), function(i) {
+#   # Display progress message
+#   message("Computing transition matrix: ", years[i], " → ", years[i + 1])
+#   # Compute crosstab between consecutive years
+#   t = terra::crosstab(c(rasters_merged[[i]], rasters_merged[[i + 1]]))
+#   # Return list with metadata and table
+#   list(year_from = years[i], year_to = years[i + 1], table = t)
+# })
+# transition_matrix[[1]]
 
 #### On selected years -------
-# Pick evenly spaced years (5 breaks here)
-years_selected = c(1989, 2000, 2012, 2023)
+# Pick evenly spaced years
+years_selected = c(1989, 2001, 2013, 2023)
 
 # Match raster indices corresponding to these years
 idx_selected = match(years_selected, years)
+rasters_sel = rasters_merged[idx_selected]
+rasters_stack = do.call(c, rasters_sel)
+names(rasters_stack) = paste0("year_", years_selected)
 
-# Pixel area
-pixel_area_m2 = terra::res(rasters_merged[[1]])[1] * terra::res(rasters_merged[[1]])[2]
+# Convert all selected rasters to a data frame (one row per pixel)
+tm_wide = as.data.frame(rasters_stack, xy = FALSE, na.rm = FALSE)
 
-# Compute contingency tables between selected years
-contingency_list = lapply(1:(length(idx_selected) - 1), function(i) {
-  from_year = years_selected[i]
-  to_year   = years_selected[i + 1]
-  
-  message("Computing contingency table: ", from_year, " → ", to_year)
-  
-  # Crosstab between rasters
-  tab = terra::crosstab(c(rasters_merged[[idx_selected[i]]],
-                           rasters_merged[[idx_selected[i + 1]]]))
-  
-  df = as.data.frame(tab)
-  colnames(df) = c("from", "to", "n_pixels")
-  
-  df = df %>%
-    dplyr::mutate(
-      year_from = from_year,
-      year_to = to_year,
-      area_m2 = round(n_pixels * pixel_area_m2, 2),
-      area_ha = round(area_m2 / 10000, 2),
-      perc = round(100 * n_pixels / sum(n_pixels), 2)
-    )
-  df
-})
+# Remove NA rows
+tm_wide = tm_wide %>% drop_na()
 
-# Combine all results
-contingency_all = dplyr::bind_rows(contingency_list)
-head(contingency_all)
+# Add pixel ID
+tm_wide = tm_wide %>%
+  dplyr::mutate(pixel_id = row_number()) %>%
+  dplyr::relocate(pixel_id)
+
+# To long format
+tm_long = tm_wide %>%
+  tidyr::pivot_longer(cols = starts_with("year_"), names_to = "year", values_to = "class") %>%
+  dplyr::mutate(year = as.integer(gsub("year_", "", year)))
 
 
 ### Compute patch-level metrics   ---------
@@ -465,4 +452,4 @@ base_path = here("outputs", "data", "landscapemetrics")
 write.csv(class_metrics, file = file.path(base_path, "class_metrics_bbox_1989_2023.csv"), row.names = FALSE)
 write.csv(forest_class_metrics_final, file = file.path(base_path, "forest_class_metrics_bbox_1989_2023.csv"), row.names=FALSE)
 write.csv(forest_core_corridor_metrics_final, file = file.path(base_path, "forest_core_corridors_metrics_bbox_1989_2023.csv"), row.names=FALSE)
-write.csv(contingency_all, file = file.path(base_path, "transition_matrix_bbox_1989_2023.csv"), row.names=FALSE)
+write.csv(tm_wide, file = file.path(base_path, "transition_matrix_bbox_1989_2023.csv"), row.names=FALSE)
