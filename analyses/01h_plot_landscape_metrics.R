@@ -6,37 +6,49 @@
 library(tidyr)
 library(ggplot2)
 library(readr)
+library(ggalluvial)
+library(here)
+library(PantaRhei)
 
 
-#### Import datasets ----------------
+### Import datasets ----------------
 base_path = here("outputs", "data", "landscapemetrics")
-class_metrics <- readr::read_csv(
+class_metrics = readr::read_csv(
   file.path(base_path, "class_metrics_bbox_1989_2023.csv"),
   show_col_types = FALSE
 )
-forest_class_metrics <- readr::read_csv(
+forest_class_metrics = readr::read_csv(
   file.path(base_path, "forest_class_metrics_bbox_1989_2023.csv"),
   show_col_types = FALSE
 )
+forest_core_corridor_metrics = readr::read_csv(
+  file.path(base_path, "forest_core_corridors_metrics_bbox_1989_2023.csv"),
+  show_col_types = FALSE
+)
+transition_matrix = readr::read_csv(
+  file.path(base_path, "transition_matrix_bbox_1989_2023.csv"),
+  show_col_types = FALSE
+)
 
-#### Stacked area chart ----------------
+### Class metrics (overall) ----------------
+
+#### Stacked area chart ------
 # Create color palette using the Legend codes provided by MapBiomas
-class_colors <- tibble::tibble(
-  Class_ID = factor(c(1,2,3,4,5,33)),
-  Description = c("Core forest","Other natural habitats","Agriculture","Water","Artificial","Forest corridors"
+class_colors = tibble::tibble(
+  Class_ID = c(1,2,3,4,5),
+  Description = c("Forest","Other non-forest formation","Agriculture","Water","Artificial"
   ),
   Color = c(
-    "#32a65e", "#ad975a", "#FFFFB2", "#0000FF", "#d4271e","chartreuse"
+    "#32a65e", "#ad975a", "#FFFFB2", "#0000FF", "#d4271e"
   )
 )
 
-##### Plot proportions of area covered by each land use ----------
 # Select data
 data = class_metrics %>% 
   dplyr::select(year, class, pland) %>% 
   dplyr::mutate(
     year  = as.integer(year),          # x axis must be numeric/continuous
-    class = as.factor(class),          # fill should be discrete
+    class = as.numeric(class),          # fill should be discrete
     pland = as.numeric(pland)          # ensure numeric
   )
 
@@ -47,7 +59,7 @@ data = data %>%
 # Plot
 ggplot(data, aes(x = year, y = pland, fill = Description, group = Description)) +
   geom_area(alpha = 0.7, position = "stack") +  # Stacked areas
-  geom_line(aes(color = Description), size = 1, position = "stack") +  # Lines colored by class
+  geom_line(aes(color = Description), linewidth = 1, position = "stack") +  # Lines colored by class
   geom_point(aes(color = Description), size = 1, position = "stack") + # Points colored by class
   scale_fill_manual(values = setNames(class_colors$Color, class_colors$Description)) +
   scale_color_manual(values = setNames(class_colors$Color, class_colors$Description)) +
@@ -55,124 +67,231 @@ ggplot(data, aes(x = year, y = pland, fill = Description, group = Description)) 
   theme_classic()
 
 
-#### Line plot -----------
-# Pivot metrics to long format
-data = forest_class_metrics %>%
-  dplyr::filter(class==1) %>% 
-  dplyr::select(-c(level, area_sd))
-data = data %>% 
-  tidyr::pivot_longer(
-    cols = -c(year, class),
-    names_to = "metric",
-    values_to = "value"
-  ) %>%
-  dplyr::mutate(year = as.integer(year)) %>% 
-  dplyr::mutate(
-    metric = recode(metric,
-                    ca = "Total forest area",
-                    np = "Number of patches",
-                    area_mn = "Mean patch area",
-                    ai = "Aggregation index"),
-    metric = factor(metric, levels = c("Total forest area",
-                                       "Number of patches",
-                                       "Mean patch area",
-                                       "Aggregation index"))
-  )
-
-# Create faceted line plot
-ggplot(data, aes(x = year, y = value, color = metric)) +
-  geom_line(size = 1.2) +
-  geom_point(size = 2) +
-  facet_wrap(~ metric, scales = "free_y", ncol = 2) +  # two columns
-  scale_color_brewer(palette = "Set2") +               # distinct colors
+#### Create stacked barplot (in %) ------
+ggplot(data, aes(x = year, y = pland, fill = Description)) +
+  geom_bar(stat = "identity", position = "stack", color = "black", linewidth = 0.2) +
+  scale_fill_manual(values = setNames(class_colors$Color, class_colors$Description)) +
   labs(
     x = "Year",
-    y = "Value",
-    color = "Metric",
-    title = "Forest Class Metrics Through Time"
+    y = "Percentage of landscape (%)",
+    fill = "Land use"
   ) +
-  theme_classic(base_size = 14) +
+  theme_classic() +
   theme(
-    strip.text = element_text(face = "bold"),
-    plot.title = element_text(face = "bold", hjust = 0.5),
-    legend.position = "none"
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "right"
   )
 
 
-# # Plot
-# ggplot(forest_class_metrics_ED, aes(x = as.numeric(year), y = FFI)) +
-#   geom_line(color = "darkgreen", linewidth = 1) +
-#   geom_point(color = "forestgreen", size = 3) +
-#   labs(
-#     title = "Temporal Evolution of the Forest Fragmentation Index (FFI)",
-#     x = "Year",
-#     y = "FFI (normalized 0–1)"
-#   ) +
-#   theme_minimal(base_size = 14)
-# 
-# # Compute scaling factor for np (to align visually with FFI)
-# scale_factor = max(forest_class_metrics_ED$np, na.rm = TRUE)
-# # Plot
-# ggplot(forest_class_metrics_ED, aes(x = as.numeric(year))) +
-#   # FFI (solid)
-#   geom_line(aes(y = FFI, color = "FFI"), linewidth = 1) +
-#   geom_point(aes(y = FFI, color = "FFI"), size = 3) +
-#   # np (dashed)
-#   geom_line(aes(y = np / scale_factor, color = "Number of patches (NP)"),
-#             linetype = "dashed", linewidth = 1) +
-#   geom_point(aes(y = np / scale_factor, color = "Number of patches (NP)"),
-#              size = 2, shape = 1) +
-#   # Dual Y axes
-#   scale_y_continuous(
-#     name = "FFI (normalized 0–1)",
-#     sec.axis = sec_axis(~ . * scale_factor, name = "Number of patches (NP)")
-#   ) +
-#   # Colors and legend
-#   scale_color_manual(
-#     name = "",
-#     values = c("FFI" = "darkgreen", "Number of patches (NP)" = "black"),
-#     guide = guide_legend(override.aes = list(linetype = c("solid", "dashed")))
-#   ) +
-#   labs(
-#     title = "Temporal Evolution of Forest Fragmentation Index (FFI) and Number of Forest Patches",
-#     x = "Year"
-#   ) +
-#   theme_minimal(base_size = 14) +
-#   theme(
-#     legend.position = "top",
-#     axis.title.y.left = element_text(color = "darkgreen"),
-#     axis.title.y.right = element_text(color = "black")
-#   )
-# 
-# 
-# # Compute scaling factor to align pland with FFI visually
-# scale_factor = max(forest_class_metrics_ED$pland, na.rm = TRUE)
-# ggplot(forest_class_metrics_ED, aes(x = as.numeric(year))) +
-#   # FFI line
-#   geom_line(aes(y = FFI, color = "FFI"), linewidth = 1) +
-#   geom_point(aes(y = FFI, color = "FFI"), size = 3) +
-#   # pland line (scaled to same range as FFI for plotting)
-#   geom_line(aes(y = pland / scale_factor, color = "Forest cover (%)"), 
-#             linetype = "dashed", linewidth = 1) +
-#   geom_point(aes(y = pland / scale_factor, color = "Forest cover (%)"), size = 2, shape = 1) +
-#   # Axes and legend
-#   scale_y_continuous(
-#     name = "FFI (normalized 0–1)",
-#     sec.axis = sec_axis(~ . * scale_factor, name = "Forest cover (%)")
-#   ) +
-#   scale_color_manual(
-#     name = "",
-#     values = c("FFI" = "darkgreen", "Forest cover (%)" = "black"),
-#     guide = guide_legend(override.aes = list(linetype = c("solid", "dashed")))
-#   ) +
-#   labs(
-#     title = "Temporal Evolution of Forest Fragmentation Index (FFI) and Forest Cover",
-#     x = "Year"
-#   ) +
-#   theme_minimal(base_size = 14) +
-#   theme(
-#     legend.position = "top",
-#     axis.title.y.right = element_text(color = "black"),
-#     axis.title.y.left = element_text(color = "darkgreen")
-#   )
+#### Positive vs negative changes throughout time (barplot) ------
+data_diff = class_metrics %>%
+  dplyr::select(year, class, ca) %>%
+  dplyr::mutate(
+    year = as.integer(year),
+    class = as.integer(class),
+    ca = as.numeric(ca)
+  ) %>%
+  # Keep only Forest (1), Agriculture (3), Artificial (5)
+  dplyr::filter(class %in% c(1, 3, 5)) %>%
+  # Compute change in surface
+  dplyr::group_by(class) %>%
+  dplyr::mutate(delta_ca = ca - dplyr::lag(ca, order_by = year)) %>%
+  dplyr::filter(!is.na(delta_ca)) %>%
+  dplyr::ungroup() %>%
+  # Add readable names and colors
+  dplyr::mutate(
+    class_name = dplyr::case_when(
+      class == 1 ~ "Forest",
+      class == 3 ~ "Agriculture",
+      class == 5 ~ "Artificial",
+      TRUE ~ as.character(class)
+    ),
+    color = dplyr::case_when(
+      class == 1 ~ "#32a65e",
+      class == 3 ~ "#FFFFB2",
+      class == 5 ~ "#d4271e" 
+    )
+  )
 
+# Plot horizontal barplot
+ggplot(data_diff, aes(x = factor(year), y = delta_ca, fill = class_name)) +
+  geom_col(position = position_dodge(width = 0.7), color = "black", width = 0.6) +
+  scale_fill_manual(values = c(
+    "Forest" = "#32a65e",
+    "Agriculture" = "#FFFFB2",
+    "Artificial" = "#d4271e"
+  )) +
+  geom_hline(yintercept = 0, color = "black", linewidth = 0.6) +
+  labs(
+    x = "Year",
+    y = "Change in surface (ca)",
+    fill = "Land use",
+    title = "Year-to-year evolution in surface (Forest, Agriculture, Artificial)"
+  ) +
+  theme_classic() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "bottom"
+  )
+
+
+### Forest class metrics -----------
+#### Line plot -----
+data_long = forest_class_metrics %>%
+  dplyr::select(
+    year,
+    ca,
+    np,
+    area_mn,
+    FFI,
+    `Normalized ECA (% of LA)`
+  ) %>% 
+  dplyr::mutate(year = as.numeric(year)) %>%
+  tidyr::pivot_longer(
+    cols = -year,
+    names_to = "Metric",
+    values_to = "Value"
+  ) %>%
+  dplyr::mutate(
+    Metric = dplyr::case_when(
+      Metric == "ca" ~ "Surface area (ha)",
+      Metric == "np" ~ "Number of patches",
+      Metric == "area_mn" ~ "Mean patch size (ha)",
+      Metric == "FFI" ~ "Forest Fragmentation Index (FFI)",
+      Metric == "Normalized ECA (% of LA)" ~ "Equivalent Connected Area (ECA, 8 km)",
+      TRUE ~ Metric
+    )
+  )
+
+# Plot facets
+ggplot(data_long, aes(x = year, y = Value)) +
+  geom_line(color = "darkgreen", linewidth = 1) +
+  geom_point(color = "forestgreen", size = 3) +
+  facet_wrap(~Metric, scales = "free_y", ncol = 2) +
+  labs(
+    title = "Temporal Evolution of Forest Landscape Metrics",
+    x = "Year",
+    y = NULL
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    strip.text = element_text(face = "bold", size = 12),
+    plot.title = element_text(face = "bold", hjust = 0.5),
+    panel.grid.minor = element_blank()
+  )
+
+
+### Forest core and corridor metrics -----------
+#### Line plot -----
+data_long = forest_core_corridor_metrics %>%
+  dplyr::select(
+    year,
+    core_area_mn,
+    core_np,
+    corr_area_mn,
+    corr_np
+  ) %>% 
+  dplyr::mutate(year = as.numeric(year)) %>%
+  tidyr::pivot_longer(
+    cols = -year,
+    names_to = "Metric",
+    values_to = "Value"
+  ) %>%
+  dplyr::mutate(
+    Metric = dplyr::case_when(
+      Metric == "core_area_mn" ~ "Mean patch size (core forest, ha)",
+      Metric == "core_np" ~ "Number of patches (core forest)",
+      Metric == "corr_area_mn" ~ "Mean patch size (forest corridors, ha)",
+      Metric == "corr_np" ~ "Number of patches (forest corridors)",
+      TRUE ~ Metric
+    )
+  )
+
+# Plot facets
+ggplot(data_long, aes(x = year, y = Value)) +
+  geom_line(color = "darkgreen", linewidth = 1) +
+  geom_point(color = "forestgreen", size = 3) +
+  facet_wrap(~Metric, scales = "free_y", ncol = 2) +
+  labs(
+    title = "Temporal Evolution of Forest Landscape Metrics (Core and Corridor)",
+    x = "Year",
+    y = NULL
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    strip.text = element_text(face = "bold", size = 12),
+    plot.title = element_text(face = "bold", hjust = 0.5),
+    panel.grid.minor = element_blank()
+  )
+
+### Transition matrix ----
+#### Sankey diagram (deforestation) -----
+## With ggalluvial
+transition_summary = transition_matrix %>%
+  dplyr::filter(year_1989 == 1,
+                !year_2001 %in% c(2, 4),
+                !year_2013 %in% c(2, 4),
+                !year_2023 %in% c(2, 4)) %>% 
+  dplyr::group_by(year_1989, year_2001, year_2013, year_2023) %>%
+  dplyr::summarise(Freq = n(), .groups = "drop") %>%
+  dplyr::arrange(desc(Freq))
+head(transition_summary, 10)
+
+# Plot
+ggplot(transition_summary,
+       aes(axis1 = as.factor(year_1989),
+           axis2 = as.factor(year_2001),
+           axis3 = as.factor(year_2013),
+           axis4 = as.factor(year_2023),
+           y = Freq)) +
+  geom_alluvium(aes(fill = as.factor(year_2001)), width = 1/12, alpha = 0.85) +
+  geom_stratum(width = 1/12, fill = "grey90", color = "grey40") +
+  geom_text(stat = "stratum", aes(label = after_stat(stratum)), size = 4) +
+  scale_x_discrete(labels = c("1989", "2001", "2013", "2023"), expand = c(.2, .05)) +
+  scale_fill_manual(values = c(
+    "1" = "#32a65e",
+    "3" = "#FFFFB2",
+    "5" = "#d4271e")) +
+  ggtitle("Land cover trajectories of deforestation", subtitle = "From 1989 to 2023") +
+  theme_void(base_size = 14) +
+  theme(panel.grid = element_blank(),
+        legend.position = "bottom")
+
+## With PantaRhei
+
+
+
+
+
+#### Sankey diagram (reforestation) -----
+## With ggalluvial
+transition_summary = transition_matrix %>%
+  dplyr::filter(!year_1989 %in% c(1, 4),
+                year_2001 == 1,
+                !year_2013 %in% c(4),
+                year_2023 == 1) %>% 
+  dplyr::group_by(year_1989, year_2001, year_2013, year_2023) %>%
+  dplyr::summarise(Freq = n(), .groups = "drop") %>%
+  dplyr::arrange(desc(Freq))
+head(transition_summary, 10)
+
+# Plot
+ggplot(transition_summary,
+       aes(axis1 = as.factor(year_1989),
+           axis2 = as.factor(year_2001),
+           axis3 = as.factor(year_2013),
+           axis4 = as.factor(year_2023),
+           y = Freq)) +
+  geom_alluvium(aes(fill = as.factor(year_2013)), width = 1/12, alpha = 0.85) +
+  geom_stratum(width = 1/12, fill = "grey90", color = "grey40") +
+  geom_text(stat = "stratum", aes(label = after_stat(stratum)), size = 4) +
+  scale_x_discrete(labels = c("1989", "2001", "2013", "2023"), expand = c(.2, .05)) +
+  scale_fill_manual(values = c(
+    "1" = "#32a65e",
+    "2" = "#ad975a",
+    "3" = "#FFFFB2",
+    "5" = "#d4271e")) +
+  ggtitle("Land cover trajectories of reforestation", subtitle = "From 1989 to 2023") +
+  theme_void(base_size = 14) +
+  theme(panel.grid = element_blank(),
+        legend.position = "bottom")
