@@ -351,18 +351,7 @@ forest_class_metrics_final = dplyr::left_join(forest_class_metrics_ED, ECA_total
 
 
 # 2. Landscape metrics for forest core and corridor
-# Prepare the core metrics
-forest_core_metrics_prefixed = forest_core_metrics %>%
-  dplyr::rename_with(~ paste0("core_", .x), -c(year, type))  # keep year/type unchanged
-
-# Prepare the corridor metrics
-forest_corridors_metrics_prefixed = forest_corridors_metrics %>%
-  dplyr::rename_with(~ paste0("corr_", .x), -c(year, type))  # keep year/type unchanged
-
-# Join by year
-forest_core_corridor_metrics_final = forest_core_metrics_prefixed %>%
-  dplyr::full_join(forest_corridors_metrics_prefixed, by = "year") %>% 
-  dplyr::select(-c(type.x, type.y))
+forest_core_corridor_metrics_final = bind_rows(forest_core_metrics, forest_corridors_metrics)
 
 
 
@@ -382,7 +371,7 @@ forest_core_corridor_metrics_final = forest_core_metrics_prefixed %>%
 
 #### On selected years -------
 # Pick evenly spaced years
-years_selected = c(1989, 2001, 2013, 2023)
+years_selected = c(1989, 2000, 2012, 2023)
 
 # Match raster indices corresponding to these years
 idx_selected = match(years_selected, years)

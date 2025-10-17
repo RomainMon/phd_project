@@ -8,7 +8,9 @@ library(ggplot2)
 library(readr)
 library(ggalluvial)
 library(here)
-library(PantaRhei)
+library(grid)
+library(PantaRhei) # For the Sankey diagram
+library(patchwork)
 
 
 ### Import datasets ----------------
@@ -32,7 +34,37 @@ transition_matrix = readr::read_csv(
 
 ### Class metrics (overall) ----------------
 
-#### Stacked area chart ------
+#### Summary statistics ------
+# Evolution per class per year
+class_metrics %>%
+  dplyr::arrange(class, year) %>%
+  dplyr::group_by(class) %>%
+  dplyr::mutate(pland_change_year = round((pland - dplyr::lag(pland)), 1),
+                ca_change_year = ca - dplyr::lag(ca),
+                ca_change_year_pct = (ca - dplyr::lag(ca)) / dplyr::lag(ca) * 100) %>%
+  dplyr::ungroup()
+
+# Changes betwenn 1989 and 2023
+class_metrics %>%
+  dplyr::group_by(class) %>%
+  dplyr::summarize(pland_change_total = round(pland[year == max(year)] - pland[year == min(year)], 1),
+                   ca_change_total = ca[year == max(year)] - ca[year == min(year)])
+
+# Between sets of years
+class_metrics %>%
+  dplyr::group_by(class) %>%
+  dplyr::summarize(
+    pland_change_1989_2000 = round(pland[year == 2000] - pland[year == 1989], 1),
+    pland_change_2000_2012 = round(pland[year == 2012] - pland[year == 2000], 1),
+    pland_change_2012_2023 = round(pland[year == 2023] - pland[year == 2012], 1),
+    ca_change_1989_2000 = ca[year == 2000] - ca[year == 1989],
+    ca_change_2000_2012 = ca[year == 2012] - ca[year == 2000],
+    ca_change_2012_2023 = ca[year == 2023] - ca[year == 2012]) %>%
+  dplyr::ungroup()
+
+
+#### Plots -------
+##### Stacked area chart ------
 # Create color palette using the Legend codes provided by MapBiomas
 class_colors = tibble::tibble(
   Class_ID = c(1,2,3,4,5),
@@ -66,8 +98,7 @@ ggplot(data, aes(x = year, y = pland, fill = Description, group = Description)) 
   labs(x = "Year", y = "Percentage of landscape", fill = "Land use", color = "Land use") +
   theme_classic()
 
-
-#### Create stacked barplot (in %) ------
+##### Stacked barplot (in %) ------
 ggplot(data, aes(x = year, y = pland, fill = Description)) +
   geom_bar(stat = "identity", position = "stack", color = "black", linewidth = 0.2) +
   scale_fill_manual(values = setNames(class_colors$Color, class_colors$Description)) +
@@ -83,7 +114,7 @@ ggplot(data, aes(x = year, y = pland, fill = Description)) +
   )
 
 
-#### Positive vs negative changes throughout time (barplot) ------
+##### Barplot (positive vs negative changes) ------
 data_diff = class_metrics %>%
   dplyr::select(year, class, ca) %>%
   dplyr::mutate(
@@ -136,7 +167,75 @@ ggplot(data_diff, aes(x = factor(year), y = delta_ca, fill = class_name)) +
 
 
 ### Forest class metrics -----------
-#### Line plot -----
+#### Summary statistics ----
+# Evolution per class per year
+forest_class_metrics %>%
+  dplyr::arrange(year) %>%
+  dplyr::mutate(area_change = (area_mn - dplyr::lag(area_mn)) / dplyr::lag(area_mn) * 100,
+                np_change = (np - dplyr::lag(np)) / dplyr::lag(np) * 100,
+                FFI_change = (FFI - dplyr::lag(FFI)) / dplyr::lag(FFI) * 100,
+                ECA_change = (`Normalized ECA (% of LA)` - dplyr::lag(`Normalized ECA (% of LA)`)) / dplyr::lag(`Normalized ECA (% of LA)`) * 100) %>% 
+  dplyr::select(year, area_change, np_change, FFI_change, ECA_change) %>% 
+  print(n=35)
+
+# Changes betwenn 1989 and 2023
+forest_class_metrics %>%
+  dplyr::summarize(area_change = area_mn[year == max(year)] - area_mn[year == min(year)],
+                   np_change = np[year == max(year)] - np[year == min(year)],
+                   FFI_change = FFI[year == max(year)] - FFI[year == min(year)],
+                   ECA_change = `Normalized ECA (% of LA)`[year == max(year)] - `Normalized ECA (% of LA)`[year == min(year)],
+                   area_change_perc = ((area_mn[year == max(year)] - area_mn[year == min(year)]) / area_mn[year == min(year)]) * 100,
+                   np_change_perc = ((np[year == max(year)] - np[year == min(year)]) / np[year == min(year)]) * 100,
+                   FFI_change_perc = ((FFI[year == max(year)] - FFI[year == min(year)]) / FFI[year == min(year)]) * 100,
+                   ECA_change_perc = ((`Normalized ECA (% of LA)`[year == max(year)] - `Normalized ECA (% of LA)`[year == min(year)]) / 
+                                        `Normalized ECA (% of LA)`[year == min(year)]) * 100)
+
+
+# Between sets of years
+forest_class_metrics %>%
+  dplyr::summarize(
+    # --- Absolute changes ---
+    area_change_1989_2000 = area_mn[year == 2000] - area_mn[year == 1989],
+    area_change_2000_2012 = area_mn[year == 2012] - area_mn[year == 2000],
+    area_change_2012_2023 = area_mn[year == 2023] - area_mn[year == 2012],
+    
+    np_change_1989_2000 = np[year == 2000] - np[year == 1989],
+    np_change_2000_2012 = np[year == 2012] - np[year == 2000],
+    np_change_2012_2023 = np[year == 2023] - np[year == 2012],
+    
+    FFI_change_1989_2000 = FFI[year == 2000] - FFI[year == 1989],
+    FFI_change_2000_2012 = FFI[year == 2012] - FFI[year == 2000],
+    FFI_change_2012_2023 = FFI[year == 2023] - FFI[year == 2012],
+    
+    ECA_change_1989_2000 = `Normalized ECA (% of LA)`[year == 2000] - `Normalized ECA (% of LA)`[year == 1989],
+    ECA_change_2000_2012 = `Normalized ECA (% of LA)`[year == 2012] - `Normalized ECA (% of LA)`[year == 2000],
+    ECA_change_2012_2023 = `Normalized ECA (% of LA)`[year == 2023] - `Normalized ECA (% of LA)`[year == 2012],
+    
+    # --- Percentage changes ---
+    area_change_perc_1989_2000 = ((area_mn[year == 2000] - area_mn[year == 1989]) / area_mn[year == 1989]) * 100,
+    area_change_perc_2000_2012 = ((area_mn[year == 2012] - area_mn[year == 2000]) / area_mn[year == 2000]) * 100,
+    area_change_perc_2012_2023 = ((area_mn[year == 2023] - area_mn[year == 2012]) / area_mn[year == 2012]) * 100,
+    
+    np_change_perc_1989_2000 = ((np[year == 2000] - np[year == 1989]) / np[year == 1989]) * 100,
+    np_change_perc_2000_2012 = ((np[year == 2012] - np[year == 2000]) / np[year == 2000]) * 100,
+    np_change_perc_2012_2023 = ((np[year == 2023] - np[year == 2012]) / np[year == 2012]) * 100,
+    
+    FFI_change_perc_1989_2000 = ((FFI[year == 2000] - FFI[year == 1989]) / FFI[year == 1989]) * 100,
+    FFI_change_perc_2000_2012 = ((FFI[year == 2012] - FFI[year == 2000]) / FFI[year == 2000]) * 100,
+    FFI_change_perc_2012_2023 = ((FFI[year == 2023] - FFI[year == 2012]) / FFI[year == 2012]) * 100,
+    
+    ECA_change_perc_1989_2000 = ((`Normalized ECA (% of LA)`[year == 2000] - `Normalized ECA (% of LA)`[year == 1989]) / 
+                                   `Normalized ECA (% of LA)`[year == 1989]) * 100,
+    ECA_change_perc_2000_2012 = ((`Normalized ECA (% of LA)`[year == 2012] - `Normalized ECA (% of LA)`[year == 2000]) / 
+                                   `Normalized ECA (% of LA)`[year == 2000]) * 100,
+    ECA_change_perc_2012_2023 = ((`Normalized ECA (% of LA)`[year == 2023] - `Normalized ECA (% of LA)`[year == 2012]) / 
+                                   `Normalized ECA (% of LA)`[year == 2012]) * 100
+  )
+
+
+
+#### Plots -----
+##### Line plot -----
 data_long = forest_class_metrics %>%
   dplyr::select(
     year,
@@ -182,116 +281,227 @@ ggplot(data_long, aes(x = year, y = Value)) +
 
 
 ### Forest core and corridor metrics -----------
-#### Line plot -----
+#### Summary statistics -----
+# Evolution per class per year
+forest_core_corridor_metrics %>%
+  dplyr::arrange(class, year) %>%
+  dplyr::group_by(class) %>%
+  dplyr::mutate(area_change = (area_mn - dplyr::lag(area_mn)) / dplyr::lag(area_mn) * 100,
+                np_change = (np - dplyr::lag(np)) / dplyr::lag(np) * 100,
+                ca_change = (ca - dplyr::lag(ca)) / dplyr::lag(ca) * 100) %>% 
+  dplyr::select(year, area_change, np_change, ca_change) %>% 
+  print(n=70)
+
+# Changes betwenn 1989 and 2023
+forest_core_corridor_metrics %>%
+  group_by(class) %>% 
+  dplyr::summarize(area_change = area_mn[year == max(year)] - area_mn[year == min(year)],
+                   np_change = np[year == max(year)] - np[year == min(year)],
+                   ca_change = ca[year == max(year)] - ca[year == min(year)],
+                   area_change_perc = ((area_mn[year == max(year)] - area_mn[year == min(year)]) / area_mn[year == min(year)]) * 100,
+                   np_change_perc = ((np[year == max(year)] - np[year == min(year)]) / np[year == min(year)]) * 100,
+                   ca_change_perc = ((ca[year == max(year)] - ca[year == min(year)]) / ca[year == min(year)]) * 100)
+
+# Between sets of years
+forest_core_corridor_metrics %>%
+  dplyr::group_by(class) %>%
+  dplyr::summarize(
+    np_1989_2000 = np[year == 2000] - np[year == 1989],
+    np_2000_2012 = np[year == 2012] - np[year == 2000],
+    np_2012_2023 = np[year == 2023] - np[year == 2012]) %>%
+  dplyr::ungroup()
+
+#### Plots ----
+##### Line plot -----
+# Prepare long data (with explicit dplyr:: prefixes)
 data_long = forest_core_corridor_metrics %>%
-  dplyr::select(
-    year,
-    core_area_mn,
-    core_np,
-    corr_area_mn,
-    corr_np
-  ) %>% 
-  dplyr::mutate(year = as.numeric(year)) %>%
+  dplyr::select(type, year, area_mn, ca, np) %>%
   tidyr::pivot_longer(
-    cols = -year,
+    cols = c(area_mn, ca, np),
     names_to = "Metric",
     values_to = "Value"
   ) %>%
   dplyr::mutate(
     Metric = dplyr::case_when(
-      Metric == "core_area_mn" ~ "Mean patch size (core forest, ha)",
-      Metric == "core_np" ~ "Number of patches (core forest)",
-      Metric == "corr_area_mn" ~ "Mean patch size (forest corridors, ha)",
-      Metric == "corr_np" ~ "Number of patches (forest corridors)",
+      Metric == "area_mn" ~ "Mean patch size (ha)",
+      Metric == "ca"      ~ "Surface area (ha)",
+      Metric == "np"      ~ "Number of patches",
       TRUE ~ Metric
+    ),
+    type = dplyr::case_when(
+      grepl("core", type, ignore.case = TRUE)     ~ "Core",
+      grepl("corridor", type, ignore.case = TRUE) ~ "Corridor",
+      TRUE ~ type
     )
   )
 
-# Plot facets
-ggplot(data_long, aes(x = year, y = Value)) +
-  geom_line(color = "darkgreen", linewidth = 1) +
-  geom_point(color = "forestgreen", size = 3) +
-  facet_wrap(~Metric, scales = "free_y", ncol = 2) +
-  labs(
-    title = "Temporal Evolution of Forest Landscape Metrics (Core and Corridor)",
-    x = "Year",
-    y = NULL
-  ) +
-  theme_minimal(base_size = 14) +
+# split
+data_core = data_long %>% dplyr::filter(type == "Core")
+data_corr = data_long %>% dplyr::filter(type == "Corridor")
+
+# Core plot: 3 rows (one metric per row), free y per panel
+core_plot = ggplot(data_core, aes(x = year, y = Value)) +
+  geom_line(color = "forestgreen", linewidth = 1) +
+  geom_point(color = "forestgreen", size = 2.5) +
+  facet_wrap(~ Metric, ncol = 1, scales = "free_y") +
+  labs(title = "Core", x = "Year", y = NULL) +
+  theme_minimal(base_size = 13) +
   theme(
-    strip.text = element_text(face = "bold", size = 12),
     plot.title = element_text(face = "bold", hjust = 0.5),
+    strip.text = element_text(face = "bold"),
     panel.grid.minor = element_blank()
   )
 
+# Corridor plot: 3 rows, free y per panel
+corr_plot = ggplot(data_corr, aes(x = year, y = Value)) +
+  geom_line(color = "#1f78b4", linewidth = 1) +
+  geom_point(color = "#1f78b4", size = 2.5) +
+  facet_wrap(~ Metric, ncol = 1, scales = "free_y") +
+  labs(title = "Corridor", x = "Year", y = NULL) +
+  theme_minimal(base_size = 13) +
+  theme(
+    plot.title = element_text(face = "bold", hjust = 0.5),
+    strip.text = element_text(face = "bold"),
+    panel.grid.minor = element_blank()
+  )
+
+# Combine side-by-side: Core left, Corridor right
+combined = core_plot + corr_plot + plot_layout(ncol = 2, widths = c(1, 1))
+
+# Print
+combined
+
 ### Transition matrix ----
-#### Sankey diagram (deforestation) -----
-## With ggalluvial
-transition_summary = transition_matrix %>%
-  dplyr::filter(year_1989 == 1,
-                !year_2001 %in% c(2, 4),
-                !year_2013 %in% c(2, 4),
-                !year_2023 %in% c(2, 4)) %>% 
-  dplyr::group_by(year_1989, year_2001, year_2013, year_2023) %>%
-  dplyr::summarise(Freq = n(), .groups = "drop") %>%
-  dplyr::arrange(desc(Freq))
-head(transition_summary, 10)
-
-# Plot
-ggplot(transition_summary,
-       aes(axis1 = as.factor(year_1989),
-           axis2 = as.factor(year_2001),
-           axis3 = as.factor(year_2013),
-           axis4 = as.factor(year_2023),
-           y = Freq)) +
-  geom_alluvium(aes(fill = as.factor(year_2001)), width = 1/12, alpha = 0.85) +
-  geom_stratum(width = 1/12, fill = "grey90", color = "grey40") +
-  geom_text(stat = "stratum", aes(label = after_stat(stratum)), size = 4) +
-  scale_x_discrete(labels = c("1989", "2001", "2013", "2023"), expand = c(.2, .05)) +
-  scale_fill_manual(values = c(
-    "1" = "#32a65e",
-    "3" = "#FFFFB2",
-    "5" = "#d4271e")) +
-  ggtitle("Land cover trajectories of deforestation", subtitle = "From 1989 to 2023") +
-  theme_void(base_size = 14) +
-  theme(panel.grid = element_blank(),
-        legend.position = "bottom")
-
 ## With PantaRhei
-
-
-
-
-
-#### Sankey diagram (reforestation) -----
-## With ggalluvial
-transition_summary = transition_matrix %>%
-  dplyr::filter(!year_1989 %in% c(1, 4),
-                year_2001 == 1,
-                !year_2013 %in% c(4),
-                year_2023 == 1) %>% 
-  dplyr::group_by(year_1989, year_2001, year_2013, year_2023) %>%
-  dplyr::summarise(Freq = n(), .groups = "drop") %>%
-  dplyr::arrange(desc(Freq))
-head(transition_summary, 10)
-
-# Plot
-ggplot(transition_summary,
-       aes(axis1 = as.factor(year_1989),
-           axis2 = as.factor(year_2001),
-           axis3 = as.factor(year_2013),
-           axis4 = as.factor(year_2023),
-           y = Freq)) +
-  geom_alluvium(aes(fill = as.factor(year_2013)), width = 1/12, alpha = 0.85) +
-  geom_stratum(width = 1/12, fill = "grey90", color = "grey40") +
-  geom_text(stat = "stratum", aes(label = after_stat(stratum)), size = 4) +
-  scale_x_discrete(labels = c("1989", "2001", "2013", "2023"), expand = c(.2, .05)) +
-  scale_fill_manual(values = c(
-    "1" = "#32a65e",
-    "2" = "#ad975a",
-    "3" = "#FFFFB2",
-    "5" = "#d4271e")) +
-  ggtitle("Land cover trajectories of reforestation", subtitle = "From 1989 to 2023") +
-  theme_void(base_size = 14) +
-  theme(panel.grid = element_blank(),
-        legend.position = "bottom")
+# # Reclass land uses
+# map_class = function(x) {
+#   dplyr::case_when(
+#     x == 1 ~ "Forest",
+#     x %in% c(3, 5) ~ "Other",
+#     TRUE ~ NA_character_
+#   )
+# }
+# 
+# tm_clean = transition_matrix %>%
+#   dplyr::mutate(
+#     y1989 = map_class(year_1989),
+#     y2001 = map_class(year_2001),
+#     y2013 = map_class(year_2013),
+#     y2023 = map_class(year_2023)
+#   ) %>%
+#   dplyr::filter(!is.na(y1989) & !is.na(y2001) & !is.na(y2013) & !is.na(y2023))
+# 
+# # Build all trajectory combinations
+# tm_clean = tm_clean %>%
+#   dplyr::mutate(traj2001 = paste(y1989, y2001, sep="-"),
+#                 traj2013 = paste(y1989, y2001, y2013, sep="-"))
+# 
+# # Flows between key stages
+# flows = list(
+#   # 1989 -> 2001
+#   tm_clean %>%
+#     dplyr::count(y1989, y2001) %>%
+#     dplyr::mutate(
+#       from = paste0(y1989, "_1989"),
+#       to = paste0(y1989, "-", y2001, "_2001"),
+#       substance = ifelse(y1989 == "Forest" & y2001 == "Other", "Deforestation",
+#                          ifelse(y1989 == "Other" & y2001 == "Forest", "Reforestation",
+#                                 ifelse(y1989 == y2001 & y1989 == "Forest", "Forest_stay", "Other_stay"))),
+#       quantity = n * 0.09
+#     ),
+#   
+#   # 2001 -> 2013
+#   tm_clean %>%
+#     dplyr::count(traj2001, y2013) %>%
+#     dplyr::mutate(
+#       from = paste0(traj2001, "_2001"),
+#       to = paste0(traj2001, "-", y2013, "_2013"),
+#       substance = ifelse(y2013 == "Forest" & grepl("Other$", traj2001), "Reforestation",
+#                          ifelse(y2013 == "Other" & grepl("Forest$", traj2001), "Deforestation",
+#                                 ifelse(y2013 == "Forest", "Forest_stay", "Other_stay"))),
+#       quantity = n * 0.09
+#     ),
+#   
+#   # 2013 -> 2023
+#   tm_clean %>%
+#     dplyr::count(traj2013, y2023) %>%
+#     dplyr::mutate(
+#       from = paste0(traj2013, "_2013"),
+#       to = paste0(y2023, "_2023"),
+#       substance = ifelse(y2023 == "Forest" & grepl("Other$", traj2013), "Reforestation",
+#                          ifelse(y2023 == "Other" & grepl("Forest$", traj2013), "Deforestation",
+#                                 ifelse(y2023 == "Forest", "Forest_stay", "Other_stay"))),
+#       quantity = n * 0.09
+#     )
+# )
+# 
+# flows_final = dplyr::bind_rows(flows) %>%
+#   dplyr::select(from, to, substance, quantity)
+# 
+# # Define nodes
+# nodes = tibble::tribble(
+#   ~ID, ~label, ~label_pos, ~label_align, ~x, ~y, ~dir,
+#   # 1989
+#   "Forest_1989", "Forest 1989", "left", "", -6, 1.5, "right",
+#   "Other_1989", "Other 1989", "left", "", -6, -1.5, "right",
+#   # 2001
+#   "Forest-Forest_2001", "Forest→Forest 2001", "below", "left", -3.5, 1.5, "right",
+#   "Forest-Other_2001", "Forest→Other 2001", "below", "left", -3.5, 0.5, "right",
+#   "Other-Other_2001", "Other→Other 2001", "below", "left", -3.5, -1.5, "right",
+#   "Other-Forest_2001", "Other→Forest 2001", "below", "left", -3.5, -0.5, "right",
+#   # 2013
+#   "Forest-Forest-Forest_2013", "FFF 2013", "below", "left", -1, 1.5, "right",
+#   "Forest-Forest-Other_2013", "FFO 2013", "below", "left", -1, 0.5, "right",
+#   "Other-Other-Other_2013", "OOO 2013", "below", "left", -1, -1.5, "right",
+#   "Other-Other-Forest_2013", "OOF 2013", "below", "left", -1, -0.5, "right",
+#   "Other-Forest-Other_2013", "OFO 2013", "below", "left", -1, 0, "right",
+#   "Forest-Other-Forest_2013", "FOF 2013", "below", "left", -1, 1, "right",
+#   # 2023
+#   "Forest_2023", "Forest 2023", "right", "", 2, 1.5, "right",
+#   "Other_2023", "Other 2023", "right", "", 2, -1.5, "right"
+# )
+# 
+# # Palette
+# palette = tibble::tribble(
+#   ~substance, ~color,
+#   "Forest_stay", "#32a65e",
+#   "Other_stay", "#7B68EE",
+#   "Reforestation", "#61FA95",
+#   "Deforestation", "#D95F02"
+# )
+# 
+# # Style and plot
+# ns = list(
+#   type="arrow",
+#   gp=grid::gpar(fill="#00008B", col="white", lwd=2),
+#   length=0.7,
+#   label_gp=grid::gpar(col="#00008B", fontsize=9),
+#   mag_pos="label",
+#   mag_fmt="%.0f ha",
+#   mag_gp=grid::gpar(fontsize=9, fontface="bold", col="#00008B")
+# )
+# 
+# title_txt = "Forest and Other trajectories (1989–2023)"
+# attr(title_txt, "gp") = grid::gpar(fontsize=16, fontface="bold", col="#00008B")
+# 
+# PantaRhei::sankey(nodes, flows_final, palette,
+#                   node_style = ns,
+#                   max_width = 0.1,
+#                   rmin = 0.5,
+#                   legend = TRUE,
+#                   page_margin = c(0.15, 0.05, 0.1, 0.1),
+#                   title = title_txt
+# )
+# 
+# # PDF export
+# pdf("sankey_forest_trajectories_1989_2023.pdf", width = 13, height = 7)
+# PantaRhei::sankey(
+#   nodes, flows_final, palette,
+#   node_style = ns,
+#   max_width = 0.1,
+#   rmin = 0.5,
+#   legend = TRUE,
+#   page_margin = c(0.15, 0.05, 0.1, 0.1),
+#   title = title_txt
+# )
+# dev.off()
