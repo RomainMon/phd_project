@@ -11,6 +11,7 @@ library(here)
 library(grid)
 library(PantaRhei) # For the Sankey diagram
 library(patchwork)
+library(stringr)
 
 
 ### Import datasets ----------------
@@ -174,8 +175,9 @@ forest_class_metrics %>%
   dplyr::mutate(area_change = (area_mn - dplyr::lag(area_mn)) / dplyr::lag(area_mn) * 100,
                 np_change = (np - dplyr::lag(np)) / dplyr::lag(np) * 100,
                 FFI_change = (FFI - dplyr::lag(FFI)) / dplyr::lag(FFI) * 100,
-                ECA_change = (`Normalized ECA (% of LA)` - dplyr::lag(`Normalized ECA (% of LA)`)) / dplyr::lag(`Normalized ECA (% of LA)`) * 100) %>% 
-  dplyr::select(year, area_change, np_change, FFI_change, ECA_change) %>% 
+                ECA_change_2km = (eca_pct_land_2000 - dplyr::lag(eca_pct_land_2000)) / dplyr::lag(eca_pct_land_2000) * 100,
+                ECA_change_8km = (eca_pct_land_8000 - dplyr::lag(eca_pct_land_8000)) / dplyr::lag(eca_pct_land_8000) * 100) %>% 
+  dplyr::select(year, area_change, np_change, FFI_change, ECA_change_2km, ECA_change_8km) %>% 
   print(n=35)
 
 # Changes betwenn 1989 and 2023
@@ -183,12 +185,13 @@ forest_class_metrics %>%
   dplyr::summarize(area_change = area_mn[year == max(year)] - area_mn[year == min(year)],
                    np_change = np[year == max(year)] - np[year == min(year)],
                    FFI_change = FFI[year == max(year)] - FFI[year == min(year)],
-                   ECA_change = `Normalized ECA (% of LA)`[year == max(year)] - `Normalized ECA (% of LA)`[year == min(year)],
+                   ECA_change_2km = eca_pct_land_2000[year == max(year)] - eca_pct_land_2000[year == min(year)],
+                   ECA_change_8km = eca_pct_land_8000[year == max(year)] - eca_pct_land_8000[year == min(year)],
                    area_change_perc = ((area_mn[year == max(year)] - area_mn[year == min(year)]) / area_mn[year == min(year)]) * 100,
                    np_change_perc = ((np[year == max(year)] - np[year == min(year)]) / np[year == min(year)]) * 100,
                    FFI_change_perc = ((FFI[year == max(year)] - FFI[year == min(year)]) / FFI[year == min(year)]) * 100,
-                   ECA_change_perc = ((`Normalized ECA (% of LA)`[year == max(year)] - `Normalized ECA (% of LA)`[year == min(year)]) / 
-                                        `Normalized ECA (% of LA)`[year == min(year)]) * 100)
+                   ECA_change_2km_perc = ((eca_pct_land_2000[year == max(year)] - eca_pct_land_2000[year == min(year)]) / eca_pct_land_2000[year == min(year)]) * 100,
+                   ECA_change_8km_perc = ((eca_pct_land_8000[year == max(year)] - eca_pct_land_8000[year == min(year)]) / eca_pct_land_8000[year == min(year)]) * 100)
 
 
 # Between sets of years
@@ -207,9 +210,9 @@ forest_class_metrics %>%
     FFI_change_2000_2012 = FFI[year == 2012] - FFI[year == 2000],
     FFI_change_2012_2023 = FFI[year == 2023] - FFI[year == 2012],
     
-    ECA_change_1989_2000 = `Normalized ECA (% of LA)`[year == 2000] - `Normalized ECA (% of LA)`[year == 1989],
-    ECA_change_2000_2012 = `Normalized ECA (% of LA)`[year == 2012] - `Normalized ECA (% of LA)`[year == 2000],
-    ECA_change_2012_2023 = `Normalized ECA (% of LA)`[year == 2023] - `Normalized ECA (% of LA)`[year == 2012],
+    ECA_change_1989_2000_2km = eca_pct_land_2000[year == 2000] - eca_pct_land_2000[year == 1989],
+    ECA_change_2000_2012_2km = eca_pct_land_2000[year == 2012] - eca_pct_land_2000[year == 2000],
+    ECA_change_2012_2023_2km = eca_pct_land_2000[year == 2023] - eca_pct_land_2000[year == 2012],
     
     # --- Percentage changes ---
     area_change_perc_1989_2000 = ((area_mn[year == 2000] - area_mn[year == 1989]) / area_mn[year == 1989]) * 100,
@@ -224,12 +227,12 @@ forest_class_metrics %>%
     FFI_change_perc_2000_2012 = ((FFI[year == 2012] - FFI[year == 2000]) / FFI[year == 2000]) * 100,
     FFI_change_perc_2012_2023 = ((FFI[year == 2023] - FFI[year == 2012]) / FFI[year == 2012]) * 100,
     
-    ECA_change_perc_1989_2000 = ((`Normalized ECA (% of LA)`[year == 2000] - `Normalized ECA (% of LA)`[year == 1989]) / 
-                                   `Normalized ECA (% of LA)`[year == 1989]) * 100,
-    ECA_change_perc_2000_2012 = ((`Normalized ECA (% of LA)`[year == 2012] - `Normalized ECA (% of LA)`[year == 2000]) / 
-                                   `Normalized ECA (% of LA)`[year == 2000]) * 100,
-    ECA_change_perc_2012_2023 = ((`Normalized ECA (% of LA)`[year == 2023] - `Normalized ECA (% of LA)`[year == 2012]) / 
-                                   `Normalized ECA (% of LA)`[year == 2012]) * 100
+    ECA_change_perc_1989_2000_2km = ((eca_pct_land_2000[year == 2000] - eca_pct_land_2000[year == 1989]) / 
+                                       eca_pct_land_2000[year == 1989]) * 100,
+    ECA_change_perc_2000_2012_2km = ((eca_pct_land_2000[year == 2012] - eca_pct_land_2000[year == 2000]) / 
+                                       eca_pct_land_2000[year == 2000]) * 100,
+    ECA_change_perc_2012_2023_2km = ((eca_pct_land_2000[year == 2023] - eca_pct_land_2000[year == 2012]) / 
+                                       eca_pct_land_2000[year == 2012]) * 100
   )
 
 
@@ -243,7 +246,8 @@ data_long = forest_class_metrics %>%
     np,
     area_mn,
     FFI,
-    `Normalized ECA (% of LA)`
+    eca_pct_land_2000,
+    eca_pct_land_8000
   ) %>% 
   dplyr::mutate(year = as.numeric(year)) %>%
   tidyr::pivot_longer(
@@ -257,7 +261,8 @@ data_long = forest_class_metrics %>%
       Metric == "np" ~ "Number of patches",
       Metric == "area_mn" ~ "Mean patch size (ha)",
       Metric == "FFI" ~ "Forest Fragmentation Index (FFI)",
-      Metric == "Normalized ECA (% of LA)" ~ "Equivalent Connected Area (ECA, 8 km)",
+      Metric == "eca_pct_land_2000" ~ "Equivalent Connected Area (ECA, 2km)",
+      Metric == "eca_pct_land_8000" ~ "Equivalent Connected Area (ECA, 8km)",
       TRUE ~ Metric
     )
   )
