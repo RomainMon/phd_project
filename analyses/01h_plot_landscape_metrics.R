@@ -28,10 +28,6 @@ forest_core_corridor_metrics = readr::read_csv(
   file.path(base_path, "forest_core_corridors_metrics_bbox_1989_2023.csv"),
   show_col_types = FALSE
 )
-transition_matrix = readr::read_csv(
-  file.path(base_path, "transition_matrix_bbox_1989_2023.csv"),
-  show_col_types = FALSE
-)
 
 ### Class metrics (overall) ----------------
 
@@ -299,7 +295,7 @@ forest_core_corridor_metrics %>%
 
 # Changes betwenn 1989 and 2023
 forest_core_corridor_metrics %>%
-  group_by(class) %>% 
+  dplyr::group_by(class) %>% 
   dplyr::summarize(area_change = area_mn[year == max(year)] - area_mn[year == min(year)],
                    np_change = np[year == max(year)] - np[year == min(year)],
                    ca_change = ca[year == max(year)] - ca[year == min(year)],
@@ -375,138 +371,3 @@ combined = core_plot + corr_plot + plot_layout(ncol = 2, widths = c(1, 1))
 
 # Print
 combined
-
-### Transition matrix ----
-## With PantaRhei
-# # Reclass land uses
-# map_class = function(x) {
-#   dplyr::case_when(
-#     x == 1 ~ "Forest",
-#     x %in% c(3, 5) ~ "Other",
-#     TRUE ~ NA_character_
-#   )
-# }
-# 
-# tm_clean = transition_matrix %>%
-#   dplyr::mutate(
-#     y1989 = map_class(year_1989),
-#     y2001 = map_class(year_2001),
-#     y2013 = map_class(year_2013),
-#     y2023 = map_class(year_2023)
-#   ) %>%
-#   dplyr::filter(!is.na(y1989) & !is.na(y2001) & !is.na(y2013) & !is.na(y2023))
-# 
-# # Build all trajectory combinations
-# tm_clean = tm_clean %>%
-#   dplyr::mutate(traj2001 = paste(y1989, y2001, sep="-"),
-#                 traj2013 = paste(y1989, y2001, y2013, sep="-"))
-# 
-# # Flows between key stages
-# flows = list(
-#   # 1989 -> 2001
-#   tm_clean %>%
-#     dplyr::count(y1989, y2001) %>%
-#     dplyr::mutate(
-#       from = paste0(y1989, "_1989"),
-#       to = paste0(y1989, "-", y2001, "_2001"),
-#       substance = ifelse(y1989 == "Forest" & y2001 == "Other", "Deforestation",
-#                          ifelse(y1989 == "Other" & y2001 == "Forest", "Reforestation",
-#                                 ifelse(y1989 == y2001 & y1989 == "Forest", "Forest_stay", "Other_stay"))),
-#       quantity = n * 0.09
-#     ),
-#   
-#   # 2001 -> 2013
-#   tm_clean %>%
-#     dplyr::count(traj2001, y2013) %>%
-#     dplyr::mutate(
-#       from = paste0(traj2001, "_2001"),
-#       to = paste0(traj2001, "-", y2013, "_2013"),
-#       substance = ifelse(y2013 == "Forest" & grepl("Other$", traj2001), "Reforestation",
-#                          ifelse(y2013 == "Other" & grepl("Forest$", traj2001), "Deforestation",
-#                                 ifelse(y2013 == "Forest", "Forest_stay", "Other_stay"))),
-#       quantity = n * 0.09
-#     ),
-#   
-#   # 2013 -> 2023
-#   tm_clean %>%
-#     dplyr::count(traj2013, y2023) %>%
-#     dplyr::mutate(
-#       from = paste0(traj2013, "_2013"),
-#       to = paste0(y2023, "_2023"),
-#       substance = ifelse(y2023 == "Forest" & grepl("Other$", traj2013), "Reforestation",
-#                          ifelse(y2023 == "Other" & grepl("Forest$", traj2013), "Deforestation",
-#                                 ifelse(y2023 == "Forest", "Forest_stay", "Other_stay"))),
-#       quantity = n * 0.09
-#     )
-# )
-# 
-# flows_final = dplyr::bind_rows(flows) %>%
-#   dplyr::select(from, to, substance, quantity)
-# 
-# # Define nodes
-# nodes = tibble::tribble(
-#   ~ID, ~label, ~label_pos, ~label_align, ~x, ~y, ~dir,
-#   # 1989
-#   "Forest_1989", "Forest 1989", "left", "", -6, 1.5, "right",
-#   "Other_1989", "Other 1989", "left", "", -6, -1.5, "right",
-#   # 2001
-#   "Forest-Forest_2001", "Forest→Forest 2001", "below", "left", -3.5, 1.5, "right",
-#   "Forest-Other_2001", "Forest→Other 2001", "below", "left", -3.5, 0.5, "right",
-#   "Other-Other_2001", "Other→Other 2001", "below", "left", -3.5, -1.5, "right",
-#   "Other-Forest_2001", "Other→Forest 2001", "below", "left", -3.5, -0.5, "right",
-#   # 2013
-#   "Forest-Forest-Forest_2013", "FFF 2013", "below", "left", -1, 1.5, "right",
-#   "Forest-Forest-Other_2013", "FFO 2013", "below", "left", -1, 0.5, "right",
-#   "Other-Other-Other_2013", "OOO 2013", "below", "left", -1, -1.5, "right",
-#   "Other-Other-Forest_2013", "OOF 2013", "below", "left", -1, -0.5, "right",
-#   "Other-Forest-Other_2013", "OFO 2013", "below", "left", -1, 0, "right",
-#   "Forest-Other-Forest_2013", "FOF 2013", "below", "left", -1, 1, "right",
-#   # 2023
-#   "Forest_2023", "Forest 2023", "right", "", 2, 1.5, "right",
-#   "Other_2023", "Other 2023", "right", "", 2, -1.5, "right"
-# )
-# 
-# # Palette
-# palette = tibble::tribble(
-#   ~substance, ~color,
-#   "Forest_stay", "#32a65e",
-#   "Other_stay", "#7B68EE",
-#   "Reforestation", "#61FA95",
-#   "Deforestation", "#D95F02"
-# )
-# 
-# # Style and plot
-# ns = list(
-#   type="arrow",
-#   gp=grid::gpar(fill="#00008B", col="white", lwd=2),
-#   length=0.7,
-#   label_gp=grid::gpar(col="#00008B", fontsize=9),
-#   mag_pos="label",
-#   mag_fmt="%.0f ha",
-#   mag_gp=grid::gpar(fontsize=9, fontface="bold", col="#00008B")
-# )
-# 
-# title_txt = "Forest and Other trajectories (1989–2023)"
-# attr(title_txt, "gp") = grid::gpar(fontsize=16, fontface="bold", col="#00008B")
-# 
-# PantaRhei::sankey(nodes, flows_final, palette,
-#                   node_style = ns,
-#                   max_width = 0.1,
-#                   rmin = 0.5,
-#                   legend = TRUE,
-#                   page_margin = c(0.15, 0.05, 0.1, 0.1),
-#                   title = title_txt
-# )
-# 
-# # PDF export
-# pdf("sankey_forest_trajectories_1989_2023.pdf", width = 13, height = 7)
-# PantaRhei::sankey(
-#   nodes, flows_final, palette,
-#   node_style = ns,
-#   max_width = 0.1,
-#   rmin = 0.5,
-#   legend = TRUE,
-#   page_margin = c(0.15, 0.05, 0.1, 0.1),
-#   title = title_txt
-# )
-# dev.off()

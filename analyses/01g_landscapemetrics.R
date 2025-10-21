@@ -351,7 +351,7 @@ ECA_final = ECA_total %>%
     names_glue = "{.value}_{dist_threshold}"
   )
 
-### Prepare tables -----------
+#### Prepare tables -----------
 # 1. Landscape metrics for forest class (overall)
 forest_class_metrics_ED = forest_class_metrics %>% 
   dplyr::left_join(dplyr::select(class_metrics, c(year, class, ed, pland)), by=c("year", "class"))
@@ -376,133 +376,8 @@ forest_class_metrics_final = dplyr::left_join(forest_class_metrics_ED, ECA_final
 forest_core_corridor_metrics_final = bind_rows(forest_core_metrics, forest_corridors_metrics)
 
 
-### Transition matrix -----
-#### Forest trajectories (rasters) -------
-# Here, we identify forest trajectories on rasters
-# Codes:
-# 1 = intact forest
-# 2 = deforested
-# 3 = reforested
+### Compute patch-level metrics   ---------
 
-# First year: intact forest
-traj = rasters_merged[[1]]
-traj[traj != 1] = NA  # non-forest is NA for now
-
-# Trajectories
-trajectories = list()
-trajectories[[1]] = traj
-prev_r = rasters_merged[[1]]
-
-# Loop from year 2 onward
-for (i in 2:length(rasters_merged)) {
-  curr_r = rasters_merged[[i]]
-  
-  # Update intact forest: still forest and was intact before
-  intact = (prev_r == 1 & curr_r == 1) & (traj == 1)
-  
-  # Update deforested: forest lost from intact forest
-  deforest = (prev_r == 1 & curr_r != 1) & (traj == 1)
-  
-  # Update reforested: was non-forest and now forest (any previous non-forest)
-  reforest = (curr_r == 1) & (is.na(traj) | traj != 1)
-  
-  # Update trajectory raster
-  traj[intact] = 1
-  traj[deforest] = 2
-  traj[reforest] = 3
-  
-  trajectories[[i]] = traj
-  prev_r = curr_r
-}
-names(trajectories) = years
-
-# Plot
-cols = c("darkgreen", "red", "blue")  # intact, deforestation, reforestation
-plot(trajectories[[2]], col=cols, legend=TRUE, main=paste0("Forest trajectory ", years[2]))
-plot(trajectories[[3]], col=cols, legend=TRUE, main=paste0("Forest trajectory ", years[3]))
-plot(trajectories[[4]], col=cols, legend=TRUE, main=paste0("Forest trajectory ", years[4]))
-plot(trajectories[[35]], col=cols, legend=TRUE, main=paste0("Forest trajectory ", years[35]))
-
-# Here, we compute a transition matrix on the rasters to identify the changes in land use across the landscape and through time
-#### Transition matrix on all rasters (year-to-year changes) ----
-# transition_matrix = lapply(1:(length(rasters_merged) - 1), function(i) {
-#   # Display progress message
-#   message("Computing transition matrix: ", years[i], " → ", years[i + 1])
-#   # Compute crosstab between consecutive years
-#   t = terra::crosstab(c(rasters_merged[[i]], rasters_merged[[i + 1]]))
-#   # Return list with metadata and table
-#   list(year_from = years[i], year_to = years[i + 1], table = t)
-# })
-# transition_matrix[[1]]
-
-#### Transition matrix for selected years -------
-selected_years = c(1989, 2000, 2012, 2023)
-selected_idx = match(selected_years, years)
-
-# Labels
-cat_labels = c(
-  "1" = "intact forest",
-  "2" = "deforested",
-  "3" = "reforested",
-  "0" = "matrix"
-)
-
-# Initialize list for results
-df_list = list()
-
-# Baseline (1989)
-r0 = trajectories[[selected_idx[1]]]
-r0_filled = classify(r0, rcl = matrix(c(NA, NA, 0), ncol = 3, byrow = TRUE))
-
-vals0 = values(r0_filled, mat = FALSE)
-tbl0 = table(factor(vals0, levels = c(0, 1, 2, 3)))
-
-df_baseline = data.frame(
-  from = 1989,
-  to = 1989,
-  category = cat_labels[names(tbl0)],
-  n = as.numeric(tbl0)
-)
-
-df_list[[1]] = df_baseline
-
-# Subsequent intervals
-for (i in 2:length(selected_idx)) {
-  from_year = selected_years[i - 1]
-  to_year = selected_years[i]
-  
-  r = trajectories[[selected_idx[i]]]  # cumulative raster of "to" year
-  
-  # Replace NA by 0 for matrix
-  r_filled = classify(r, rcl = matrix(c(NA, NA, 0), ncol = 3, byrow = TRUE))
-  
-  # Count pixels per category
-  vals = values(r_filled, mat = FALSE)
-  tbl = table(factor(vals, levels = c(0, 1, 2, 3)))
-  
-  df = data.frame(
-    from = from_year,
-    to = to_year,
-    category = cat_labels[names(tbl)],
-    n = as.numeric(tbl)
-  )
-  
-  df_list[[i]] = df
-}
-
-# Combine all into one data frame
-tm_1989_2023 = bind_rows(df_list)
-
-# Compute area
-pixel_area_ha = prod(res(rasters_merged[[1]])) / 10000
-total_area_ha = ncell(rasters_merged[[1]]) * pixel_area_ha
-tm_1989_2023 = tm_1989_2023 %>%
-  dplyr::mutate(area_ha = n * pixel_area_ha) %>% 
-  dplyr::mutate(area_perc = area_ha * 100 / total_area_ha)
-
-
-
-# ### Compute patch-level metrics   ---------
 # # Function to compute patch metrics on filtered patches (intersecting the entities in "vect")
 # compute_patch_metrics_filtered = function(raster, class_value, metrics, vect) {
 #   # Extract patches for the specified class
@@ -527,7 +402,9 @@ tm_1989_2023 = tm_1989_2023 %>%
 #   return(metrics_result)
 # }
 # 
-# #### On core forest -------
+
+#### On core forest -------
+
 # list_patch_metrics = purrr::imap(rasters, ~{
 #   message("Processing raster: ", years[.y])
 #   compute_patch_metrics_filtered(
@@ -547,4 +424,3 @@ base_path = here("outputs", "data", "landscapemetrics")
 write.csv(class_metrics, file = file.path(base_path, "class_metrics_bbox_1989_2023.csv"), row.names = FALSE)
 write.csv(forest_class_metrics_final, file = file.path(base_path, "forest_class_metrics_bbox_1989_2023.csv"), row.names=FALSE)
 write.csv(forest_core_corridor_metrics_final, file = file.path(base_path, "forest_core_corridors_metrics_bbox_1989_2023.csv"), row.names=FALSE)
-write.csv(tm_1989_2023, file = file.path(base_path, "transition_matrix_bbox_1989_2023.csv"), row.names=FALSE)
