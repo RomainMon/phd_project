@@ -9,7 +9,6 @@ library(readr)
 library(ggalluvial)
 library(here)
 library(grid)
-library(PantaRhei) # For the Sankey diagram
 library(patchwork)
 library(stringr)
 

@@ -35,6 +35,8 @@ plot(rasters[[1]], col=c("#32a65e", "#ad975a", "#FFFFB2", "#0000FF", "#d4271e", 
 ### Import vectors -----
 regions = terra::vect(here("data", "geo", "APonchon", "GLT", "RegionsName.shp"))
 regions = terra::project(regions, "EPSG:31983")
+regions_sf = sf::st_as_sf(regions)
+plot(regions_sf)
 
 ### Download Makurhini -----
 # library(devtools)
@@ -377,6 +379,19 @@ forest_core_corridor_metrics_final = bind_rows(forest_core_metrics, forest_corri
 
 
 ### Compute patch-level metrics   ---------
+
+# Intersect patches with GLT groups
+plot(rasters[[1]], col=c("#32a65e", "#ad975a", "#FFFFB2", "#0000FF", "#d4271e", "chartreuse"))
+plot(regions, add=TRUE)
+patches = landscapemetrics::get_patches(rasters[[1]], class = 1, directions = 8)
+patches_rast = patches[[1]][[1]] # layer_1$class_X
+plot(patches_rast)
+plot(regions, add=TRUE)
+patches_vect = patches_rast %>% 
+  terra::as.polygons()
+patches_glts = terra::intersect(patches_vect, regions)
+patches_glts$lyr.1
+patches_glts = patches_glts$lyr.1
 
 # # Function to compute patch metrics on filtered patches (intersecting the entities in "vect")
 # compute_patch_metrics_filtered = function(raster, class_value, metrics, vect) {

@@ -10,6 +10,8 @@ library(terra)
 library(ggplot2)
 library(raster)
 library(sf)
+library(PantaRhei) # For the Sankey diagram
+
 
 ### Import rasters (with corridors) -------
 base_path = here("outputs", "data", "MapBiomas", "Rasters_reclass")
@@ -32,68 +34,44 @@ plot(rasters[[1]], col=c("#32a65e", "#ad975a", "#FFFFB2", "#0000FF", "#d4271e"))
 ### Transition matrix -----
 #### Forest trajectories (rasters) -------
 # Here, we identify forest trajectories on rasters
-# Codes:
-# 1 = intact forest
-# 2 = deforested
-# 3 = reforested
-# 10 = matrix (non-forest)
-# NA = true missing data (no raster information)
 
-# # Starting point (first year)
-# traj = rasters[[1]]
-# 
-# # Assign 10 to all non-forest (matrix) cells, keep NA where raster has no data
-# traj[!is.na(traj) & traj != 1] = 10
-# plot(traj, main = paste0("Initial (", years[1], ")"))
-# 
-# # Initialize trajectory list
-# trajectories = list()
-# trajectories[[1]] = traj
-# 
-# # Store previous raster
-# prev_r = rasters[[1]]
-# 
-# # Loop over subsequent years
-# for (i in 2:length(rasters)) {
-#   curr_r = rasters[[i]]
-#   
-#   # Identify transitions
-#   intact   = (prev_r == 1 & curr_r == 1)
-#   deforest = (prev_r == 1 & curr_r != 1 & !is.na(curr_r))
-#   reforest = (prev_r != 1 & curr_r == 1 & !is.na(curr_r))
-#   
-#   # Update cumulative trajectory
-#   # 1. Reforestation (forest gained) — applies even to deforested or matrix pixels
-#   traj[reforest] = 3
-#   
-#   # 2. Deforestation (forest lost) — applies even to reforested pixels
-#   traj[deforest] = 2
-#   
-#   # 3. Intact forest stays intact if always forest
-#   traj[intact & traj == 1] = 1
-#   
-#   # 4. Non-forest (never forest or currently matrix) = 10
-#   traj[!is.na(curr_r) & curr_r != 1 & !deforest & !reforest & traj %in% c(1, 10)] = 10
-#   
-#   # 5. Preserve true NA (no data)
-#   traj[is.na(curr_r)] = NA
-#   
-#   # Store this year's cumulative trajectory
-#   trajectories[[i]] = traj
-#   
-#   # Update previous raster
-#   prev_r = curr_r
-# }
-# 
-# names(trajectories) = years
-# 
-# # --- Plot examples ---
-# cols = c("darkgreen", "red", "blue", "grey")
-# plot(trajectories[[2]], col = cols, legend = TRUE, main = paste0("Forest trajectory ", years[2]))
-# plot(trajectories[[3]], col = cols, legend = TRUE, main = paste0("Forest trajectory ", years[3]))
-# plot(trajectories[[4]], col = cols, legend = TRUE, main = paste0("Forest trajectory ", years[4]))
-# plot(trajectories[[length(trajectories)]], col = cols, legend = TRUE, main = paste0("Forest trajectory ", years[length(years)]))
+# Reclassify all non-forest (2–5) to 10 (matrix)
+rasters = lapply(rasters, function(r) classify(r, cbind(2:5, 10)))
 
+# Initialize with the first raster (1989)
+final = rasters[[1]]
+final[final == 1] = 1     # forest
+final[final == 10] = 10   # matrix
+plot(final)
+
+# Store cumulative rasters if you want to plot multiple years
+final_list = list(final)
+
+# Loop through the rest of the years
+for (i in 2:length(rasters)) {
+  curr = rasters[[i]]
+  prev = final
+  
+  # Apply transition rules
+  reforested = ( (prev == 10 | prev == 3) & curr == 1 )
+  deforested = ( (prev == 1 | prev == 2) & curr == 10 )
+  
+  # Update cumulative map
+  final[reforested] = 2
+  final[deforested] = 3
+  
+  # Store this year's cumulative result (optional)
+  final_list[[i]] = final
+}
+
+# Plot maps
+plot(final_list[[2]], col = c("darkgreen", "lightgreen", "red", "grey70"), 
+     main = paste0("Forest Dynamics ", years[[2]]),
+     axes = FALSE, legend = TRUE)
+plot(final_list[[35]], col = c("darkgreen", "lightgreen", "red", "grey70"), 
+     main = paste0("Forest Dynamics ", years[[35]]),
+     axes = FALSE, legend = TRUE)
+freq(final)
 
 
 # Below, we compute a transition matrix on the rasters to identify the changes in land use across the landscape and through time
@@ -111,233 +89,158 @@ plot(rasters[[1]], col=c("#32a65e", "#ad975a", "#FFFFB2", "#0000FF", "#d4271e"))
 
 #### Transition matrix for selected years ----
 
-# selected_years = c(1989, 2000, 2012, 2023)
-# selected_idx = match(selected_years, years)
-# 
-# cat_labels = c(
-#   "0" = "matrix",
-#   "1" = "intact forest",
-#   "2" = "deforested",
-#   "3" = "reforested"
-# )
-# 
-# df_list = list()
-# 
-# for (i in seq_along(selected_idx)) {
-#   
-#   if (i == 1) {
-#     # BASELINE (same year)
-#     r_from = trajectories[[selected_idx[i]]]
-#     r_from_filled = classify(r_from, rcl = matrix(c(NA, NA, 0), ncol = 3, byrow = TRUE))
-#     
-#     vals_from = values(r_from_filled, mat = FALSE)
-#     tbl_from = table(factor(vals_from, levels = 0:3))
-#     
-#     df_baseline = expand.grid(from_cat = 0:3, to_cat = 0:3) %>%
-#       dplyr::mutate(from = selected_years[i],
-#                     to = selected_years[i],
-#                     n = ifelse(from_cat == to_cat, as.numeric(tbl_from)[match(from_cat, 0:3)], 0))
-#     
-#     df_baseline$from_cat = cat_labels[as.character(df_baseline$from_cat)]
-#     df_baseline$to_cat   = cat_labels[as.character(df_baseline$to_cat)]
-#     
-#     df_list[[i]] = df_baseline
-#     
-#   } else {
-#     # TRANSITION BETWEEN YEARS
-#     from_year = selected_years[i - 1]
-#     to_year   = selected_years[i]
-#     
-#     r_from = trajectories[[selected_idx[i - 1]]]
-#     r_to   = trajectories[[selected_idx[i]]]
-#     
-#     # Replace NAs by 0 (matrix)
-#     r_from_filled = classify(r_from, rcl = matrix(c(NA, NA, 0), ncol = 3, byrow = TRUE))
-#     r_to_filled   = classify(r_to,   rcl = matrix(c(NA, NA, 0), ncol = 3, byrow = TRUE))
-#     
-#     # Crosstab between consecutive rasters
-#     tmat = terra::crosstab(c(r_from_filled, r_to_filled), useNA = FALSE)
-#     tmat_df = as.data.frame(tmat)
-#     colnames(tmat_df) = c("from_cat", "to_cat", "Freq")
-#     
-#     # Convert to character to ensure join compatibility
-#     tmat_df = tmat_df %>%
-#       dplyr::mutate(across(c(from_cat, to_cat), as.character))
-#     
-#     # Create all possible combinations (0–3 × 0–3)
-#     all_combos = expand.grid(from_cat = as.character(0:3), to_cat = as.character(0:3))
-#     
-#     # Join and fill missing with zeros
-#     tmat_full = all_combos %>%
-#       dplyr::left_join(tmat_df, by = c("from_cat", "to_cat")) %>%
-#       dplyr::mutate(Freq = ifelse(is.na(Freq), 0, Freq))
-#     
-#     # Add metadata and labels
-#     df = tmat_full %>%
-#       dplyr::mutate(
-#         from = from_year,
-#         to = to_year,
-#         from_cat = cat_labels[from_cat],
-#         to_cat   = cat_labels[to_cat],
-#         n = Freq
-#       ) %>%
-#       dplyr::select(from, to, from_cat, to_cat, n)
-#     
-#     df_list[[i]] = df
-#   }
-# }
-# 
-# # Combine all into one table
-# tm_1989_2023 = bind_rows(df_list)
-# 
-# # Compute area
-# pixel_area_ha = prod(res(rasters_merged[[1]])) / 10000
-# total_area_ha = ncell(rasters_merged[[1]]) * pixel_area_ha
-# 
-# tm_1989_2023 = tm_1989_2023 %>%
-#   dplyr::mutate(
-#     area_ha = n * pixel_area_ha,
-#     area_perc = area_ha * 100 / total_area_ha
-#   ) %>% 
-#   dplyr::filter(n!=0)
-# 
-# ### Export datasets ------
-# base_path = here("outputs", "data", "tm")
-# write.csv(tm_1989_2023, file = file.path(base_path, "transition_matrix_bbox_1989_2023.csv"), row.names=FALSE)
+# Define years of interest
+target_years = c(1989, 2000, 2012, 2023)
+
+# Get their indices in your final_list
+idx = match(target_years, years)
+
+# Function to compute transition matrix between two rasters
+transition_stats = function(r1, r2, year1, year2) {
+  
+  # Cross-tabulate transitions
+  tab = terra::crosstab(c(r1, r2), long = TRUE)
+  colnames(tab) = c("from", "to", "n_cells")
+  
+  # Compute area (1 cell = resolution_x * resolution_y, convert m² → ha)
+  res_m = res(r1)
+  cell_area_ha = prod(res_m) / 10000
+  
+  # Add area and percentages
+  total_cells = sum(tab$n_cells)
+  tab = tab %>%
+    dplyr::mutate(area_ha = n_cells * cell_area_ha,
+           perc = 100 * n_cells / total_cells,
+           transition = paste0(from, "_to_", to),
+           period = paste0(year1, "-", year2))
+  
+  return(tab)
+}
+
+# Compute transitions for all intervals
+transitions = list()
+for (i in 1:(length(idx) - 1)) {
+  transitions[[i]] <- transition_stats(
+    final_list[[idx[i]]],
+    final_list[[idx[i + 1]]],
+    target_years[i],
+    target_years[i + 1]
+  )
+}
+
+# Combine results
+transition_df = bind_rows(transitions)
+
+# Add category names for readability ---
+class_labels = c("1"="Forest", "10"="Matrix", "2"="Reforested", "3"="Deforested")
+transition_df = transition_df %>%
+  dplyr::mutate(from_class = class_labels[as.character(from)],
+         to_class   = class_labels[as.character(to)]) %>%
+  dplyr::select(period, from_class, to_class, n_cells, area_ha, perc)
+
 
 ### Plot transition matrix ----
 
 ## With PantaRhei
-# # Reclass land uses
-# map_class = function(x) {
-#   dplyr::case_when(
-#     x == 1 ~ "Forest",
-#     x %in% c(3, 5) ~ "Other",
-#     TRUE ~ NA_character_
-#   )
-# }
-# 
-# tm_clean = transition_matrix %>%
-#   dplyr::mutate(
-#     y1989 = map_class(year_1989),
-#     y2001 = map_class(year_2001),
-#     y2013 = map_class(year_2013),
-#     y2023 = map_class(year_2023)
-#   ) %>%
-#   dplyr::filter(!is.na(y1989) & !is.na(y2001) & !is.na(y2013) & !is.na(y2023))
-# 
-# # Build all trajectory combinations
-# tm_clean = tm_clean %>%
-#   dplyr::mutate(traj2001 = paste(y1989, y2001, sep="-"),
-#                 traj2013 = paste(y1989, y2001, y2013, sep="-"))
-# 
-# # Flows between key stages
-# flows = list(
-#   # 1989 -> 2001
-#   tm_clean %>%
-#     dplyr::count(y1989, y2001) %>%
-#     dplyr::mutate(
-#       from = paste0(y1989, "_1989"),
-#       to = paste0(y1989, "-", y2001, "_2001"),
-#       substance = ifelse(y1989 == "Forest" & y2001 == "Other", "Deforestation",
-#                          ifelse(y1989 == "Other" & y2001 == "Forest", "Reforestation",
-#                                 ifelse(y1989 == y2001 & y1989 == "Forest", "Forest_stay", "Other_stay"))),
-#       quantity = n * 0.09
-#     ),
-#   
-#   # 2001 -> 2013
-#   tm_clean %>%
-#     dplyr::count(traj2001, y2013) %>%
-#     dplyr::mutate(
-#       from = paste0(traj2001, "_2001"),
-#       to = paste0(traj2001, "-", y2013, "_2013"),
-#       substance = ifelse(y2013 == "Forest" & grepl("Other$", traj2001), "Reforestation",
-#                          ifelse(y2013 == "Other" & grepl("Forest$", traj2001), "Deforestation",
-#                                 ifelse(y2013 == "Forest", "Forest_stay", "Other_stay"))),
-#       quantity = n * 0.09
-#     ),
-#   
-#   # 2013 -> 2023
-#   tm_clean %>%
-#     dplyr::count(traj2013, y2023) %>%
-#     dplyr::mutate(
-#       from = paste0(traj2013, "_2013"),
-#       to = paste0(y2023, "_2023"),
-#       substance = ifelse(y2023 == "Forest" & grepl("Other$", traj2013), "Reforestation",
-#                          ifelse(y2023 == "Other" & grepl("Forest$", traj2013), "Deforestation",
-#                                 ifelse(y2023 == "Forest", "Forest_stay", "Other_stay"))),
-#       quantity = n * 0.09
-#     )
-# )
-# 
-# flows_final = dplyr::bind_rows(flows) %>%
-#   dplyr::select(from, to, substance, quantity)
-# 
-# # Define nodes
-# nodes = tibble::tribble(
-#   ~ID, ~label, ~label_pos, ~label_align, ~x, ~y, ~dir,
-#   # 1989
-#   "Forest_1989", "Forest 1989", "left", "", -6, 1.5, "right",
-#   "Other_1989", "Other 1989", "left", "", -6, -1.5, "right",
-#   # 2001
-#   "Forest-Forest_2001", "Forest→Forest 2001", "below", "left", -3.5, 1.5, "right",
-#   "Forest-Other_2001", "Forest→Other 2001", "below", "left", -3.5, 0.5, "right",
-#   "Other-Other_2001", "Other→Other 2001", "below", "left", -3.5, -1.5, "right",
-#   "Other-Forest_2001", "Other→Forest 2001", "below", "left", -3.5, -0.5, "right",
-#   # 2013
-#   "Forest-Forest-Forest_2013", "FFF 2013", "below", "left", -1, 1.5, "right",
-#   "Forest-Forest-Other_2013", "FFO 2013", "below", "left", -1, 0.5, "right",
-#   "Other-Other-Other_2013", "OOO 2013", "below", "left", -1, -1.5, "right",
-#   "Other-Other-Forest_2013", "OOF 2013", "below", "left", -1, -0.5, "right",
-#   "Other-Forest-Other_2013", "OFO 2013", "below", "left", -1, 0, "right",
-#   "Forest-Other-Forest_2013", "FOF 2013", "below", "left", -1, 1, "right",
-#   # 2023
-#   "Forest_2023", "Forest 2023", "right", "", 2, 1.5, "right",
-#   "Other_2023", "Other 2023", "right", "", 2, -1.5, "right"
-# )
-# 
-# # Palette
-# palette = tibble::tribble(
-#   ~substance, ~color,
-#   "Forest_stay", "#32a65e",
-#   "Other_stay", "#7B68EE",
-#   "Reforestation", "#61FA95",
-#   "Deforestation", "#D95F02"
-# )
-# 
-# # Style and plot
-# ns = list(
-#   type="arrow",
-#   gp=grid::gpar(fill="#00008B", col="white", lwd=2),
-#   length=0.7,
-#   label_gp=grid::gpar(col="#00008B", fontsize=9),
-#   mag_pos="label",
-#   mag_fmt="%.0f ha",
-#   mag_gp=grid::gpar(fontsize=9, fontface="bold", col="#00008B")
-# )
-# 
-# title_txt = "Forest and Other trajectories (1989–2023)"
-# attr(title_txt, "gp") = grid::gpar(fontsize=16, fontface="bold", col="#00008B")
-# 
-# PantaRhei::sankey(nodes, flows_final, palette,
-#                   node_style = ns,
-#                   max_width = 0.1,
-#                   rmin = 0.5,
-#                   legend = TRUE,
-#                   page_margin = c(0.15, 0.05, 0.1, 0.1),
-#                   title = title_txt
-# )
-# 
-# # PDF export
-# pdf("sankey_forest_trajectories_1989_2023.pdf", width = 13, height = 7)
-# PantaRhei::sankey(
-#   nodes, flows_final, palette,
-#   node_style = ns,
-#   max_width = 0.1,
-#   rmin = 0.5,
-#   legend = TRUE,
-#   page_margin = c(0.15, 0.05, 0.1, 0.1),
-#   title = title_txt
-# )
-# dev.off()
+# Extract year pairs
+transition_df = transition_df %>%
+  tidyr::separate(period, into = c("year_from", "year_to"), sep = "-", convert = TRUE)
 
+# Build flows
+flows = transition_df %>%
+  dplyr::mutate(
+    from = paste0(from_class, "_", year_from),
+    to = paste0(to_class, "_", year_to),
+    substance = case_when(
+      from_class == "Forest" & to_class == "Forest" ~ "Forest_stay",
+      from_class == "Matrix" & to_class == "Matrix" ~ "Matrix_stay",
+      from_class == "Forest" & to_class == "Deforested" ~ "Deforestation",
+      from_class == "Matrix" & to_class == "Reforested" ~ "Reforestation",
+      from_class == "Deforested" & to_class == "Deforested" ~ "Deforested_stay",
+      from_class == "Reforested" & to_class == "Reforested" ~ "Reforested_stay",
+      from_class == "Deforested" & to_class == "Reforested" ~ "Reforestation",
+      from_class == "Reforested" & to_class == "Deforested" ~ "Deforestation",
+      from_class == "Forest" & to_class == "Reforested" ~ "Reforestation",
+      from_class == "Matrix" & to_class == "Deforested" ~ "Deforestation",
+      TRUE ~ "Other"
+    ),
+    quantity = perc
+  ) %>%
+  dplyr::select(from, to, substance, quantity)
+
+# Build nodes
+# This defines the structure and positions for plotting
+nodes = tibble::tribble(
+  ~ID, ~label, ~label_pos, ~label_align, ~x, ~y, ~dir,
+  
+  # 1989 (start year)
+  "Forest_1989", "Forest 1989", "left", "", -6, 2, "right",
+  "Matrix_1989", "Matrix 1989", "left", "", -6, -2, "right",
+  
+  # 2000 (second year)
+  "Forest_2000", "Forest 2000", "below", "left", -3.5, 2, "right",
+  "Matrix_2000", "Matrix 2000", "below", "left", -3.5, -2, "right",
+  "Deforested_2000", "Deforested 2000", "below", "left", -3.5, 0.5, "right",
+  "Reforested_2000", "Reforested 2000", "below", "left", -3.5, -0.5, "right",
+  
+  # 2012
+  "Forest_2012", "Forest 2012", "below", "left", -1, 2, "right",
+  "Matrix_2012", "Matrix 2012", "below", "left", -1, -2, "right",
+  "Deforested_2012", "Deforested 2012", "below", "left", -1, 0.5, "right",
+  "Reforested_2012", "Reforested 2012", "below", "left", -1, -0.5, "right",
+  
+  # 2023
+  "Forest_2023", "Forest 2023", "right", "", 2, 2, "right",
+  "Matrix_2023", "Matrix 2023", "right", "", 2, -2, "right",
+  "Deforested_2023", "Deforested 2023", "right", "", 2, 0.5, "right",
+  "Reforested_2023", "Reforested 2023 (Secondary forest)", "right", "", 2, -0.5, "right"
+)
+
+# Define palette
+palette = tibble::tribble(
+  ~substance, ~color,
+  "Forest_stay", "#32a65e",
+  "Matrix_stay", "#7B68EE",
+  "Reforestation", "#61FA95",
+  "Deforestation", "#D95F02",
+  "Deforested_stay", "orange",
+  "Reforested_stay", "lightgreen"
+)
+
+# Node style and title
+ns = list(
+  type = "arrow",
+  gp = grid::gpar(fill = "#00008B", col = "white", lwd = 2),
+  length = 0.7,
+  label_gp = grid::gpar(col = "#00008B", fontsize = 9),
+  mag_pos = "label",
+  mag_fmt = "%.1f %%", # Define the label (for ha: %.0f ha means 0 decimal followed by ha; for percentages: %.1f %% means 1 decimal followed by %)
+  mag_gp = grid::gpar(fontsize = 9, fontface = "bold", col = "#00008B")
+)
+
+title_txt = "Forest dynamics (1989–2023)"
+attr(title_txt, "gp") = grid::gpar(fontsize = 16, fontface = "bold", col = "#00008B")
+
+# Plot Sankey diagram
+PantaRhei::sankey(
+  nodes, flows, palette,
+  node_style = ns,
+  max_width = 0.1,
+  rmin = 0.5,
+  legend = FALSE,
+  page_margin = c(0.15, 0.05, 0.25, 0.20),
+  title = title_txt
+)
+
+# Export PDF
+pdf("sankey_forest_trajectories_1989_2023.pdf", width = 13, height = 7)
+PantaRhei::sankey(
+  nodes, flows, palette,
+  node_style = ns,
+  max_width = 0.1,
+  rmin = 0.5,
+  legend = FALSE,
+  page_margin = c(0.15, 0.05, 0.25, 0.20),
+  title = title_txt
+)
+dev.off()
