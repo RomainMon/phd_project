@@ -12,7 +12,6 @@ library(raster)
 library(sf)
 library(PantaRhei) # For the Sankey diagram
 
-
 ### Import rasters (with corridors) -------
 base_path = here("outputs", "data", "MapBiomas", "Rasters_reclass")
 raster_files = list.files(base_path, pattern = "\\.tif$", full.names = TRUE)
@@ -222,7 +221,7 @@ title_txt = "Forest dynamics (1989–2023)"
 attr(title_txt, "gp") = grid::gpar(fontsize = 16, fontface = "bold", col = "#00008B")
 
 # Plot Sankey diagram
-PantaRhei::sankey(
+sankey_plot = PantaRhei::sankey(
   nodes, flows, palette,
   node_style = ns,
   max_width = 0.1,
@@ -244,3 +243,50 @@ PantaRhei::sankey(
   title = title_txt
 )
 dev.off()
+
+### Doughnut plot
+# Summarize land use composition per year and class
+# 1989
+initial_year = transition_df %>%
+  dplyr::filter(year_from == min(year_from)) %>%
+  dplyr::group_by(from_class) %>%
+  dplyr::summarise(area_ha = sum(area_ha), .groups = "drop") %>%
+  dplyr::mutate(year = min(transition_df$year_from)) %>%
+  dplyr::rename(class = from_class)
+
+# Compute composition for other years
+subsequent_years = transition_df %>%
+  dplyr::group_by(year = year_to, class = to_class) %>%
+  dplyr::summarise(area_ha = sum(area_ha), .groups = "drop")
+
+# Combine all years
+donut_df = dplyr::bind_rows(initial_year, subsequent_years) %>%
+  dplyr::group_by(year) %>%
+  dplyr::mutate(perc = area_ha / sum(area_ha) * 100) %>%
+  dplyr::ungroup()
+
+# Doughnut plot
+# Same colors as Sankey
+category_colors = c(
+  "Forest" = "#32a65e",
+  "Matrix" = "#7B68EE",
+  "Reforested" = "#61FA95",
+  "Deforested" = "#D95F02"
+)
+
+ggplot(donut_df, aes(x = 2, y = perc, fill = class)) +
+  geom_bar(stat = "identity", width = 1, color = "white") +
+  coord_polar(theta = "y") +
+  xlim(0.5, 2.5) +
+  geom_text(aes(label = paste0(round(perc, 1), "%")),
+            position = position_stack(vjust = 0.5),
+            color = "white", size = 3.5) +
+  facet_wrap(~year, nrow = 1) +
+  scale_fill_manual(values = category_colors) +
+  theme_void() +
+  ggtitle("Land-use composition by year") +
+  theme(
+    legend.position = "bottom",
+    plot.title = element_text(size = 14, face = "bold", color = "#00008B"),
+    strip.text = element_text(size = 11, face = "bold")
+  )

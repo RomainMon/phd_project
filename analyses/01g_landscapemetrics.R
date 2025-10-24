@@ -33,10 +33,18 @@ plot(rasters[[1]], col=c("#32a65e", "#ad975a", "#FFFFB2", "#0000FF", "#d4271e", 
 
 
 ### Import vectors -----
+# Regions Name
 regions = terra::vect(here("data", "geo", "APonchon", "GLT", "RegionsName.shp"))
 regions = terra::project(regions, "EPSG:31983")
 regions_sf = sf::st_as_sf(regions)
 plot(regions_sf)
+# BBOX
+bbox = terra::vect(here("data", "geo", "BBOX", "sampling_units_bbox_31983.shp"))
+bbox_sf = sf::st_as_sf(bbox)
+minbbox = terra::vect(here("data", "geo", "BBOX", "sampling_units_minbbox_buffer5km.shp"))
+plot(minbbox)
+plot(regions, add=TRUE)
+minbbox_sf = sf::st_as_sf(minbbox)
 
 ### Download Makurhini -----
 # library(devtools)
@@ -255,7 +263,7 @@ total_area_m2 = sum(values(cell_areas_m2), na.rm = TRUE)
 # Convert to hectares
 total_area_ha = total_area_m2 / 10000
 
-## Compute ECA
+##### ECA ---------
 # NB: computing ECA on all rasters makes the computer crash
 # Subsets of rasters
 list_forest_patches_1 = list_forest_patches[1:7]   # 1989–1995
@@ -353,6 +361,18 @@ ECA_final = ECA_total %>%
     names_glue = "{.value}_{dist_threshold}"
   )
 
+##### ProtConn ------
+# ProtConn = MK_ProtConn(nodes = list_forest_patches[[35]],
+#                        region = bbox_sf,
+#                        area_unit = "ha",
+#                        distance = list(type = "centroid", resistance = NULL),
+#                        distance_thresholds = c(2000, 8000),
+#                        probability = 0.5,
+#                        transboundary = NULL,
+#                        transboundary_type = "nodes",
+#                        protconn_bound = FALSE)
+
+
 #### Prepare tables -----------
 # 1. Landscape metrics for forest class (overall)
 forest_class_metrics_ED = forest_class_metrics %>% 
@@ -380,62 +400,241 @@ forest_core_corridor_metrics_final = bind_rows(forest_core_metrics, forest_corri
 
 ### Compute patch-level metrics   ---------
 
-# Intersect patches with GLT groups
-plot(rasters[[1]], col=c("#32a65e", "#ad975a", "#FFFFB2", "#0000FF", "#d4271e", "chartreuse"))
-plot(regions, add=TRUE)
-patches = landscapemetrics::get_patches(rasters[[1]], class = 1, directions = 8)
-patches_rast = patches[[1]][[1]] # layer_1$class_X
-plot(patches_rast)
-plot(regions, add=TRUE)
-patches_vect = patches_rast %>% 
-  terra::as.polygons()
-patches_glts = terra::intersect(patches_vect, regions)
-patches_glts$lyr.1
-patches_glts = patches_glts$lyr.1
+#### On a single raster -----
+##### Filter patches -----
 
-# # Function to compute patch metrics on filtered patches (intersecting the entities in "vect")
-# compute_patch_metrics_filtered = function(raster, class_value, metrics, vect) {
-#   # Extract patches for the specified class
-#   patches = landscapemetrics::get_patches(raster, class = class_value, directions = 8)
-#   patches_rast = patches[[1]][[1]] # layer_1$class_X
-#   
-#   # Identify which patch IDs intersect the vector file
-#   patch_ids = unique(terra::extract(patches_rast, vect)[, 2])
-#   patch_ids = patch_ids[!is.na(patch_ids)]
-#   
-#   # Keep full patches that intersect
-#   patches_keep = patches_rast
-#   patches_keep[!patches_keep %in% patch_ids] = NA
-#   
-#   # Compute patch-level metrics
-#   metrics_result = landscapemetrics::spatialize_lsm(
-#     landscape = patches_keep,
-#     directions = 8,
-#     what = metrics
-#   )
-#   
-#   return(metrics_result)
-# }
-# 
+# 1. Identify forest patches
+forest_patches = landscapemetrics::get_patches(rasters[[1]], class = 1, directions = 8)
+patches_rast = forest_patches[[1]][[1]]  # raster of patch IDs
+patches_vect = as.polygons(patches_rast, dissolve = TRUE)
+plot(patches_vect)
+patches_sf = sf::st_as_sf(patches_vect)
+plot(patches_sf)
 
-#### On core forest -------
+# 2. Select patches within bbox
+# Select patches that intersect any minbbox polygon
+patches_in_bbox = patches_sf[sf::st_intersects(patches_sf, minbbox_sf, sparse = FALSE) %>% apply(1, any), ]
 
-# list_patch_metrics = purrr::imap(rasters, ~{
-#   message("Processing raster: ", years[.y])
-#   compute_patch_metrics_filtered(
-#     raster = .x,
-#     class_value = 1,
-#     metrics = c("lsm_p_area", "lsm_p_shape"),
-#     vect = regions
-#   )
-# })
-# 
-# # Assign names for clarity
-# names(list_patch_metrics) = years
+# Plot
+plot(st_geometry(patches_sf), col = 'lightgreen', border = 'darkgreen')
+plot(st_geometry(minbbox_sf), add = TRUE, border = 'red', lwd = 2)
+plot(st_geometry(patches_in_bbox), add = TRUE, col = 'orange', border = 'orange')
 
+# 2. Remove very small patches
+# Calculate patch area in hectares
+patches_in_bbox$area_ha = as.numeric(sf::st_area(patches_in_bbox)) / 10000  # m² → ha
+
+# Filter patches
+patches_filtered = patches_in_bbox %>%
+  dplyr::filter(area_ha >= 5)
+
+# Plot
+plot(st_geometry(patches_in_bbox), col = "lightgrey", border = "grey")
+plot(st_geometry(patches_filtered), add = TRUE, col = "darkgreen", border = "green")
+plot(regions_sf, add=TRUE, col = "red")
+
+# 3. Ensure patches intersecting GLT locations are also included
+patches_w_glt = patches_sf[
+  sf::st_intersects(patches_sf, regions_sf, sparse = FALSE) %>% apply(1, any),
+]
+
+# Combine both sets, avoiding duplicates
+patches_final = dplyr::bind_rows(patches_filtered, patches_w_glt) %>%
+  dplyr::distinct(geometry, .keep_all = TRUE)
+
+# Check
+cat("Number of patches before:", nrow(patches_filtered), "\n")
+cat("Number of region-intersecting patches added:", nrow(patches_w_glt), "\n")
+cat("Final patch count:", nrow(patches_final), "\n")
+
+# 4. Plot final layer
+plot(st_geometry(patches_sf), col = "lightgrey", border = "grey")
+plot(st_geometry(patches_final), add = TRUE, col = "darkgreen", border = "darkgreen")
+plot(st_geometry(regions_sf), add = TRUE, col = "red", lwd = 2)
+
+##### Landscapemetrics -----
+
+## Compute landscape metrics spatially
+mask_rast = rasterize(patches_final, rasters[[1]], field = 6)
+plot(mask_rast, col="darkgreen")
+check_landscape(mask_rast)
+patch_lm = landscapemetrics::spatialize_lsm(
+  mask_rast,
+  what = c("lsm_p_cai", "lsm_p_shape"),
+  directions = 8
+)
+
+# Visualize
+plot(patch_lm$layer_1$lsm_p_cai, main = "Patch area (selected patches)")
+plot(patch_lm$layer_1$lsm_p_shape, main = "Shape (selected patches)")
+
+# Extract values
+patch_cai = patch_lm$layer_1$lsm_p_cai
+patch_shape = patch_lm$layer_1$lsm_p_shape
+
+##### Makurhini -----
+
+## Compute PC
+PC = MK_dPCIIC(nodes = patches_final, attribute = NULL,
+                distance = list(type = "centroid"),
+                metric = "PC", probability = 0.05,
+                distance_thresholds = 8000)
+head(PC)
+
+##### Join metrics -----
+# Extract area and shape per patch polygon
+patch_cai_sf = terra::extract(
+  patch_cai,
+  patches_final,
+  fun = unique,
+  na.rm = TRUE,
+  bind = TRUE
+)
+patch_cai_sf = sf::st_as_sf(patch_cai_sf) %>% 
+  dplyr::rename(cai = value) %>% 
+  dplyr::select(-area_ha)
+
+patch_shape_sf = terra::extract(
+  patch_shape,
+  patches_final,
+  fun = unique,
+  na.rm = TRUE,
+  bind = TRUE
+)
+patch_shape_sf = sf::st_as_sf(patch_shape_sf) %>% 
+  dplyr::rename(shape = value) %>% 
+  dplyr::select(-area_ha)
+
+# Join
+patches_metrics_final = patches_final %>%
+  dplyr::left_join(st_drop_geometry(patch_cai_sf), by = "lyr.1") %>%
+  dplyr::left_join(st_drop_geometry(patch_shape_sf), by = "lyr.1") %>% 
+  dplyr::left_join(st_drop_geometry(dplyr::select(PC, -area_ha)), by = "lyr.1")
+
+#### Function ----
+compute_patch_metrics = function(r, year, minbbox_sf, regions_sf) {
+  message("Processing year: ", year)
+  
+  #--------------------------#
+  # 1. Extract forest patches
+  #--------------------------#
+  forest_patches = landscapemetrics::get_patches(r, class = 1, directions = 8)
+  patches_rast = forest_patches[[1]][[1]]
+  patches_vect = terra::as.polygons(patches_rast, dissolve = TRUE, na.rm = TRUE)
+  patches_sf = sf::st_as_sf(patches_vect)
+  
+  #--------------------------#
+  # 2. Filter patches by bbox and size
+  #--------------------------#
+  patches_in_bbox = patches_sf[
+    sf::st_intersects(patches_sf, minbbox_sf, sparse = FALSE) %>% apply(1, any),
+  ]
+  patches_in_bbox$area_ha = as.numeric(sf::st_area(patches_in_bbox)) / 10000
+  patches_filtered = patches_in_bbox %>% filter(area_ha >= 5)
+  
+  # Ensure patches intersecting GLT regions are included
+  patches_w_glt = patches_sf[
+    sf::st_intersects(patches_sf, regions_sf, sparse = FALSE) %>% apply(1, any),
+  ]
+  
+  # Combine and deduplicate
+  patches_final = bind_rows(patches_filtered, patches_w_glt) %>%
+    distinct(geometry, .keep_all = TRUE)
+  
+  if (nrow(patches_final) == 0) {
+    warning("No valid patches found for year ", year)
+    return(NULL)
+  }
+  
+  #--------------------------#
+  # 3. Compute patch-level LSM
+  #--------------------------#
+  mask_rast = terra::rasterize(patches_final, r, field = 6)
+  patch_lm = landscapemetrics::spatialize_lsm(
+    mask_rast,
+    what = c("lsm_p_cai", "lsm_p_shape"),
+    directions = 8
+  )
+  
+  # Extract per-patch values
+  patch_cai = terra::extract(
+    patch_lm$layer_1$lsm_p_cai,
+    patches_final,
+    fun = unique,
+    na.rm = TRUE,
+    bind = TRUE
+  )
+  patch_shape = terra::extract(
+    patch_lm$layer_1$lsm_p_shape,
+    patches_final,
+    fun = unique,
+    na.rm = TRUE,
+    bind = TRUE
+  )
+  
+  patch_cai_sf = sf::st_as_sf(patch_cai) %>% 
+    dplyr::rename(cai = value) %>% 
+    dplyr::select(-area_ha)
+  
+  patch_shape_sf = sf::st_as_sf(patch_shape) %>% 
+    dplyr::rename(shape = value) %>% 
+    dplyr::select(-area_ha)
+  
+  patch_metrics_sf = patches_final %>%
+    dplyr::left_join(st_drop_geometry(patch_cai_sf), by = "lyr.1") %>%
+    dplyr::left_join(st_drop_geometry(patch_shape_sf), by = "lyr.1")
+  
+  #--------------------------#
+  # 4. Compute PC (Makurhini)
+  #--------------------------#
+  PC = tryCatch({
+    MK_dPCIIC(
+      nodes = patches_final,
+      attribute = NULL,
+      distance = list(type = "centroid"),
+      metric = "PC",
+      probability = 0.05,
+      distance_thresholds = 8000
+    )
+  }, error = function(e) {
+    warning("Makurhini PC failed for year ", year, ": ", e$message)
+    NULL
+  })
+  
+  if (!is.null(PC)) {
+    patch_metrics_sf = patch_metrics_sf %>%
+      dplyr::left_join(st_drop_geometry(dplyr::select(PC, -area_ha)), by = "lyr.1")
+  }
+  
+  #--------------------------#
+  # 5. Add year & return
+  #--------------------------#
+  patch_metrics_sf$year = year
+  return(patch_metrics_sf)
+}
+
+### Apply to all rasters ----
+patches_metrics_list = purrr::map2(
+  rasters,
+  years,
+  ~ compute_patch_metrics(.x, .y, minbbox_sf, regions_sf)
+)
 
 ### Export datasets ------
 base_path = here("outputs", "data", "landscapemetrics")
+
+# Export landscape metrics
 write.csv(class_metrics, file = file.path(base_path, "class_metrics_bbox_1989_2023.csv"), row.names = FALSE)
 write.csv(forest_class_metrics_final, file = file.path(base_path, "forest_class_metrics_bbox_1989_2023.csv"), row.names=FALSE)
 write.csv(forest_core_corridor_metrics_final, file = file.path(base_path, "forest_core_corridors_metrics_bbox_1989_2023.csv"), row.names=FALSE)
+
+# Export patch metrics
+purrr::walk2(
+  patches_metrics_list,
+  years,
+  ~ {
+    output_path = file.path(base_path, paste0("patches_metrics_", .y, ".shp"))
+    sf::st_write(.x, output_path, delete_dsn = TRUE, quiet = TRUE)
+    message("✅ Exported: ", output_path)
+  }
+)
