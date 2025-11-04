@@ -363,101 +363,105 @@ ECA_final = ECA_total %>%
 
 
 #### ProtConn ------
-ProtConn_1 = lapply(list_forest_patches_1, \(x)
-                    MK_ProtConn(
-                      nodes = x,
-                      region = bbox_sf,
-                      area_unit = "ha",
-                      distance = list(type = "centroid", resistance = NULL),
-                      distance_thresholds = c(2000, 8000),
-                      probability = 0.5,
-                      transboundary = NULL,
-                      transboundary_type = "nodes",
-                      protconn_bound = FALSE))
-ProtConn_2 = lapply(list_forest_patches_2, \(x)
-                    MK_ProtConn(
-                      nodes = x,
-                      region = bbox_sf,
-                      area_unit = "ha",
-                      distance = list(type = "centroid", resistance = NULL),
-                      distance_thresholds = c(2000, 8000),
-                      probability = 0.5,
-                      transboundary = NULL,
-                      transboundary_type = "nodes",
-                      protconn_bound = FALSE))
-ProtConn_3 = lapply(list_forest_patches_3, \(x)
-                    MK_ProtConn(
-                      nodes = x,
-                      region = bbox_sf,
-                      area_unit = "ha",
-                      distance = list(type = "centroid", resistance = NULL),
-                      distance_thresholds = c(2000, 8000),
-                      probability = 0.5,
-                      transboundary = NULL,
-                      transboundary_type = "nodes",
-                      protconn_bound = FALSE))
-ProtConn_4 = lapply(list_forest_patches_4, \(x)
-                    MK_ProtConn(
-                      nodes = x,
-                      region = bbox_sf,
-                      area_unit = "ha",
-                      distance = list(type = "centroid", resistance = NULL),
-                      distance_thresholds = c(2000, 8000),
-                      probability = 0.5,
-                      transboundary = NULL,
-                      transboundary_type = "nodes",
-                      protconn_bound = FALSE))
-ProtConn_5 = lapply(list_forest_patches_5, \(x)
-                    MK_ProtConn(
-                      nodes = x,
-                      region = bbox_sf,
-                      area_unit = "ha",
-                      distance = list(type = "centroid", resistance = NULL),
-                      distance_thresholds = c(2000, 8000),
-                      probability = 0.5,
-                      transboundary = NULL,
-                      transboundary_type = "nodes",
-                      protconn_bound = FALSE))
+# NB: ProtConn can ne computed with Makurhini, but we can also compute ProtConn manually 
+# ProtConn = 100 * (ECA/AL) (AL being landscape area) (Saura et al. 2017, Ecological Indicators)
 
-# Combine ProtConn tables
-all_ProtConn = c(ProtConn_1, ProtConn_2, ProtConn_3, ProtConn_4, ProtConn_5)
-ProtConn_total = do.call(rbind, lapply(names(all_ProtConn), function(year) {
-  
-  year_obj = all_ProtConn[[year]]
-  
-  # iterate over distance thresholds
-  do.call(rbind, lapply(names(year_obj), function(dist) {
-    df <- year_obj[[dist]]
-    df$year <- year       # add year
-    df$distance <- dist   # add distance
-    df
-  }))
-}))
+# ProtConn_1 = lapply(list_forest_patches_1, \(x)
+#                     MK_ProtConn(
+#                       nodes = x,
+#                       region = bbox_sf,
+#                       area_unit = "ha",
+#                       distance = list(type = "centroid", resistance = NULL),
+#                       distance_thresholds = c(2000, 8000),
+#                       probability = 0.5,
+#                       transboundary = NULL,
+#                       transboundary_type = "nodes",
+#                       protconn_bound = FALSE))
+# ProtConn_2 = lapply(list_forest_patches_2, \(x)
+#                     MK_ProtConn(
+#                       nodes = x,
+#                       region = bbox_sf,
+#                       area_unit = "ha",
+#                       distance = list(type = "centroid", resistance = NULL),
+#                       distance_thresholds = c(2000, 8000),
+#                       probability = 0.5,
+#                       transboundary = NULL,
+#                       transboundary_type = "nodes",
+#                       protconn_bound = FALSE))
+# ProtConn_3 = lapply(list_forest_patches_3, \(x)
+#                     MK_ProtConn(
+#                       nodes = x,
+#                       region = bbox_sf,
+#                       area_unit = "ha",
+#                       distance = list(type = "centroid", resistance = NULL),
+#                       distance_thresholds = c(2000, 8000),
+#                       probability = 0.5,
+#                       transboundary = NULL,
+#                       transboundary_type = "nodes",
+#                       protconn_bound = FALSE))
+# ProtConn_4 = lapply(list_forest_patches_4, \(x)
+#                     MK_ProtConn(
+#                       nodes = x,
+#                       region = bbox_sf,
+#                       area_unit = "ha",
+#                       distance = list(type = "centroid", resistance = NULL),
+#                       distance_thresholds = c(2000, 8000),
+#                       probability = 0.5,
+#                       transboundary = NULL,
+#                       transboundary_type = "nodes",
+#                       protconn_bound = FALSE))
+# ProtConn_5 = lapply(list_forest_patches_5, \(x)
+#                     MK_ProtConn(
+#                       nodes = x,
+#                       region = bbox_sf,
+#                       area_unit = "ha",
+#                       distance = list(type = "centroid", resistance = NULL),
+#                       distance_thresholds = c(2000, 8000),
+#                       probability = 0.5,
+#                       transboundary = NULL,
+#                       transboundary_type = "nodes",
+#                       protconn_bound = FALSE))
+# 
+# # Combine ProtConn tables
+# all_ProtConn = c(ProtConn_1, ProtConn_2, ProtConn_3, ProtConn_4, ProtConn_5)
+# ProtConn_total = do.call(rbind, lapply(names(all_ProtConn), function(year) {
+#   
+#   year_obj = all_ProtConn[[year]]
+#   
+#   # iterate over distance thresholds
+#   do.call(rbind, lapply(names(year_obj), function(dist) {
+#     df <- year_obj[[dist]]
+#     df$year <- year       # add year
+#     df$distance <- dist   # add distance
+#     df
+#   }))
+# }))
+# 
+# # To wide format
+# ProtConn_total = as.data.frame(ProtConn_total)
+# ProtConn_total = ProtConn_total %>% 
+#   tidyr::pivot_wider(names_from = Index, values_from = Value) %>% 
+#   tidyr::pivot_wider(names_from = `ProtConn indicator`, values_from = Percentage) %>% 
+#   dplyr::group_by(year, distance) %>% 
+#   dplyr::summarise(across(everything(), ~ first(na.omit(.x))), .groups = "drop")
+# 
+# # Rename
+# ProtConn_total = ProtConn_total %>% 
+#   dplyr::rename(land_area = `Maximum landscape attribute`,
+#                 protected_surf = `Protected surface`,
+#                 EC_PC = `EC(PC)`) %>% 
+#   dplyr::select(-7)
+# 
+# # Pivot wider
+# ProtConn_final = ProtConn_total %>% 
+#   dplyr::mutate(year = as.numeric(as.character(year))) %>% 
+#   # pivot wider so that distance threshold becomes a suffix
+#   tidyr::pivot_wider(
+#     names_from = distance,
+#     values_from = c(EC_PC:ProtConn_Trans_land),
+#     names_glue = "{.value}_{distance}"
+#   )
 
-# To wide format
-ProtConn_total = as.data.frame(ProtConn_total)
-ProtConn_total = ProtConn_total %>% 
-  tidyr::pivot_wider(names_from = Index, values_from = Value) %>% 
-  tidyr::pivot_wider(names_from = `ProtConn indicator`, values_from = Percentage) %>% 
-  dplyr::group_by(year, distance) %>% 
-  dplyr::summarise(across(everything(), ~ first(na.omit(.x))), .groups = "drop")
-
-# Rename
-ProtConn_total = ProtConn_total %>% 
-  dplyr::rename(land_area = `Maximum landscape attribute`,
-                protected_surf = `Protected surface`,
-                EC_PC = `EC(PC)`) %>% 
-  dplyr::select(-7)
-
-# Pivot wider
-ProtConn_final = ProtConn_total %>% 
-  dplyr::mutate(year = as.numeric(as.character(year))) %>% 
-  # pivot wider so that distance threshold becomes a suffix
-  tidyr::pivot_wider(
-    names_from = distance,
-    values_from = c(EC_PC:ProtConn_Trans_land),
-    names_glue = "{.value}_{distance}"
-  )
 
 #### Prepare tables -----------
 # 1. Landscape metrics for forest class (overall)
@@ -477,10 +481,7 @@ forest_class_metrics_ED = forest_class_metrics_ED %>%
   )
 
 # Merge with ECA
-forest_class_metrics_ECA = dplyr::left_join(forest_class_metrics_ED, ECA_final, by=c("year"="Time"))
-
-# Merge with ProtConn
-forest_class_metrics_final = dplyr::left_join(forest_class_metrics_ECA, ProtConn_final, by=c("year"))
+forest_class_metrics_final = dplyr::left_join(forest_class_metrics_ED, ECA_final, by=c("year"="Time"))
 
 # 2. Landscape metrics for forest core and corridor
 forest_core_corridor_metrics_final = bind_rows(forest_core_metrics, forest_corridors_metrics)

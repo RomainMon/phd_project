@@ -31,8 +31,9 @@ for (i in seq_along(rasters)) {
 plot(rasters[[1]], col=c("#32a65e", "#ad975a", "#FFFFB2", "#0000FF", "#d4271e"))
 
 ### Transition matrix -----
-#### Forest trajectories (rasters) -------
-# Here, we identify forest trajectories on rasters
+#### Spatial forest trajectories (rasters) -------
+# Here, we identify forest trajectories on rasters: the output is a map with intact forests (1), reforested cells (6), deforested cells (7)
+# NB: the final map is cumulative, i.e., all cells modified previously are saved through the iteration (not only those from the previous map)
 
 # Reclassify all non-forest (2–5) to 10 (matrix)
 rasters = lapply(rasters, function(r) classify(r, cbind(2:5, 10)))
@@ -52,12 +53,12 @@ for (i in 2:length(rasters)) {
   prev = final
   
   # Apply transition rules
-  reforested = ( (prev == 10 | prev == 3) & curr == 1 )
-  deforested = ( (prev == 1 | prev == 2) & curr == 10 )
+  reforested = ( (prev == 10 | prev == 7) & curr == 1 )
+  deforested = ( (prev == 1 | prev == 6) & curr == 10 )
   
   # Update cumulative map
-  final[reforested] = 2
-  final[deforested] = 3
+  final[reforested] = 6
+  final[deforested] = 7
   
   # Store this year's cumulative result (optional)
   final_list[[i]] = final
@@ -67,11 +68,39 @@ for (i in 2:length(rasters)) {
 plot(final_list[[2]], col = c("darkgreen", "lightgreen", "red", "grey70"), 
      main = paste0("Forest Dynamics ", years[[2]]),
      axes = FALSE, legend = TRUE)
+plot(final_list[[12]], col = c("darkgreen", "lightgreen", "red", "grey70"), 
+     main = paste0("Forest Dynamics ", years[[12]]),
+     axes = FALSE, legend = TRUE)
+plot(final_list[[24]], col = c("darkgreen", "lightgreen", "red", "grey70"), 
+     main = paste0("Forest Dynamics ", years[[24]]),
+     axes = FALSE, legend = TRUE)
 plot(final_list[[35]], col = c("darkgreen", "lightgreen", "red", "grey70"), 
      main = paste0("Forest Dynamics ", years[[35]]),
      axes = FALSE, legend = TRUE)
-freq(final)
+freq(final_list[[35]])
 
+### replace 10 in each final_list map by the original class 2–5 that year
+for(i in seq_along(final_list)){
+  this <- final_list[[i]]
+  orig <- rasters[[i]]   # this raster still has original 1–5 values (except we reclassified 2–5 to 10 earlier)
+  
+  # so: we need the ORIGINAL original (before reclass 2–5→10)
+  # → we reload that specific raster again WITHOUT the reclass
+  
+  orig_file <- raster_df$file[i]
+  orig_true <- terra::rast(orig_file)  # this one still has 1–5 intact
+  
+  # change 10 to the real class from that year
+  this[this == 10] <- orig_true[this == 10]
+  
+  final_list[[i]] <- this
+}
+
+# Check
+plot(final_list[[35]], col = c("#32a65e", "#ad975a", "#FFFFB2", "#0000FF", "#d4271e", "lightgreen", "pink"), 
+     main = paste0("Forest Dynamics ", years[[35]]),
+     axes = FALSE, legend = TRUE)
+freq(final_list[[35]])
 
 # Below, we compute a transition matrix on the rasters to identify the changes in land use across the landscape and through time
 #### Transition matrix on all rasters (year-to-year changes) ----
@@ -131,7 +160,7 @@ for (i in 1:(length(idx) - 1)) {
 transition_df = bind_rows(transitions)
 
 # Add category names for readability ---
-class_labels = c("1"="Forest", "10"="Matrix", "2"="Reforested", "3"="Deforested")
+class_labels = c("1"="Forest", "10"="Matrix", "6"="Reforested", "7"="Deforested")
 transition_df = transition_df %>%
   dplyr::mutate(from_class = class_labels[as.character(from)],
          to_class   = class_labels[as.character(to)]) %>%
@@ -290,3 +319,24 @@ ggplot(donut_df, aes(x = 2, y = perc, fill = class)) +
     plot.title = element_text(size = 14, face = "bold", color = "#00008B"),
     strip.text = element_text(size = 11, face = "bold")
   )
+
+### Export rasters -----------
+message("Exporting rasters...")
+
+# Define output folder
+output_dir = here("outputs", "data", "MapBiomas", "Rasters_cumulative_tm")
+
+# Export each raster with year in the filename
+for (i in seq_along(final_list)) {
+  year_i <- years[i]
+  output_path <- file.path(output_dir, paste0("raster_cumul_tm_", year_i, ".tif"))
+  
+  message("  - Writing raster for year ", year_i)
+  
+  terra::writeRaster(
+    final_list[[i]],
+    filename = output_path,
+    overwrite = TRUE, # Overwrite existing files or not
+    wopt = list(datatype = "INT1U", gdal = c("COMPRESS=LZW"))
+  )
+}

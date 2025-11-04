@@ -171,10 +171,8 @@ forest_class_metrics %>%
                 np_change = (np - dplyr::lag(np)) / dplyr::lag(np) * 100,
                 FFI_change = (FFI - dplyr::lag(FFI)) / dplyr::lag(FFI) * 100,
                 ECA_change_2km = (eca_pct_land_2000 - dplyr::lag(eca_pct_land_2000)) / dplyr::lag(eca_pct_land_2000) * 100,
-                ECA_change_8km = (eca_pct_land_8000 - dplyr::lag(eca_pct_land_8000)) / dplyr::lag(eca_pct_land_8000) * 100,
-                ProtConn_change_2km = (ProtConn_d2000 - dplyr::lag(ProtConn_d2000)),
-                ProtConn_change_8km = (ProtConn_d8000 - dplyr::lag(ProtConn_d8000))) %>% 
-  dplyr::select(year, area_change, np_change, FFI_change, ECA_change_2km, ECA_change_8km, ProtConn_change_2km, ProtConn_change_8km) %>% 
+                ECA_change_8km = (eca_pct_land_8000 - dplyr::lag(eca_pct_land_8000)) / dplyr::lag(eca_pct_land_8000) * 100) %>% 
+  dplyr::select(year, area_change, np_change, FFI_change, ECA_change_2km, ECA_change_8km) %>% 
   print(n=35)
 
 # Changes betwenn 1989 and 2023
@@ -184,8 +182,6 @@ forest_class_metrics %>%
                    FFI_change = FFI[year == max(year)] - FFI[year == min(year)],
                    ECA_change_2km = eca_pct_land_2000[year == max(year)] - eca_pct_land_2000[year == min(year)],
                    ECA_change_8km = eca_pct_land_8000[year == max(year)] - eca_pct_land_8000[year == min(year)],
-                   ProtConn_change_2km = ProtConn_d2000[year == max(year)] - ProtConn_d2000[year == min(year)], 
-                   ProtConn_change_8km = ProtConn_d8000[year == max(year)] - ProtConn_d8000[year == min(year)], 
                    area_change_perc = ((area_mn[year == max(year)] - area_mn[year == min(year)]) / area_mn[year == min(year)]) * 100,
                    np_change_perc = ((np[year == max(year)] - np[year == min(year)]) / np[year == min(year)]) * 100,
                    FFI_change_perc = ((FFI[year == max(year)] - FFI[year == min(year)]) / FFI[year == min(year)]) * 100,
@@ -212,10 +208,6 @@ forest_class_metrics %>%
     ECA_change_1989_2000_2km = eca_pct_land_2000[year == 2000] - eca_pct_land_2000[year == 1989],
     ECA_change_2000_2012_2km = eca_pct_land_2000[year == 2012] - eca_pct_land_2000[year == 2000],
     ECA_change_2012_2023_2km = eca_pct_land_2000[year == 2023] - eca_pct_land_2000[year == 2012],
-    
-    ProtConn_change_1989_2000_2km = ProtConn_d2000[year == 2000] - ProtConn_d2000[year == 1989],
-    ProtConn_change_2000_2012_2km = ProtConn_d2000[year == 2012] - ProtConn_d2000[year == 2000],
-    ProtConn_change_2012_2023_2km = ProtConn_d2000[year == 2023] - ProtConn_d2000[year == 2012],
     
     # --- Percentage changes ---
     area_change_perc_1989_2000 = ((area_mn[year == 2000] - area_mn[year == 1989]) / area_mn[year == 1989]) * 100,
@@ -250,9 +242,7 @@ data_long = forest_class_metrics %>%
     area_mn,
     FFI,
     eca_pct_land_2000,
-    eca_pct_land_8000,
-    ProtConn_d2000,
-    ProtConn_d8000
+    eca_pct_land_8000
   ) %>% 
   dplyr::mutate(year = as.numeric(year)) %>%
   tidyr::pivot_longer(
@@ -268,8 +258,6 @@ data_long = forest_class_metrics %>%
       Metric == "FFI" ~ "Forest Fragmentation Index (FFI)",
       Metric == "eca_pct_land_2000" ~ "Equivalent Connected Area (ECA, 2km)",
       Metric == "eca_pct_land_8000" ~ "Equivalent Connected Area (ECA, 8km)",
-      Metric == "ProtConn_d2000" ~ "Percentage of connected forests (ProtConn, 2km)",
-      Metric == "ProtConn_d8000" ~ "Percentage of connected forests (ProtConn, 8km)",
       TRUE ~ Metric
     )
   )
