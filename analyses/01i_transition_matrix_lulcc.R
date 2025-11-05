@@ -77,30 +77,6 @@ plot(final_list[[24]], col = c("darkgreen", "lightgreen", "red", "grey70"),
 plot(final_list[[35]], col = c("darkgreen", "lightgreen", "red", "grey70"), 
      main = paste0("Forest Dynamics ", years[[35]]),
      axes = FALSE, legend = TRUE)
-freq(final_list[[35]])
-
-### replace 10 in each final_list map by the original class 2–5 that year
-for(i in seq_along(final_list)){
-  this <- final_list[[i]]
-  orig <- rasters[[i]]   # this raster still has original 1–5 values (except we reclassified 2–5 to 10 earlier)
-  
-  # so: we need the ORIGINAL original (before reclass 2–5→10)
-  # → we reload that specific raster again WITHOUT the reclass
-  
-  orig_file <- raster_df$file[i]
-  orig_true <- terra::rast(orig_file)  # this one still has 1–5 intact
-  
-  # change 10 to the real class from that year
-  this[this == 10] <- orig_true[this == 10]
-  
-  final_list[[i]] <- this
-}
-
-# Check
-plot(final_list[[35]], col = c("#32a65e", "#ad975a", "#FFFFB2", "#0000FF", "#d4271e", "lightgreen", "pink"), 
-     main = paste0("Forest Dynamics ", years[[35]]),
-     axes = FALSE, legend = TRUE)
-freq(final_list[[35]])
 
 # Below, we compute a transition matrix on the rasters to identify the changes in land use across the landscape and through time
 #### Transition matrix on all rasters (year-to-year changes) ----
@@ -260,18 +236,18 @@ sankey_plot = PantaRhei::sankey(
   title = title_txt
 )
 
-# Export PDF
-pdf("sankey_forest_trajectories_1989_2023.pdf", width = 13, height = 7)
-PantaRhei::sankey(
-  nodes, flows, palette,
-  node_style = ns,
-  max_width = 0.1,
-  rmin = 0.5,
-  legend = FALSE,
-  page_margin = c(0.15, 0.05, 0.25, 0.20),
-  title = title_txt
-)
-dev.off()
+# # Export PDF
+# pdf("sankey_forest_trajectories_1989_2023.pdf", width = 13, height = 7)
+# PantaRhei::sankey(
+#   nodes, flows, palette,
+#   node_style = ns,
+#   max_width = 0.1,
+#   rmin = 0.5,
+#   legend = FALSE,
+#   page_margin = c(0.15, 0.05, 0.25, 0.20),
+#   title = title_txt
+# )
+# dev.off()
 
 ### Doughnut plot
 # Summarize land use composition per year and class
@@ -319,6 +295,123 @@ ggplot(donut_df, aes(x = 2, y = perc, fill = class)) +
     plot.title = element_text(size = 14, face = "bold", color = "#00008B"),
     strip.text = element_text(size = 11, face = "bold")
   )
+
+
+### Complete rasters with original matrix values -----
+## replace 10 in each final_list map by the original class 2–5 that year
+for(i in seq_along(final_list)){
+  this <- final_list[[i]]
+  orig <- rasters[[i]]   # this raster still has original 1–5 values (except we reclassified 2–5 to 10 earlier)
+  
+  # so: we need the ORIGINAL original (before reclass 2–5→10)
+  # → we reload that specific raster again WITHOUT the reclass
+  
+  orig_file <- raster_df$file[i]
+  orig_true <- terra::rast(orig_file)  # this one still has 1–5 intact
+  
+  # change 10 to the real class from that year
+  this[this == 10] <- orig_true[this == 10]
+  
+  final_list[[i]] <- this
+}
+
+# Check
+plot(final_list[[35]], col = c("#32a65e", "#ad975a", "#FFFFB2", "#0000FF", "#d4271e", "lightgreen", "pink"),
+     main = paste0("Forest Dynamics ", years[[35]]),
+     axes = FALSE, legend = TRUE)
+
+### Summary statistics ------
+
+## Number of cells per category
+tab23 = freq(final_list[[35]]) %>% as.data.frame()
+colnames(tab23) = c("layer", "class","n_cells")
+
+## Surface (ha) and percentage (%)
+res_m = res(final_list[[35]])
+cell_area_ha = prod(res_m)/10000
+
+tab23 = tab23 %>%
+  dplyr::mutate(area_ha = n_cells*cell_area_ha,
+                perc_tot = 100*n_cells/sum(n_cells))
+tab23
+
+## Donut plot
+# class labels
+class_labels = c(
+  "1"="Forest",
+  "2"="Other non-forest habitat",
+  "3"="Agriculture",
+  "4"="Water",
+  "5"="Urban areas",
+  "6"="Reforested (secondary forest)",
+  "7"="Deforested"
+)
+
+tab23_plot = tab23 %>%
+  dplyr::mutate(class = class_labels[as.character(class)])
+
+category_colors = c(
+  "Forest" = "#32a65e",
+  "Other non-forest habitat" = "#ad975a",
+  "Agriculture" = "#FFFFB2",
+  "Water" = "#0000FF",
+  "Urban areas" = "#d4271e",
+  "Reforested" = "#61FA95",
+  "Deforested" = "#D95F02"
+)
+
+ggplot(tab23_plot, aes(x=2, y=perc_tot, fill=class)) +
+  geom_bar(stat="identity", width=1, color="white") +
+  coord_polar(theta="y") +
+  xlim(0.5, 2.5) +
+  geom_text(aes(label=paste0(round(perc_tot,1),"%")),
+            position=position_stack(vjust=0.5),
+            color="black", size=4) +
+  scale_fill_manual(values=category_colors) +
+  theme_void() +
+  ggtitle("Land-use composition · 2023") +
+  theme(
+    legend.position="bottom",
+    plot.title = element_text(size=14, face="bold", color="#00008B")
+  )
+
+## % of secondary forest (reforested areas)
+# total forest = 1 + 6
+forest23 = tab23 %>%
+  dplyr::filter(class %in% c(1,6)) %>%
+  dplyr::mutate(
+    class = dplyr::case_when(
+      class==1 ~ "Intact forest",
+      class==6 ~ "Secondary forest"
+    ),
+    area_ha = n_cells * cell_area_ha
+  ) %>%
+  dplyr::group_by(class) %>%
+  dplyr::summarise(area_ha = sum(area_ha), .groups="drop") %>%
+  dplyr::mutate(perc_tot = area_ha/sum(area_ha)*100)
+
+## Donut plot
+# define colors — keep same colors you already use
+forest_colors = c(
+  "Intact forest"     = "#32a65e",   # dark green forest
+  "Secondary forest"  = "#61FA95"    # light green reforested
+)
+
+ggplot(forest23, aes(x=2, y=perc_tot, fill=class)) +
+  geom_bar(stat="identity", width=1, color="white") +
+  coord_polar(theta="y") +
+  xlim(0.5, 2.5) +
+  geom_text(aes(label=paste0(round(perc_tot,1),"%")),
+            position=position_stack(vjust=0.5),
+            color="black", size=4) +
+  scale_fill_manual(values=forest_colors) +
+  theme_void() +
+  ggtitle("Forest composition · 2023") +
+  theme(
+    legend.position="bottom",
+    plot.title = element_text(size=14, face="bold", color="#00008B")
+  )
+
 
 ### Export rasters -----------
 message("Exporting rasters...")

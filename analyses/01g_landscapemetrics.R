@@ -362,7 +362,7 @@ ECA_final = ECA_total %>%
   )
 
 
-#### ProtConn ------
+##### ProtConn ------
 # NB: ProtConn can ne computed with Makurhini, but we can also compute ProtConn manually 
 # ProtConn = 100 * (ECA/AL) (AL being landscape area) (Saura et al. 2017, Ecological Indicators)
 
@@ -461,7 +461,6 @@ ECA_final = ECA_total %>%
 #     values_from = c(EC_PC:ProtConn_Trans_land),
 #     names_glue = "{.value}_{distance}"
 #   )
-
 
 #### Prepare tables -----------
 # 1. Landscape metrics for forest class (overall)

@@ -9,6 +9,7 @@ library(here)
 library(terra)
 library(sf)
 library(landscapemetrics)
+library(multilandr)
 
 ### Import rasters -------
 ## Land use
@@ -84,6 +85,12 @@ uniao = terra::vect(here("data", "geo", "MMA", "protected_areas", "ucs", "uniao.
 uniao = terra::project(uniao, "EPSG:31983")
 plot(uniao)
 uniao_sf = sf::st_as_sf(uniao)
+
+## APA mld
+apa_mld = terra::vect(here("data", "geo", "MMA", "protected_areas", "ucs", "apa_mld.shp"))
+apa_mld = terra::project(apa_mld, "EPSG:31983")
+plot(apa_mld)
+apa_mld_sf = sf::st_as_sf(apa_mld)
 
 ### Prepare the cell-based dataset -----
 
@@ -208,10 +215,24 @@ lulc_2023_sf = lulc_2023_sf %>%
 table(lulc_2023_sf$legal_status)
 table(lulc_2023_sf$legal_status2)
 
+##### Intersects APA -----
+# intersection
+inter_apa = sf::st_intersects(
+  lulc_2023_sf %>% dplyr::select(cell_id, geometry),
+  apa_mld_sf %>% dplyr::select(geometry),
+  sparse = FALSE
+)
+
+lulc_2023_sf = lulc_2023_sf %>%
+  dplyr::mutate(apa_mld = ifelse(apply(inter_apa, 1, any), 1, 0))
+
 #### Distance to features -------
+
+##### Centroids ---------
 # compute pixel centroids
 lulc_centroids = sf::st_centroid(lulc_2023_sf)
 
+##### Distance computation -----
 # roads: distance to nearest road
 d_road = sf::st_distance(lulc_centroids, roads_sf)
 dist_to_road = apply(d_road, 1, min)
@@ -252,7 +273,7 @@ patch_raster[is.na(patch_raster)] = NA
 
 # extract edges
 edge = landscapemetrics::get_boundaries(patch_raster, as_NA = TRUE)
-plot(edge[[1]])
+plot(edge[[1]], col="lightpink")
 edge_raster = edge[[1]]
 
 # Polygonize edges (dissolve identical patch IDs)
@@ -283,41 +304,96 @@ mean_slope = mean_slope %>%
 
 # join back
 lulc_2023_sf = lulc_2023_sf %>%
-  dplyr::left_join(mean_slope %>% select(cell_id, mean_slope), by = "cell_id")
+  dplyr::left_join(mean_slope %>% dplyr::select(cell_id, mean_slope), by = "cell_id")
 
 #### Land use in buffers -----
-r2023 = rasters[[35]]
 
-# 1 km radius in pixels:
-# get resolution
-resm = mean(res(r2023))    # spatial resolution
-radius = 1000 / resm       # buffer radius in pixels
+##### With multilandr ------
+# 1. Create multiland object
+# Rasters and points objects
+r2023 = rasters[[35]] # SpatRaster object
+points = terra::vect(lulc_centroids)
+points = sample(points, 100)
 
-# binary masks
-w1km = terra::focalMat(r2023, d = 1000, type = "circle")
-forest = ifel(r2023 == 1, 1, 0)
-agri   = ifel(r2023 == 3, 1, 0)
-urban  = ifel(r2023 == 5, 1, 0)
+# Class names
+cl_names = c(1, "Forest",
+             2, "Notforest",
+             3, "Agriculture",
+             4, "Water",
+             5, "Urban",
+             6, "Reforested",
+             7, "Deforested") 
 
-# count total pixels in window
-area_tot_1km = focal(!is.na(r2023), w = w1km, fun=sum, na.rm=TRUE)
+# Multiland object
+buff_centroids = mland(points_layer = points,
+                  rast_layer = r2023,
+                  radii = 1000,
+                  class_names = list(cl_names),
+                  site_ref = "cell_id",
+                  on_the_fly = TRUE,
+                  bufftype = "round",
+                  progress = TRUE)
 
-# compute land use in windows
-forest_pct_1km = 100 * focal(forest, w = w1km, fun=sum, na.rm=TRUE) / area_tot_1km
-agri_pct_1km   = 100 * focal(agri,   w = w1km, fun=sum, na.rm=TRUE) / area_tot_1km
-urban_pct_1km  = 100 * focal(urban,  w = w1km, fun=sum, na.rm=TRUE) / area_tot_1km
+# 2. Plot Multiland object
+mland_plot(buff_centroids, points=10) # plot an example
 
-# extract at centroid
-cent = lulc_centroids |> vect()
-lulc_2023_sf$forest_pct_1km = terra::extract(forest_pct_1km, cent)[,2]
-lulc_2023_sf$agri_pct_1km   = terra::extract(agri_pct_1km, cent)[,2]
-lulc_2023_sf$urban_pct_1km  = terra::extract(urban_pct_1km, cent)[,2]
+# 3. Calculation of metrics
+ml_metrics = mland_metrics(buff_centroids, 
+                            level = "class", 
+                            metric = c("pland"),
+                            absence_values = list("pland" = 0))
+ml_metrics
+head(ml_metrics@data)
 
+# 4. Join back to dataset
+# clean df of metrics
+ml_df = ml_metrics@data %>% 
+  dplyr::as_tibble() %>% 
+  dplyr::rename(cell_id = site) %>% 
+  dplyr::select(cell_id, classname, value) %>% 
+  tidyr::pivot_wider(names_from = classname,
+              values_from = value,
+              names_prefix = "pland_")
+
+# join
+lulc_2023_sf = lulc_2023_sf %>% 
+  dplyr::left_join(ml_df, by = "cell_id")
+
+# quick check
+### set 1 random point to inspect
+set.seed(42)
+check1 = lulc_2023_sf2 %>% 
+  dplyr::filter(!is.na(pland_Forest)) %>%
+  dplyr::slice_sample(n=1)
+
+### 1 km buffer
+buff = sf::st_buffer(check1, dist = 1000)
+
+### crop raster around the buffer (slightly bigger so you see context)
+r_zoom = terra::crop(r2023, vect(sf::st_buffer(buff, 200)))
+
+cols = c("#32a65e", "#ad975a", "#FFFFB2", "#0000FF", "#d4271e", "chartreuse", "pink")
+plot(r_zoom, col=cols, legend=TRUE, main="MapBiomas 2023, 1 km QA/QC")
+
+plot(buff$geometry, border="black", lwd=2, add=TRUE)
+plot(check1$geometry, pch=19, col="black", cex=1, add=TRUE)
+
+### add PLAND values
+txt = paste0(
+  "cell_id = ", check1$cell_id, "\n",
+  "Forest = ", round(check1$pland_Forest,1), "%\n",
+  "Notforest = ", round(check1$pland_Notforest, 1), "%\n",
+  "Agriculture = ", round(check1$pland_Agriculture,1), "%\n",
+  "Water = ", round(check1$pland_Water,1), "%\n",
+  "Urban = ", round(check1$pland_Urban,1), "%\n",
+  "Reforested = ", round(check1$pland_Reforested,1), "%\n",
+  "Deforested = ", round(check1$pland_Deforested,1), "%"
+)
+
+legend("top", legend=txt, bty="n")
 
 
 ## Prepare the property-based dataset ----------
-
-
 ### Compute the forest proportion on CAR properties ------- 
 # mask forest only (value == 1)
 forest_2023 = rasters[[35]] == 1
