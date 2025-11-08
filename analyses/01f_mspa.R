@@ -59,7 +59,7 @@ reclass_small_patches = function(r, min_area_ha) {
   small_core = !large_core_mask & !is.na(core)
   
   # Update the input raster
-  r[small_core] = 2 # Value to give to small patches
+  r[small_core] = 999 # Value to give to small patches
   
   return(r)
 }
@@ -73,6 +73,8 @@ rasters_large_patches = lapply(seq_along(rasters), function(i) {
 # Quick check
 plot(rasters[[1]])
 plot(rasters_large_patches[[1]]) # At first sight, nothing changed, but look carefully: tiny patches are reclassified!
+freq(rasters[[1]])
+freq(rasters_large_patches[[1]])
 
 #### Reclass for MSPA ----
 # -> GTB requires a 8-byte type formatted input mask (.tif) with 0 = missing data, 1 = background, 2 = habitat
@@ -124,10 +126,10 @@ for(i in seq_along(rasters_for_mspa)) {
 
 
 #### Run MSPA -----
-# Open GLT > File > Batch Process > Pattern > Morphological > MSPA
+# Open GTB > File > Batch Process > Pattern > Morphological > MSPA
 # Default parameters are connectivity = 8 (or 4), edge width = 1, transition = on (i.e., bridges connect core areas, if "off" they connect edges), intext = on (distinguished internal from external features)
 # The foreground area of a binary image is divided into seven visually distinguished MSPA classes: Core, Islet, Perforation, Edge, Loop, Bridge, and Branch (up to 23 classes in the output raster depending on the intext parameter)
-# Parameters = 8, 1, 0 ("off"), 0 ("off")
+# Here, we define parameters as: 8, 1, 0 ("off"), 0 ("off")
 # Check in QGIS
 
 
@@ -161,7 +163,7 @@ file.rename(mspa_df$file, mspa_df$new_name)
 mspa_df$file <- mspa_df$new_name
 
 # Load rasters in chronological order
-rasters_mspa <- lapply(mspa_df$file, terra::rast)t
+rasters_mspa <- lapply(mspa_df$file, terra::rast)
 unique(values(rasters_mspa[[1]]))
 plot(rasters_mspa[[1]])
 mspa_years <- mspa_df$year
@@ -206,8 +208,9 @@ mask_with_mspa <- function(landuse, mspa) {
 rasters_reclass_w_mspa <- map2(rasters, rasters_mspa, mask_with_mspa)
 
 # Quick check
-plot(rasters_reclass_w_mspa[[35]])
-
+plot(rasters_reclass_w_mspa[[36]])
+freq(rasters[[36]])
+freq(rasters_reclass_w_mspa[[36]])
 
 #### Add corridors unmarked as corridors by MSPA -----
 # -> Here, we overlay plantios on MSPA rasters and assign value 33 where there is an intersection with the plantio AND the raster year is equal or after date_refor
@@ -233,6 +236,11 @@ rasters_reclass_w_mspa2 <- lapply(seq_along(rasters_reclass_w_mspa), function(i)
 })
 
 # Check
+# Count
+freq(rasters_reclass_w_mspa[[36]])
+freq(rasters_reclass_w_mspa2[[36]])
+
+# Visual check
 year_to_check <- 2016
 r_index <- which(mspa_years == year_to_check)
 r_check <- rasters_reclass_w_mspa2[[r_index]]
@@ -250,8 +258,13 @@ plot(r_check, main = paste("Raster with plantios overlay - Year", year_to_check)
 # Overlay the plantios polygons
 plot(plantios_selected, border = "black", add = TRUE)
 
-
 #### Export MSPA final rasters -----
+# Last check
+freq(rasters[[36]]) # The frequency of all land use classes before any reclassification
+freq(rasters_large_patches[[36]]) # The frequency of forest (large patches) (1) and forest (small patches) (999)
+freq(rasters_reclass_w_mspa2[[36]]) # The frequency of all land use classes and of forest corridors (33)
+
+# Export
 output_mspa_final_path = here("outputs", "data", "MapBiomas", "MSPA", "reclass_w_MSPA") # Define the output folder
 for (i in seq_along(rasters_reclass_w_mspa2)) {
   year <- mspa_years[i]
@@ -269,10 +282,6 @@ for (i in seq_along(rasters_reclass_w_mspa2)) {
   
   message("Saved masked raster: ", out_file)
 }
-
-
-
-
 
 ### Own version (imperfect) -----
 # # Here, we distinguish between habitat patches and corridors, defined as narrow strips of vegetation connecting at least 2 habitat patches

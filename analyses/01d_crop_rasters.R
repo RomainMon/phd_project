@@ -29,7 +29,7 @@ sampling_units = vect(file.path(base_path, "RegionsName.shp"))
 
 
 ### Quick check -------
-crs(rasters[[1]])
+crs(rasters[[36]])
 ext(rasters[[1]])
 plot(rasters[[1]])  # plot the first layer
 crs(region)
@@ -119,7 +119,7 @@ rasters_cropped <- lapply(rasters, function(r) {
 })
 
 # Check one
-plot(rasters_cropped[[1]])
+plot(rasters_cropped[[36]])
 plot(bbox_expanded_4326, add = TRUE, border = "red")
 
 ### Reproject cropped rasters --------
