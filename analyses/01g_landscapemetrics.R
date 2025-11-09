@@ -49,17 +49,8 @@ for (i in seq_along(rasters_reclass_forest_cat)) {
   cat("Year", years[i], " → raster name:", basename(raster_df$file[i]), "\n")
 }
 plot(rasters_reclass_forest_cat[[36]])
-vals  <- c(1,2,3,4,5,10,11,12,13,14,15)
-cols  <- c("#32a65e", "#ad975a", "#FFFFB2", "#0000FF", "#d4271e",
-           "lightgreen", "chartreuse", "darkseagreen", "darkolivegreen","darkkhaki", "yellow")
 
-# assign color table to the raster
-terra::coltab(rasters_reclass_forest_cat[[36]]) <- cbind(value=vals, color=cols)
-
-# plot
-plot(rasters_reclass_forest_cat[[36]], main="Forest classes")
-
-#### MSPA rasters -------
+#### MSPA rasters (with corridors) -------
 base_path = here("outputs", "data", "MapBiomas", "MSPA", "reclass_w_mspa")
 raster_files = list.files(base_path, pattern = "\\.tif$", full.names = TRUE)
 
@@ -92,6 +83,7 @@ plot(minbbox)
 plot(regions, add=TRUE)
 minbbox_sf = sf::st_as_sf(minbbox)
 
+
 ### Download Makurhini -----
 # library(devtools)
 # library(remotes)
@@ -104,13 +96,14 @@ minbbox_sf = sf::st_as_sf(minbbox)
 
 # Check landscape validity (for landscape metrics)
 check_landscape(rasters_reclass[[36]])
-check_landscape(rasters_reclass_forest[[36]])
+check_landscape(rasters_reclass_forest_cat[[36]])
 check_landscape(rasters_mspa[[36]])
 
 #### Using landscapemetrics  ---------
 
 ##### Functions -------
 ### Merge classes
+# This function merges classes defined in the argument classes_to_merge and gives them the value "new_value"
 # r = raster
 # year = year of raster
 # classes_to_merge = vector of classes to collapse
@@ -129,12 +122,13 @@ merge_classes = function(r, year, classes_to_merge, new_value) {
 }
 
 # example:
-r_example = merge_classes(rasters_reclass_forest[[36]], years[[36]], classes_to_merge = c(2,3,4,5), new_value = 99)
+r_example = merge_classes(rasters_reclass_forest_cat[[36]], years[[36]], classes_to_merge = c(2,3,4,5), new_value = 99)
 plot(r_example)
 unique(values(r_example))
 freq(r_example)
 
 # Function to compute class-level metrics for all classes
+# This function computes landscapemetrics at the class-level for a list of chronological rasters
 compute_class_metrics = function(r, year, metrics_to_compute) {
   message("Processing raster for year: ", year)
   
@@ -157,6 +151,7 @@ compute_class_metrics = function(r, year, metrics_to_compute) {
 }
 
 # Function to compute class-level metrics for one class only
+# This function computes landscapemetrics at the class-level for ONE class exclusively, and on a list of chronological rasters
 compute_one_class_metrics = function(r, year, class_value, metrics_to_compute) {
   
   message("Processing raster for year: ", year)
@@ -201,6 +196,8 @@ all_lulc_classes = all_lulc_classes %>%
 all_lulc_classes = all_lulc_classes %>% 
   dplyr::select(-c(id,layer))
 
+# quick summary
+summary(all_lulc_classes)
 
 ##### By forest categories --------
 # First, we merge all matrix land uses
@@ -209,7 +206,7 @@ matrix_classes = c(2,3,4,5)
 
 # apply merging
 rasters_forest_vs_matrix = purrr::map2(
-  rasters_reclass_forest,
+  rasters_reclass_forest_cat,
   years,
   ~ merge_classes(.x, .y, matrix_classes, new_value = 2)  # or 99, but 2 is nice = “other LULC”
 )
@@ -227,8 +224,11 @@ forest_cat_metrics = forest_cat_metrics %>%
   tidyr::pivot_wider(names_from = metric, values_from = value) %>% 
   dplyr::select(-id, -layer)
 
+# quick summary
+summary(forest_cat_metrics)
 
-##### Other metrics for forest (core + corridor) --------
+##### Other forest metrics (core + corridor) --------
+# Here, we compute new metrics for the forest class only
 forest_class_metrics = purrr::map2_dfr(
   rasters_reclass,
   years,
@@ -245,8 +245,11 @@ forest_class_metrics = forest_class_metrics %>%
   dplyr::select(-c(id, layer)) %>%
   dplyr::mutate(type = "forest_all", .before = 1)
 
+# quick check
+summary(forest_class_metrics)
 
 ##### Core forest --------
+# Here, we compute metrics on core forests only (using MSPA)
 forest_core_metrics = purrr::map2_dfr(
   rasters_mspa,
   years,
@@ -264,7 +267,11 @@ forest_core_metrics = forest_core_metrics %>%
   dplyr::select(-c(id, layer)) %>%
   dplyr::mutate(type = "forest_core", .before = 1)
 
+# quick check
+summary(forest_core_metrics)
+
 ##### Corridors --------
+# Here, we compute metrics on corridor forests only (using MSPA)
 forest_corridors_metrics <- purrr::map2_dfr(
   rasters_mspa,
   years,
@@ -282,13 +289,16 @@ forest_corridors_metrics = forest_corridors_metrics %>%
   dplyr::select(-c(id, layer)) %>%
   dplyr::mutate(type = "forest_corridor", .before = 1)
 
+# quick check
+summary(forest_corridors_metrics)
 
 
 #### Using Makurhini ---------
 # NB: Makurhini works on SF polygons
 
 ##### ECA ------
-###### On forest habitat (core + corridors) -------
+# Here, we compute ECA on forest habitat (irrespective of their status)
+# We quantify the level of connectivity of forest habitat in the landscape
 
 # 1. Transform forests cells as patches
 # Function to extract patches and convert to sf
@@ -344,6 +354,7 @@ cell_areas_ha = terra::cellSize(r, unit = "ha")  # returns SpatRaster of cell ar
 
 # Sum all non-NA cells to get total area
 total_area_ha = sum(values(cell_areas_ha), na.rm = TRUE)
+total_area_ha
 
 # NB: computing ECA on all rasters makes the computer crash
 # Subsets of rasters
@@ -409,6 +420,7 @@ dECA5 = Makurhini::MK_dECA(
   LA = total_area_ha,
   plot=names(list_forest_patches_5)
 )
+
 
 # Combine ECA tables
 ECA_total = dplyr::bind_rows(
@@ -551,7 +563,7 @@ forest_class_metrics_ED = forest_class_metrics %>%
 
 # Compute the forest fragmentation index (Ma et al. 2025, Nat Comm)
 # To replicate Ma et al. (2023) index, one must: normalize each metric using min–max scaling, invert MPA’s direction (1-MPA), average the three normalized components equally.
-forest_class_metrics_ED = forest_class_metrics_ED %>% 
+forest_class_metrics_FFI = forest_class_metrics_ED %>% 
   dplyr::mutate(
     # Normalize each variable (min–max scaling)
     ed_norm = (ed - min(ed, na.rm = TRUE)) / (max(ed, na.rm = TRUE) - min(ed, na.rm = TRUE)),
@@ -562,7 +574,7 @@ forest_class_metrics_ED = forest_class_metrics_ED %>%
   )
 
 # Merge with ECA
-forest_class_metrics_final = dplyr::left_join(forest_class_metrics_ED, ECA_final, by=c("year"="Time"))
+forest_class_metrics_final = dplyr::left_join(forest_class_metrics_FFI, ECA_final, by=c("year"="Time"))
 
 
 # 2. Landscape metrics for forest core and corridor
@@ -575,8 +587,8 @@ forest_core_corridor_metrics_final = bind_rows(forest_core_metrics, forest_corri
 ##### Patch selection (core only) ----------
 
 # 1) patches = core forest only, class = 1 (i.e., 2 fragments connected by a corridor are considered as 2 patches)
-plot(rasters[[1]], col=c("#32a65e", "#ad975a", "#FFFFB2", "#0000FF", "#d4271e", "chartreuse"))
-forest_patches = landscapemetrics::get_patches(rasters[[1]], class = 1, directions = 8)
+plot(rasters_mspa[[1]], col=c("#32a65e", "#ad975a", "#FFFFB2", "#0000FF", "#d4271e", "chartreuse"))
+forest_patches = landscapemetrics::get_patches(rasters_mspa[[1]], class = 1, directions = 8)
 patches_sf = sf::st_as_sf(as.polygons(forest_patches[[1]][[1]], dissolve = TRUE))
 
 # visualize
@@ -590,7 +602,7 @@ regions_buffer = sf::st_buffer(regions_sf, 500)
 patch_near = patches_sf[st_intersects(patches_sf, regions_buffer, sparse=FALSE) %>%  apply(1, any),]
 
 # 4) final kept patches = in OR near
-patches_final = bind_rows(patch_in, patch_near) %>%  distinct(geometry, .keep_all=TRUE)
+patches_final = bind_rows(patch_in, patch_near) %>% dplyr::distinct(geometry, .keep_all=TRUE)
 
 # QC plot
 plot(st_geometry(patches_sf), col="grey80", border=NA, main="kept patches")
@@ -599,7 +611,8 @@ plot(st_geometry(regions_sf), add=TRUE, col="red", lwd=2)
 
 ##### Landscapemetrics ----------------------------------------------
 
-mask_rast = terra::rasterize(patches_final, rasters[[1]], field = 1)
+mask_rast = terra::rasterize(patches_final, rasters_mspa[[1]], field = 1)
+plot(mask_rast)
 patch_lm = landscapemetrics::spatialize_lsm(
   mask_rast,
   what = c("lsm_p_area","lsm_p_shape"),
@@ -621,38 +634,38 @@ PC_centroid = MK_dPCIIC(nodes = patches_final,
 
 ## 2) PC with resistance rasters
 ## resistance raster = rasters with forest core and corridors
-mspa = rasters[[1]]
+mspa = rasters_mspa[[1]]
 
 # Computational times are long so we crop the original raster
 # buffer minbbox to avoid cutting important connectors at the border
 minbbox2000 = terra::buffer(minbbox, width=2000)
+plot(minbbox2000)
 
-# crop MSPA to bounding box
-r_crop = terra::crop(mspa, minbbox2000) %>%  terra::mask(minbbox2000)
+# buffer patches 1 km
+patches_buf1km = terra::buffer(terra::vect(patches_final), width = 1000) %>% terra::aggregate()
+plot(patches_buf1km)
+
+# extend bbox by patch buffer
+minbbox_expanded = terra::union(minbbox2000, patches_buf1km)
+
+# crop MSPA to expanded area
+r_crop = terra::crop(mspa, minbbox_expanded) %>% 
+  terra::mask(minbbox_expanded)
+
 plot(r_crop, col=c("#32a65e", "#ad975a", "#FFFFB2", "#0000FF", "#d4271e", "chartreuse"))
-plot(regions, add=TRUE, col="red", lwy=1)
+plot(regions, add=TRUE, col="red", lwd=1)
 
-# a) corridors cost = 1 (same as core)
+# we compute ECA with corridors
+# corridors cost = 1 (same as core)
 resist1 = terra::ifel(r_crop==1, 1,
                       terra::ifel(r_crop==33,1,100))
 plot(resist1, col=c("darkgreen","gray"))
-plot(patches_final, add=TRUE, col="orange")
-plot(regions, add=TRUE, col="red", lwy=1)
-# b) corridors cost = 100
-resist2 = terra::ifel(r_crop==1, 1,
-                      terra::ifel(r_crop==33,100,100))
-plot(resist2, col=c("darkgreen","yellow","gray"))
 plot(patches_final, add=TRUE, col="orange")
 plot(regions, add=TRUE, col="red", lwy=1)
 
 ## PC with least-cost
 PC_LC1 = MK_dPCIIC(nodes=patches_final,
                    distance=list(type="least-cost", resistance=resist1),
-                   metric="PC",
-                   probability=0.05,
-                   distance_thresholds=c(2000,8000))
-PC_LC100 = MK_dPCIIC(nodes=patches_final,
-                   distance=list(type="least-cost", resistance=resist2),
                    metric="PC",
                    probability=0.05,
                    distance_thresholds=c(2000,8000))
@@ -672,9 +685,6 @@ PCc8000  <- rename_pc(PC_centroid$d8000,  "PCc8000_")
 PCcorr1_2000 <- rename_pc(PC_LC1$d2000,     "PCcorr1_2000_")
 PCcorr1_8000 <- rename_pc(PC_LC1$d8000,     "PCcorr1_8000_")
 
-PCcorr100_2000 <- rename_pc(PC_LC100$d2000,     "PCcorr100_2000_")
-PCcorr100_8000 <- rename_pc(PC_LC100$d8000,     "PCcorr100_8000_")
-
 ##### Final join ---------------------------
 
 patches_metrics_final =
@@ -684,9 +694,7 @@ patches_metrics_final =
   dplyr::left_join(st_drop_geometry(PCc2000),     by="lyr.1") %>% 
   dplyr::left_join(st_drop_geometry(PCc8000),     by="lyr.1") %>% 
   dplyr::left_join(st_drop_geometry(PCcorr1_2000),  by="lyr.1") %>% 
-  dplyr::left_join(st_drop_geometry(PCcorr1_8000),  by="lyr.1") %>% 
-  dplyr::left_join(st_drop_geometry(PCcorr100_2000),  by="lyr.1") %>% 
-  dplyr::left_join(st_drop_geometry(PCcorr100_8000),  by="lyr.1")
+  dplyr::left_join(st_drop_geometry(PCcorr1_8000),  by="lyr.1")
 patches_metrics_final = patches_metrics_final %>% 
   dplyr::mutate(area = round(area,2))
 
@@ -694,66 +702,57 @@ patches_metrics_final = patches_metrics_final %>%
 # Quick summaries
 message("Final patches in metrics table: ", nrow(patches_metrics_final))
 # inspect first rows:
-print(dplyr::select(patches_metrics_final, lyr.1, area, PCc8000_dPC, PCcorr1_8000_dPC, PCcorr100_8000_dPC) %>%  head(10))
+print(dplyr::select(patches_metrics_final, lyr.1, area, PCc8000_dPC, PCcorr1_8000_dPC) %>%  head(10))
 
 
 #### Apply to all rasters ----------------
-# Function wrapping the procedure above
 compute_patch_metrics <- function(r, year,
-                                     regions_sf, minbbox,
-                                     buffer_patch = 500,
-                                     buffer_mspa = 2000){
+                                  regions_sf, regions_buffer, 
+                                  minbbox2000,
+                                  buffer_patch = 500){
   
   message("Processing year: ", year)
   
   # -------------- PATCH SELECTION
   
-  # 1) patches = core forest only, class = 1
   forest_patches = landscapemetrics::get_patches(r, class = 1, directions = 8)
   patches_sf = sf::st_as_sf(as.polygons(forest_patches[[1]][[1]], dissolve = TRUE))
   
-  # 2) patches intersecting GLT regions
-  patch_in = patches_sf[sf::st_intersects(patches_sf, regions_sf, sparse=FALSE) %>%  apply(1, any),]
+  patch_in   = patches_sf[sf::st_intersects(patches_sf, regions_sf,     sparse=FALSE) %>% apply(1, any),]
+  patch_near = patches_sf[sf::st_intersects(patches_sf, regions_buffer, sparse=FALSE) %>% apply(1, any),]
   
-  # 3) patches within 500m of regions
-  regions_buffer = sf::st_buffer(regions_sf, buffer_patch)
-  patch_near = patches_sf[sf::st_intersects(patches_sf, regions_buffer, sparse=FALSE) %>%  apply(1, any),]
-  
-  # 4) kept patches
-  patches_final = dplyr::bind_rows(patch_in, patch_near) %>%
+  patches_final = dplyr::bind_rows(patch_in, patch_near) %>% 
     dplyr::distinct(geometry, .keep_all=TRUE)
   
   # -------------- LANDSCAPE METRICS
   
   mask_rast = terra::rasterize(patches_final, r, field = 1)
-  patch_lm = landscapemetrics::spatialize_lsm(
-    mask_rast, what = c("lsm_p_area","lsm_p_shape"), directions=8
-  )
+  patch_lm  = landscapemetrics::spatialize_lsm(mask_rast,
+                                               what = c("lsm_p_area","lsm_p_shape"),
+                                               directions=8)
   
-  patch_area = sf::st_as_sf(terra::extract(patch_lm$layer_1$lsm_p_area, patches_final, fun=unique, bind=TRUE)) %>% 
-    dplyr::rename(area=value)
-  patch_shape = sf::st_as_sf(terra::extract(patch_lm$layer_1$lsm_p_shape, patches_final, fun=unique, bind=TRUE)) %>%  
-    dplyr::rename(shape=value)
+  patch_area  = sf::st_as_sf(terra::extract(patch_lm$layer_1$lsm_p_area, patches_final, fun=unique, bind=TRUE)) %>% dplyr::rename(area=value)
+  patch_shape = sf::st_as_sf(terra::extract(patch_lm$layer_1$lsm_p_shape, patches_final, fun=unique, bind=TRUE)) %>% dplyr::rename(shape=value)
   
   # -------------- CONNECTIVITY
   
-  # PC centroid
   PC_centroid = MK_dPCIIC(nodes = patches_final,
                           distance = list(type="centroid"),
-                          metric="PC",
-                          probability=0.05,
-                          distance_thresholds=c(2000,8000))
+                          metric = "PC",
+                          probability = 0.05,
+                          distance_thresholds = c(2000,8000))
   
-  # crop MSPA
-  minbbox2000 = terra::buffer(minbbox, width=buffer_mspa)
-  r_crop = terra::crop(r, minbbox2000) |> terra::mask(minbbox2000)
+  # buffer patches 1 km
+  patches_buf1km = terra::buffer(terra::vect(patches_final), width=1000) |> terra::aggregate()
   
-  # resist 1 = corridors cheap
+  # extend bbox
+  minbbox_expanded = terra::union(minbbox2000, patches_buf1km)
+  
+  # crop r
+  r_crop = terra::crop(r, minbbox_expanded) |> terra::mask(minbbox_expanded)
+  
   resist1 = terra::ifel(r_crop==1, 1,
                         terra::ifel(r_crop==33,1,100))
-  # resist 2 = corridors costly
-  resist2 = terra::ifel(r_crop==1, 1,
-                        terra::ifel(r_crop==33,100,100))
   
   PC_LC1 = MK_dPCIIC(nodes=patches_final,
                      distance=list(type="least-cost", resistance=resist1),
@@ -761,44 +760,38 @@ compute_patch_metrics <- function(r, year,
                      probability=0.05,
                      distance_thresholds=c(2000,8000))
   
-  PC_LC100 = MK_dPCIIC(nodes=patches_final,
-                     distance=list(type="least-cost", resistance=resist2),
-                     metric="PC",
-                     probability=0.05,
-                     distance_thresholds=c(2000,8000))
-  
-  
   rename_pc = function(df, prefix){
-    df %>% dplyr::rename_with(~ paste0(prefix, .x), .cols = -lyr.1)
+    dplyr::rename_with(df, ~ paste0(prefix, .x), .cols = -lyr.1)
   }
   
-  PCc2000  <- rename_pc(PC_centroid$d2000,  "PCc2000_")
-  PCc8000  <- rename_pc(PC_centroid$d8000,  "PCc8000_")
-  PCcorr1_2000 <- rename_pc(PC_LC1$d2000,     "PCcorr1_2000_")
-  PCcorr1_8000 <- rename_pc(PC_LC1$d8000,     "PCcorr1_8000_")
-  PCcorr100_2000 <- rename_pc(PC_LC100$d2000,     "PCcorr100_2000_")
-  PCcorr100_8000 <- rename_pc(PC_LC100$d8000,     "PCcorr100_8000_")
-  
-  # -------------- FINAL JOIN
+  PCc2000        <- rename_pc(PC_centroid$d2000,    "PCc2000_")
+  PCc8000        <- rename_pc(PC_centroid$d8000,    "PCc8000_")
+  PCcorr1_2000   <- rename_pc(PC_LC1$d2000,         "PCcorr1_2000_")
+  PCcorr1_8000   <- rename_pc(PC_LC1$d8000,         "PCcorr1_8000_")
   
   patches_metrics_final =
     patches_final %>%
-    dplyr::left_join(st_drop_geometry(patch_area),   by="lyr.1") %>%
-    dplyr::left_join(st_drop_geometry(patch_shape),  by="lyr.1") %>%
-    dplyr::left_join(st_drop_geometry(PCc2000),      by="lyr.1") %>%
-    dplyr::left_join(st_drop_geometry(PCc8000),      by="lyr.1") %>%
+    dplyr::left_join(st_drop_geometry(patch_area),     by="lyr.1") %>%
+    dplyr::left_join(st_drop_geometry(patch_shape),    by="lyr.1") %>%
+    dplyr::left_join(st_drop_geometry(PCc2000),        by="lyr.1") %>%
+    dplyr::left_join(st_drop_geometry(PCc8000),        by="lyr.1") %>%
     dplyr::left_join(st_drop_geometry(PCcorr1_2000),   by="lyr.1") %>%
     dplyr::left_join(st_drop_geometry(PCcorr1_8000),   by="lyr.1") %>%
-    dplyr::left_join(st_drop_geometry(PCcorr100_2000),   by="lyr.1") %>%
-    dplyr::left_join(st_drop_geometry(PCcorr100_8000),   by="lyr.1") %>%
-    dplyr::mutate(area = round(area,2),
-                  year = year)
+    dplyr::mutate(area = round(area,2), year = year)
   
   return(patches_metrics_final)
 }
 
 # Loop
-all_years_metrics = purrr::map2_dfr(rasters, years, ~ compute_patch_metrics(.x, .y, regions_sf, minbbox))
+regions_buffer = sf::st_buffer(regions_sf, 500)
+minbbox2000    = terra::buffer(minbbox, width=2000)
+all_years_metrics = purrr::map2(rasters_mspa, years,
+                                ~ compute_patch_metrics(r=.x,
+                                                        year=.y,
+                                                        regions_sf=regions_sf,
+                                                        regions_buffer=regions_buffer,
+                                                        minbbox2000=minbbox2000))
+
 
 ### Export datasets ------
 base_path = here("outputs", "data", "landscapemetrics")
@@ -811,11 +804,11 @@ write.csv(forest_cat_metrics, file = file.path(base_path, "forest_cat_metrics_bb
 
 # Export patch metrics
 purrr::walk2(
-  patches_metrics_list,
+  all_years_metrics,
   years,
   ~ {
-    output_path = file.path(base_path, paste0("patches_metrics_", .y, ".shp"))
-    sf::st_write(.x, output_path, delete_dsn = TRUE, quiet = TRUE)
+    output_path = file.path(base_path, paste0("patches_metrics_", .y, ".gpkg"))
+    sf::st_write(.x, output_path, layer = "patches", delete_dsn = TRUE, quiet = TRUE)
     message("✅ Exported: ", output_path)
   }
 )
