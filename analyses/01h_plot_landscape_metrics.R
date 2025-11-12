@@ -184,7 +184,7 @@ cat("Changes between 1989 and 2024 were:\n")
 cat(paste0("* ", res_change, collapse="\n"), "\n")
 
 ##### Barplot (positive vs negative changes) ------
-# 1) With a line
+# Prepare data
 data = all_lulc_metrics %>%
   dplyr::select(year, class, ca) %>%
   dplyr::mutate(
@@ -214,7 +214,7 @@ data = all_lulc_metrics %>%
     )
   )
 
-# Plot: dodged bars (Δha) + connecting lines & points per class (years numeric)
+# 1) Plot: dodged bars (Δha) + connecting lines & points per class (years numeric)
 ggplot() +
   
   # dodged bars (keeps your original visual)
@@ -318,62 +318,136 @@ ggplot() +
   )
 
 # 3) ... and the forest dynamics
-forest_dyn = data %>%
+# Identify forest increase/decrease runs
+forest_dyn <- data %>%
   dplyr::filter(class_name == "Forest") %>%
   dplyr::mutate(trend = ifelse(delta_ca > 0, "inc", "dec")) %>%
   dplyr::group_by(grpid = data.table::rleid(trend)) %>%
   dplyr::summarise(
     start = min(as.integer(year)),
     end   = max(as.integer(year)),
-    trend = first(trend),
-    n     = n()
+    trend = dplyr::first(trend),
+    n     = dplyr::n(),
+    .groups = "drop"
   ) %>%
-  dplyr::ungroup() %>%
-  dplyr::filter(n > 1) %>%        # REMOVE single-year segments
+  dplyr::filter(n > 1) %>%
   dplyr::mutate(
-    y = -7000,             # position on the Y axis
-    label = ifelse(trend == "inc", "forest increasing", "forest decreasing")
+    label = dplyr::case_when(
+      trend == "inc" ~ "forest increasing",
+      trend == "dec" ~ "forest decreasing"
+    ),
+    start = start - 0.5,
+    end = end + 0.5
   )
 
-ggplot(data, aes(x = year, y = delta_ca, fill = class_name)) +
+# Define bracket positions (larger gaps, scaling order)
+forest_dyn <- forest_dyn %>%
+  dplyr::mutate(
+    min_y = min(data$delta_ca, na.rm = TRUE),
+    y_base = min_y * 0.8 - (dplyr::row_number() - 1) * abs(min_y) * 0.12,  # progressive lowering
+    height = abs(min_y) * 0.04
+  )
+
+# Colors for rectangles
+rect_colors <- c(
+  "forest increasing" = "#66BB6A",
+  "forest decreasing" = "#E57373"
+)
+
+# Final plot
+p_forest <- ggplot(data, aes(x = year, y = delta_ca, fill = class_name)) +
+  # Shaded rectangles (forest dynamics, not in legend)
+  geom_rect(
+    data = forest_dyn,
+    aes(
+      xmin = start,
+      xmax = end,
+      ymin = -Inf,
+      ymax = Inf,
+      fill = label
+    ),
+    inherit.aes = FALSE,
+    alpha = 0.15,
+    show.legend = FALSE
+  ) +
+  
+  # Columns and smoothed lines
   geom_col(position = position_dodge(width = 0.7), color = "black", width = 0.6) +
-  scale_fill_manual(values = c(
-    "Forest" = "#32a65e",
-    "Agriculture" = "#FFFFB2",
-    "Artificial" = "#d4271e"
-  )) +
   geom_hline(yintercept = 0, color = "black", linewidth = 0.6) +
-  # smoothed lines for each class
-  geom_smooth(aes(color = class_name), se = FALSE, span = 0.3, linewidth = 1.2) +
-  scale_color_manual(values = c(
-    "Forest" = "#32a65e",
-    "Agriculture" = "#FFFFB2",
-    "Artificial" = "#d4271e"
-  )) +
-  # 3) brackets (segments)
-  # downward green squared brackets (forest)
-  geom_segment(data = forest_dyn,
-               aes(x = start, xend = end, y = y, yend = y),
-               inherit.aes = FALSE,
-               color = "#32a65e", linewidth = 2) +       # top bar (at y = -7000)
-  geom_text(data = forest_dyn,
-            aes(x = (start + end)/2, y = y - 300,
-                label = ifelse(trend == "inc", "↑", "↓")),
-            inherit.aes = FALSE,
-            color = "#32a65e",
-            size = 5) +
+  geom_smooth(aes(color = class_name), se = FALSE, span = 0.3, linewidth = 1.2, show.legend = FALSE) +
+  
+  # Black brackets (below, staggered)
+  geom_segment(
+    data = forest_dyn,
+    aes(x = start, xend = end, y = y_base, yend = y_base),
+    inherit.aes = FALSE,
+    linewidth = 0.9,
+    colour = "black"
+  ) +
+  geom_segment(
+    data = forest_dyn,
+    aes(x = start, xend = start, y = y_base, yend = y_base + height),
+    inherit.aes = FALSE,
+    linewidth = 0.9,
+    colour = "black"
+  ) +
+  geom_segment(
+    data = forest_dyn,
+    aes(x = end, xend = end, y = y_base, yend = y_base + height),
+    inherit.aes = FALSE,
+    linewidth = 0.9,
+    colour = "black"
+  ) +
+  
+  # Text below brackets (no arrows)
+  geom_text(
+    data = forest_dyn,
+    aes(x = (start + end) / 2, y = y_base - height * 1.2, label = label),
+    inherit.aes = FALSE,
+    size = 4,
+    fontface = "italic"
+  ) +
+  
+  # Unified legend (fill only, no color legend)
+  scale_fill_manual(
+    values = c(
+      "Forest" = "#32a65e",
+      "Agriculture" = "#FFFFB2",
+      "Artificial" = "#d4271e",
+      "forest increasing" = "#66BB6A",
+      "forest decreasing" = "#E57373"
+    ),
+    breaks = c("Forest", "Agriculture", "Artificial"),
+    labels = c("Forest", "Agriculture", "Artificial"),
+    name = "Land use"
+  ) +
+  scale_color_manual(
+    values = c(
+      "Forest" = "#32a65e",
+      "Agriculture" = "#FFFFB2",
+      "Artificial" = "#d4271e"
+    ),
+    guide = "none"
+  ) +
+  
+  # Labels & Theme
   labs(
     x = "Year",
-    y = "Change in surface (ca)",
-    fill = "Land use",
-    color = "Land use",
+    y = "Change in surface (ha)",
     title = "Year-to-year evolution in surface of main land uses"
   ) +
-  theme_classic() +
+  theme_classic(base_size = 14) +
   theme(
     axis.text.x = element_text(angle = 45, hjust = 1),
-    legend.position = "right"
+    legend.position = "right",
+    legend.title = element_text(size = 13),
+    legend.text = element_text(size = 12)
   )
+
+p_forest
+
+
+
 
 ###### Text -------
 # filter only Forest time series
@@ -495,7 +569,7 @@ data = data %>%
 
 # add readable labels
 data = data %>%
-  dplyr::mutate(class_label = case_when(
+  dplyr::mutate(class_label = dplyr::case_when(
     class == 1  ~ "Other forests",
     class == 10 ~ "Other assisted restoration",
     class == 11 ~ "Assisted restoration in reserves",
@@ -527,7 +601,7 @@ data = forest_cat_metrics %>%
   dplyr::mutate(class = ifelse(class == 15, 1, class)) %>%
   dplyr::group_by(year, class) %>%
   dplyr::summarise(np = sum(np), .groups="drop") %>%
-  dplyr::mutate(class_label = case_when(
+  dplyr::mutate(class_label = dplyr::case_when(
     class == 1  ~ "Other forests",
     class == 10 ~ "Other assisted restoration",
     class == 11 ~ "Assisted restoration in reserves",
@@ -552,142 +626,34 @@ ggplot(data, aes(x = year, y = np)) +
   )
 
 
-##### Nested donut plot -------
-### main class colors
-class_colors <- tibble::tibble(
-  class    = c(1,2,3,4,5),
-  Description = c("Forest","Other non-forest formation","Agriculture","Water","Artificial"),
-  Color       = c("#32a65e", "#ad975a", "#FFFFB2", "#0000FF", "#d4271e")
-)
-
-# 1) Inner ring
-lulc_2024 <- all_lulc_metrics %>%
-  dplyr::filter(year == 2024) %>%
-  dplyr::select(class, pland) %>%
-  dplyr::mutate(pland = as.numeric(pland),
-                pland = pland / sum(pland, na.rm = TRUE)) %>%
-  dplyr::left_join(class_colors, by="class") %>%
-  dplyr::arrange(class) %>%
-  dplyr::mutate(xmin = dplyr::lag(cumsum(pland), default=0),
-                xmax = cumsum(pland),
-                label_inner = paste0(Description, " (", percent(pland, accuracy=0.1), ")"))
-
-# forest arc
-forest_inner <- lulc_2024 %>% dplyr::filter(class == 1)
-
-# 2) Outer ring (collapse assisted restoration)
-forest_2024 <- forest_cat_metrics %>%
-  dplyr::filter(year == 2024) %>%
-  dplyr::filter(class != 2) %>%
-  dplyr::mutate(class = ifelse(class == 15, 1, class),
-                class = dplyr::case_when(
-                  class %in% c(10,11,12) ~ 100, # merged bucket ID
-                  TRUE ~ class
-                )) %>%
-  dplyr::group_by(class) %>%
-  dplyr::summarise(pland = sum(as.numeric(pland), na.rm = TRUE), .groups="drop") %>%
-  dplyr::filter(class %in% c(1,100,13,14)) %>%
-  dplyr::mutate(pland = pland / sum(pland, na.rm=TRUE)) %>%
-  dplyr::arrange(class) %>%
-  dplyr::mutate(label_outer = case_when(
-    class == 1   ~ "Other forest (unknown status)",
-    class == 100 ~ "Assisted restored forests",
-    class == 13  ~ "Forests in reserves",
-    class == 14  ~ "Private forests"
-  )) %>%
-  dplyr::mutate(label_outer = paste0(label_outer, " (", percent(pland, accuracy=0.1), " of forest)"))
-
-# 4 green gradient
-greens <- colorRampPalette(c("#32a65e", "#165733"))(4) # light->dark
-
-forest_2024 <- forest_2024 %>%
-  dplyr::mutate(Color = greens[row_number()])
-
-# angle mapping
-forest_span <- forest_inner$xmax - forest_inner$xmin
-
-forest_2024 <- forest_2024 %>%
-  dplyr::mutate(xmin_rel = dplyr::lag(cumsum(pland), default=0),
-                xmax_rel = cumsum(pland),
-                xmin = forest_inner$xmin + xmin_rel*forest_span,
-                xmax = forest_inner$xmin + xmax_rel*forest_span)
-
-# plot
-ggplot() +
-  # inner donut
-  ggforce::geom_arc_bar(
-    data = lulc_2024,
-    aes(
-      x0 = 0, y0 = 0, r0 = 0.3, r = 1.0,
-      start = 2*pi*xmin, end = 2*pi*xmax, fill = Description
-    ),
-    color="white", size=0.3
-  ) +
-  # outer donut
-  ggforce::geom_arc_bar(
-    data = forest_2024,
-    aes(
-      x0=0,y0=0,r0=1.0,r=1.7,
-      start = 2*pi*xmin, end = 2*pi*xmax, fill=label_outer
-    ),
-    color="white", size=0.25
-  ) +
-  # add % values on inner ring (just the %)
-  geom_text(
-    data = lulc_2024,
-    aes(x = sin(2*pi*(xmin+xmax))*0.8,
-        y = -cos(2*pi*(xmin+xmax))*0.8,
-        label = percent(pland, accuracy = 0.1)),
-    size = 3,
-    fontface = "bold"
-  ) +
-  # add % values on outer ring
-  geom_text(
-    data = forest_2024,
-    aes(x = sin(2*pi*(xmin+xmax))*1.35,
-        y = -cos(2*pi*(xmin+xmax))*1.35,
-        label = percent(pland, accuracy = 0.1)),
-    size = 3,
-    fontface = "bold"
-  ) +
-  coord_fixed() +
-  theme_void() +
-  scale_fill_manual(values = c(
-    setNames(lulc_2024$Color, lulc_2024$Description),
-    setNames(forest_2024$Color, forest_2024$label_outer)
-  )) +
-  labs(fill=NULL)
-
-
-
 ##### Waffle plot -----
 
 # Forest cat colors
 greens <- c("#afd69b","#485B4D","#a6dbbc","#8fb6ab")
 
-### TOP waffle = whole landscape
+### Whole landscape
 top <- all_lulc_metrics %>%
   dplyr::filter(year == 2024) %>%
   dplyr::mutate(grp = ifelse(class == 1, "Forest", "Matrix")) %>%
   dplyr::group_by(grp) %>%
   dplyr::summarise(ca = sum(ca), .groups="drop") %>%
   dplyr::mutate(p = ca/sum(ca)) %>%
+  dplyr::mutate(pct_label = paste0(grp, " (", round(p*100), "%)")) %>%
   dplyr::mutate(n = round(p*100)) %>%
   dplyr::mutate(n = ifelse(n==0,1,n)) %>%
   dplyr::mutate(n = round(n/sum(n)*100)) %>%
   tidyr::uncount(n) %>%
-  dplyr::mutate(i = row_number(),
+  dplyr::mutate(i = dplyr::row_number(),
                 x = (i-1) %% 10,
                 y = (i-1) %/% 10,
-                block = "Landscape")
+                block = "a) Whole landscape (forest vs matrix)")
 
-### MID waffle = forest subcategories
-
+### Forest subcategories
 forest_sub <- forest_cat_metrics %>%
   dplyr::filter(year == 2024) %>%
   dplyr::filter(class != 2) %>% 
-  dplyr::mutate(class = ifelse(class == 15, 1, class), # aggregate 15 and 1
-                class = dplyr::case_when(class %in% c(10,11,12) ~ 100, # aggregate 10, 11 and 12
+  dplyr::mutate(class = ifelse(class == 15, 1, class),
+                class = dplyr::case_when(class %in% c(10,11,12) ~ 100,
                                          TRUE ~ class)) %>%
   dplyr::group_by(class) %>%
   dplyr::summarise(ca = sum(ca), .groups="drop") %>%
@@ -697,20 +663,22 @@ forest_sub <- forest_cat_metrics %>%
     class == 13  ~ "Forests in reserves",
     class == 14  ~ "Private forests"
   )) %>%
-  dplyr::mutate(p = ca/sum(ca)) %>%
+  dplyr::mutate(p = ca / sum(ca)) %>%
+  dplyr::mutate(
+    pct_label = paste0(label, " (",
+                       ifelse(p*100 < 1 & p*100 > 0, "<1", round(p*100)), "%)") # Here we make sure that 0% becomes <1% on the legend
+  ) %>%
   dplyr::mutate(n = round(p*100)) %>%
-  dplyr::mutate(n = ifelse(n==0,1,n)) %>%
+  dplyr::mutate(n = ifelse(n == 0, 1, n)) %>%
   dplyr::mutate(n = round(n/sum(n)*100)) %>%
   tidyr::uncount(n) %>%
-  dplyr::mutate(i = row_number(),
+  dplyr::mutate(i = dplyr::row_number(),
                 x = (i-1) %% 10,
                 y = (i-1) %/% 10,
-                block = "Forest only")
-forest_sub <- forest_sub %>%
+                block = "b) Forest status") %>%
   dplyr::rename(grp = label)
 
-### BOT waffle = matrix subcategories
-
+### Matrix subcategories
 matrix_sub <- all_lulc_metrics %>%
   dplyr::filter(year == 2024, class %in% c(2,3,4,5)) %>% # aggregate matrix types
   dplyr::group_by(class) %>%
@@ -722,17 +690,14 @@ matrix_sub <- all_lulc_metrics %>%
     class == 5 ~ "Artificial"
   )) %>%
   dplyr::mutate(p = ca/sum(ca)) %>%
+  dplyr::mutate(pct_label = paste0(label, " (", round(p*100), "%)")) %>%
   dplyr::mutate(n = round(p*100)) %>%
   tidyr::uncount(n) %>%
-  dplyr::mutate(i = row_number(),
+  dplyr::mutate(i = dplyr::row_number(),
                 x = (i-1) %% 10,
                 y = (i-1) %/% 10,
-                block = "Matrix only")
-matrix_sub <- matrix_sub %>%
+                block = "c) Types of matrix land uses") %>%
   dplyr::rename(grp = label)
-
-### bind all
-tiles <- bind_rows(top, forest_sub, matrix_sub)
 
 ### colors
 col_vec <- c(
@@ -748,15 +713,63 @@ col_vec <- c(
   "Artificial"                    = "#d4271e"
 )
 
-### plot
-ggplot(tiles, aes(x, y, fill = grp %||% type)) +
-  geom_tile(color="white") +
+### Plots
+p_landscape <- ggplot(top, aes(x, y, fill = grp)) +
+  geom_tile(color = "white") +
   scale_y_reverse() +
   coord_fixed() +
-  facet_wrap(~ block, ncol=1) +
+  scale_fill_manual(
+    values = col_vec,
+    labels = setNames(top$pct_label, top$grp),
+    name = NULL
+  ) +  # remove legend title
   theme_void() +
-  scale_fill_manual(values = col_vec) +
-  labs(fill=NULL)
+  theme(legend.position = "bottom",
+        plot.title = element_text(hjust = 0.5),
+        legend.text = element_text(size = 12)) +
+  ggtitle("a) Whole landscape (forest vs matrix)")
+
+p_forest <- ggplot(forest_sub, aes(x, y, fill = grp)) +
+  geom_tile(color = "white") +
+  scale_y_reverse() +
+  coord_fixed() +
+  scale_fill_manual(
+    values = col_vec,
+    labels = setNames(forest_sub$pct_label, forest_sub$grp),
+    name = NULL
+  ) +
+  theme_void() +
+  theme(legend.position = "right",
+        plot.title = element_text(hjust = 0.5),
+        legend.text = element_text(size = 12)) +
+  ggtitle("b) Forest status")
+
+p_matrix <- ggplot(matrix_sub, aes(x, y, fill = grp)) +
+  geom_tile(color = "white") +
+  scale_y_reverse() +
+  coord_fixed() +
+  scale_fill_manual(
+    values = col_vec,
+    labels = setNames(matrix_sub$pct_label, matrix_sub$grp),
+    name = NULL
+  ) +
+  theme_void() +
+  theme(legend.position = "right",
+        plot.title = element_text(hjust = 0.5),
+        legend.text = element_text(size = 12)) +
+  ggtitle("c) Types of matrix land uses")
+
+### Combine layout and add global title
+design <- "AB
+AC"
+
+waffles <- p_landscape + p_forest + p_matrix +
+  plot_layout(design = design,
+              widths = c(0.58, 0.42),
+              heights = c(1, 1))
+
+plot(waffles)
+
 
 
 ### Forest class metrics -----------
@@ -830,16 +843,14 @@ forest_class_metrics %>%
 
 
 #### Plots -----
-##### Line plot -----
+##### Line plot - all -----
 data = forest_class_metrics %>%
   dplyr::select(
     year,
     ca,
     np,
     area_mn,
-    FFI,
-    eca_ha_2000,
-    eca_ha_8000
+    FFI
   ) %>% 
   dplyr::mutate(year = as.numeric(year)) %>%
   tidyr::pivot_longer(
@@ -853,8 +864,6 @@ data = forest_class_metrics %>%
       Metric == "np" ~ "Number of patches",
       Metric == "area_mn" ~ "Mean patch size (ha)",
       Metric == "FFI" ~ "Forest Fragmentation Index (FFI)",
-      Metric == "eca_ha_2000" ~ "Equivalent Connected Area (ECA, 2km)",
-      Metric == "eca_ha_8000" ~ "Equivalent Connected Area (ECA, 8km)",
       TRUE ~ Metric
     )
   )
@@ -876,6 +885,146 @@ ggplot(data, aes(x = year, y = Value)) +
     panel.grid.minor = element_blank()
   )
 
+
+##### Line plot - ECA -----
+# Prepare ECA data
+eca_data <- forest_class_metrics %>%
+  dplyr::select(
+    year, eca_ha_2000, eca_ha_8000, change_2000
+  ) %>%
+  tidyr::pivot_longer(
+    cols = c(eca_ha_2000, eca_ha_8000),
+    names_to = "Metric",
+    values_to = "Value"
+  ) %>%
+  dplyr::mutate(
+    Metric = dplyr::case_when(
+      Metric == "eca_ha_2000" ~ "ECA (2 km)",
+      Metric == "eca_ha_8000" ~ "ECA (8 km)"
+    ),
+    year = as.numeric(year)
+  )
+
+# Identify runs of consecutive same ECA change
+change_df <- forest_class_metrics %>%
+  dplyr::arrange(year) %>%
+  dplyr::mutate(change_2000 = as.character(change_2000)) %>%
+  # Merge losses before grouping
+  dplyr::mutate(
+    change_2000 = dplyr::case_when(
+      change_2000 %in% c("+ Habitat loss", "+ Connectivity loss") ~ "Habitat or connectivity loss",
+      TRUE ~ change_2000
+    )
+  ) %>%
+  dplyr::mutate(run_id = cumsum(c(1, diff(as.numeric(as.factor(change_2000))) != 0)))
+
+# Summarize runs and keep only relevant ones
+brackets_df <- change_df %>%
+  dplyr::group_by(run_id, change_2000) %>%
+  dplyr::summarise(
+    xmin = min(year),
+    xmax = max(year),
+    n_years = dplyr::n(),
+    .groups = "drop"
+  ) %>%
+  dplyr::filter(n_years > 1 & !is.na(change_2000)) %>%
+  dplyr::arrange(xmin)
+
+# Merge consecutive brackets with same label
+brackets_df <- brackets_df %>%
+  dplyr::mutate(group_merge = cumsum(dplyr::lag(change_2000, default = "") != change_2000)) %>%
+  dplyr::group_by(change_2000, group_merge) %>%
+  dplyr::summarise(
+    xmin = min(xmin),
+    xmax = max(xmax),
+    .groups = "drop"
+  ) %>%
+  dplyr::arrange(xmin)
+
+# Define vertical positions
+brackets_df <- brackets_df %>%
+  dplyr::mutate(
+    global_max = max(eca_data$Value, na.rm = TRUE),
+    stack_i = dplyr::row_number(),
+    y_base = global_max * (1 + 0.015 * stack_i),
+    height = global_max * 0.01
+  )
+
+# Colors for rectangles
+rect_colors <- c(
+  "Habitat or connectivity gain" = "#66BB6A",
+  "Habitat or connectivity loss" = "#E57373"
+)
+
+# Plot ECA metrics
+p_eca <- ggplot(eca_data, aes(x = year, y = Value, color = Metric)) +
+  geom_rect(
+    data = brackets_df,
+    aes(
+      xmin = xmin - 0.5,    # -0.5 offset
+      xmax = xmax + 0.5,    # +0.5 offset
+      ymin = -Inf,
+      ymax = Inf,
+      fill = change_2000
+    ),
+    inherit.aes = FALSE,
+    alpha = 0.25, # how transparent the rectangles are
+    linewidth = 0
+  ) +
+  geom_line(linewidth = 1.1) +
+  geom_point(size = 3) +
+  scale_color_manual(values = c("ECA (2 km)" = "#BFB8FF", "ECA (8 km)" = "#0C0075")) +
+  scale_fill_manual(values = rect_colors) +
+  labs(
+    title = "Changes in Equivalent Connected Area (ECA)",
+    x = "Year",
+    y = "ECA (ha)",
+    color = NULL,
+    fill = "Change type"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    legend.position = "bottom",
+    legend.text = element_text(size = 12),
+    plot.title = element_text(face = "bold", hjust = 0.5),
+    panel.grid.minor = element_blank()
+  )
+
+# Brackets directly over rectangles
+p_final <- p_eca +
+  coord_cartesian(clip = "off") +
+  geom_segment(
+    data = brackets_df,
+    aes(x = xmin, xend = xmax, y = y_base, yend = y_base),
+    inherit.aes = FALSE,
+    linewidth = 0.8,
+    colour = "black"
+  ) +
+  geom_segment(
+    data = brackets_df,
+    aes(x = xmin, xend = xmin, y = y_base, yend = y_base - height),
+    inherit.aes = FALSE,
+    linewidth = 0.8,
+    colour = "black"
+  ) +
+  geom_segment(
+    data = brackets_df,
+    aes(x = xmax, xend = xmax, y = y_base, yend = y_base - height),
+    inherit.aes = FALSE,
+    linewidth = 0.8,
+    colour = "black"
+  ) +
+  geom_text(
+    data = brackets_df,
+    aes(x = (xmin + xmax) / 2, y = y_base + (global_max * 0.005), label = change_2000),
+    inherit.aes = FALSE,
+    size = 4,
+    fontface = "italic"
+  )
+
+p_final
+
+
 ###### Text --------------
 forest_series <- forest_class_metrics %>%
   dplyr::arrange(year)
@@ -889,14 +1038,14 @@ metrics <- c("ca", "area_mn", "area_sd", "np", "FFI", "eca_ha_2000", "eca_ha_800
 
 # Values in 2024
 values_2024 <- forest_series %>%
-  filter(year == end_year) %>%
-  select(all_of(metrics)) %>%
+  dplyr::filter(year == end_year) %>%
+  dplyr::select(all_of(metrics)) %>%
   as.list()
 
 # Overall change 1989 → 2024
 values_1989 <- forest_series %>%
-  filter(year == start_year) %>%
-  select(all_of(metrics)) %>%
+  dplyr::filter(year == start_year) %>%
+  dplyr::select(all_of(metrics)) %>%
   as.list()
 
 overall_change <- mapply(function(start, end) end - start, values_1989, values_2024)
