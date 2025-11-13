@@ -6,13 +6,10 @@
 library(tidyr)
 library(ggplot2)
 library(readr)
-library(ggalluvial)
 library(here)
 library(grid)
 library(patchwork)
 library(stringr)
-library(ggforce)
-library(ggrepel)
 library(tibble)
 library(scales)
 # remotes::install_github("davidsjoberg/ggstream")
@@ -230,7 +227,7 @@ ggplot() +
   geom_line(
     data = data,
     aes(x = year, y = delta_ca, group = class_name, color = class_name),
-    size = 0.9
+    linewidth = 0.9
   ) +
   
   # points at each year on the lines
