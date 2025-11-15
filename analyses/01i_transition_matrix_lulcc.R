@@ -30,10 +30,10 @@ for (i in seq_along(rasters)) {
 }
 plot(rasters[[1]], col=c("#32a65e", "#ad975a", "#FFFFB2", "#0000FF", "#d4271e"))
 
-
 ### Transition matrix -----
 #### Spatial trajectories (rasters) -------
 
+## 2a. COMPUTE YEAR-TO-YEAR TRANSITIONS
 # Function to compute year-to-year land-use transitions
 compute_transitions <- function(rasters, years) {
   # Check inputs
@@ -73,7 +73,49 @@ transitions <- compute_transitions(rasters, years)
 plot(transitions[[1]], main = names(transitions)[1])
 unique(values(transitions[[1]]))
 
-## 2. COMPUTE CUMULATIVE TRANSITIONS
+## Check
+# Choose a transition code you want to inspect (e.g., 15 = 1→5)
+target_transition <- 15
+
+# Select the transition raster to inspect
+trans_rast <- transitions[[1]]   # example for tYYYY_YYYY
+
+# Find ALL cell indices where the transition occurred
+cells_changed <- which(values(trans_rast) == target_transition)
+
+# Choose ONE cell at random (or the first one)
+cell_id <- cells_changed[1]
+
+# Get coordinates of that raster cell
+cell_xy <- xyFromCell(trans_rast, cell_id)
+
+# Create a geographic buffer around that point
+# Buffer radius in map units
+buffer_radius <- 200
+buf <- buffer(vect(cell_xy, crs=crs(trans_rast)), width = buffer_radius)
+
+# Crop rasters to the buffered window
+prev <- rasters[[1]]
+curr <- rasters[[2]]
+
+# Plot
+prev_crop <- crop(prev, buf)
+curr_crop <- crop(curr, buf)
+trans_crop <- crop(trans_rast, buf)
+par(mfrow=c(1,3))
+
+plot(prev_crop, main="Before")
+points(cell_xy[1], cell_xy[2], pch=20, col="red", cex=1.5)
+
+plot(curr_crop, main="After")
+points(cell_xy[1], cell_xy[2], pch=20, col="red", cex=1.5)
+
+plot(trans_crop, main=paste("Transition =", target_transition))
+points(cell_xy[1], cell_xy[2], pch=20, col="red", cex=1.5)
+
+par(mfrow=c(1,1))
+
+## 2b. COMPUTE CUMULATIVE TRANSITIONS
 # If the pixel does not change, its value stays the same.
 # If it does change, the new transition code is appended (e.g., 1 → 2 → 1 becomes 121).
 # Each raster in the output list represents the cumulative state up to that time step.
@@ -136,6 +178,66 @@ cumulative_transitions <- compute_cumulative_transitions(rasters, years)
 plot(cumulative_transitions[[1]], main = names(cumulative_transitions)[1])
 freq(cumulative_transitions[[1]])
 freq(cumulative_transitions[[length(cumulative_transitions)]])
+
+## Check
+# Choose the cumulative code to inspect
+target_traj <- 131
+
+# Final cumulative raster (contains the full trajectory)
+final_cum <- cumulative_transitions[[length(cumulative_transitions)]]
+
+# Get cell indices where this exact trajectory occurred
+cells_traj <- which(values(final_cum) == target_traj)
+cell_id <- cells_traj[1]   # pick the first match
+
+# Coordinates of the focal pixel
+cell_xy <- xyFromCell(final_cum, cell_id)
+
+# Define buffer radius (map units)
+buffer_radius <- 500
+buf <- buffer(vect(cell_xy, crs = crs(final_cum)), width = buffer_radius)
+
+# Re-read the raw values for this pixel across all years
+pixel_values <- sapply(rasters, function(r) values(r)[cell_id])
+
+# Pair them with the years
+trajectory <- data.frame(
+  year = years,
+  value = pixel_values
+)
+trajectory
+
+# Crop relevant rasters
+years_to_plot <- c(1994, 1995, 1998)
+rasters_subset <- rasters[match(years_to_plot, years)]
+
+rasters_crop <- lapply(rasters_subset, function(r) crop(r, buf))
+names(rasters_crop) <- years_to_plot
+
+# Crop transition rasters
+trans_crop_94_95 <- crop(cumulative_transitions[[6]], buf)
+trans_crop_95_98 <- crop(cumulative_transitions[[9]], buf)
+
+# Plot
+par(mfrow=c(2,3), mar=c(3,3,2,1))
+plot(rasters_crop[[1]], main="1994")
+points(cell_xy[1], cell_xy[2], pch=20, col="red", cex=1.5)
+
+plot(rasters_crop[[2]], main="1995")
+points(cell_xy[1], cell_xy[2], pch=20, col="red", cex=1.5)
+
+plot(rasters_crop[[3]], main="1998")
+points(cell_xy[1], cell_xy[2], pch=20, col="red", cex=1.5)
+
+# Transition rasters
+plot(trans_crop_94_95, main="Transition 1994→1995")
+points(cell_xy[1], cell_xy[2], pch=20, col="red", cex=1.5)
+
+plot(trans_crop_95_98, main="Transition 1995→1998")
+points(cell_xy[1], cell_xy[2], pch=20, col="red", cex=1.5)
+
+plot.new()   # empty panel
+par(mfrow=c(1,1))
 
 
 ## 3. RECLASS TRANSITION RASTERS
