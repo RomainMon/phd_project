@@ -71,10 +71,10 @@ rasters_large_patches = lapply(seq_along(rasters), function(i) {
 })
 
 # Quick check
-plot(rasters[[1]])
-plot(rasters_large_patches[[1]]) # At first sight, nothing changed, but look carefully: tiny patches are reclassified!
-freq(rasters[[1]])
-freq(rasters_large_patches[[1]])
+plot(rasters[[36]])
+plot(rasters_large_patches[[36]]) # At first sight, nothing changed, but look carefully: tiny patches are reclassified!
+freq(rasters[[36]])
+freq(rasters_large_patches[[36]])
 
 #### Reclass for MSPA ----
 # -> GTB requires a 8-byte type formatted input mask (.tif) with 0 = missing data, 1 = background, 2 = habitat
@@ -282,6 +282,9 @@ for (i in seq_along(rasters_reclass_w_mspa2)) {
   
   message("Saved masked raster: ", out_file)
 }
+
+
+
 
 ### Own version (imperfect) -----
 # # Here, we distinguish between habitat patches and corridors, defined as narrow strips of vegetation connecting at least 2 habitat patches

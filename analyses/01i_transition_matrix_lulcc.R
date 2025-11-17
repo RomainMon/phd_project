@@ -11,8 +11,11 @@ library(ggplot2)
 library(raster)
 library(sf)
 library(PantaRhei) # For the Sankey diagram
+library(RColorBrewer)
 
-### Import rasters (with corridors) -------
+### Import rasters -------
+
+# Rasters reclassified (including corridors as forests)
 base_path = here("outputs", "data", "MapBiomas", "Rasters_reclass")
 raster_files = list.files(base_path, pattern = "\\.tif$", full.names = TRUE)
 
@@ -28,12 +31,62 @@ years = raster_df$year
 for (i in seq_along(rasters)) {
   cat("Year", years[i], " → raster name:", basename(raster_df$file[i]), "\n")
 }
-plot(rasters[[1]], col=c("#32a65e", "#ad975a", "#FFFFB2", "#0000FF", "#d4271e"))
+plot(rasters[[36]], col=c("#32a65e", "#ad975a", "#FFFFB2", "#0000FF", "#d4271e"))
+
+# Rasters reclassified with forest categories
+base_path = here("outputs", "data", "MapBiomas", "Rasters_reclass_forest_cat")
+raster_files = list.files(base_path, pattern = "\\.tif$", full.names = TRUE)
+
+# Extract years
+years = stringr::str_extract(basename(raster_files), "(?<!\\d)\\d{4}(?!\\d)")
+# Create a dataframe to link files and years
+raster_df = data.frame(file = raster_files, year = as.numeric(years)) %>%
+  dplyr::arrange(year)
+# Load rasters in chronological order
+rasters_forest_cat = lapply(raster_df$file, terra::rast)
+years = raster_df$year
+# Check
+for (i in seq_along(rasters_forest_cat)) {
+  cat("Year", years[i], " → raster name:", basename(raster_df$file[i]), "\n")
+}
+
+raster2024 = rasters_forest_cat[[36]]
+vals_after <- c(1,2,3,4,5,10,11,12,13,14,15)
+cols_after <- c("#32a65e", "#ad975a", "#FFFFB2", "#0000FF", "#d4271e", 
+                "lightgreen", "chartreuse", "darkseagreen", "darkolivegreen","darkkhaki", "yellow")
+terra::coltab(raster2024) <- cbind(vals_after, cols_after)
+plot(raster2024)
+freq(raster2024)
 
 ### Transition matrix -----
 #### Spatial trajectories (rasters) -------
 
-## 2a. COMPUTE YEAR-TO-YEAR TRANSITIONS
+##### 1. REMOVE ROAD OVERPASSES (not forest) ------
+# We override road overpasses (cannot be considered as "reforestation")
+rasters_corrected <- vector("list", length(rasters))
+
+for (i in seq_along(rasters)) {
+  r_orig <- rasters[[i]]
+  r_cat  <- rasters_forest_cat[[i]]
+  
+  # Extract values
+  v_orig <- values(r_orig)
+  v_cat  <- values(r_cat)
+  
+  # Replace: wherever forest_cat == 15 → set original raster to 5
+  v_orig[v_cat == 15] <- 5
+  
+  # Write back
+  rasters_corrected[[i]] <- setValues(r_orig, v_orig)
+  names(rasters_corrected)[i] <- names(rasters)[i]
+}
+
+
+##### 2a. YEAR-TO-YEAR TRANSITIONS -------
+# Create a set of transition rasters where each cell encodes its land-use change from the previous year
+# These rasters show all annual land-use transitions.
+# The output value = (prev * 10) + curr (for instance, 13 = Previously forest, now agriculture)
+
 # Function to compute year-to-year land-use transitions
 compute_transitions <- function(rasters, years) {
   # Check inputs
@@ -69,16 +122,16 @@ compute_transitions <- function(rasters, years) {
 }
 
 # Example usage:
-transitions <- compute_transitions(rasters, years)
-plot(transitions[[1]], main = names(transitions)[1])
-unique(values(transitions[[1]]))
+yty_transitions <- compute_transitions(rasters_corrected, years)
+plot(yty_transitions[[1]], main = names(yty_transitions)[1])
+unique(values(yty_transitions[[1]]))
 
 ## Check
 # Choose a transition code you want to inspect (e.g., 15 = 1→5)
 target_transition <- 15
 
 # Select the transition raster to inspect
-trans_rast <- transitions[[1]]   # example for tYYYY_YYYY
+trans_rast <- yty_transitions[[1]]   # example for tYYYY_YYYY
 
 # Find ALL cell indices where the transition occurred
 cells_changed <- which(values(trans_rast) == target_transition)
@@ -115,10 +168,13 @@ points(cell_xy[1], cell_xy[2], pch=20, col="red", cex=1.5)
 
 par(mfrow=c(1,1))
 
-## 2b. COMPUTE CUMULATIVE TRANSITIONS
+
+##### 2b. CUMULATIVE TRANSITIONS -------
+# Contrary to 1a, here the transitions are cumulative, i.e., the cell value appends each time the cell land use changes.
+# Rules:
 # If the pixel does not change, its value stays the same.
 # If it does change, the new transition code is appended (e.g., 1 → 2 → 1 becomes 121).
-# Each raster in the output list represents the cumulative state up to that time step.
+# Each raster in the output list represents the cumulative state up to that time step. This preserves the full temporal history of each pixel.
 
 # Function to compute cumulative land-use transitions
 compute_cumulative_transitions <- function(rasters, years) {
@@ -174,7 +230,7 @@ compute_cumulative_transitions <- function(rasters, years) {
 }
 
 # Example usage:
-cumulative_transitions <- compute_cumulative_transitions(rasters, years)
+cumulative_transitions <- compute_cumulative_transitions(rasters_corrected, years)
 plot(cumulative_transitions[[1]], main = names(cumulative_transitions)[1])
 freq(cumulative_transitions[[1]])
 freq(cumulative_transitions[[length(cumulative_transitions)]])
@@ -240,11 +296,12 @@ plot.new()   # empty panel
 par(mfrow=c(1,1))
 
 
-## 3. RECLASS TRANSITION RASTERS
+##### 3. RECLASS TRANSITION RASTERS ------
+# Reclassify cumulative trajectories to identify reforestation (6) and deforestation (7) events
 # Deforested cells (7) → all cells that are currently non-forest (2–5) but were forest (1) at least once in the past.
 # Reforested cells (6) → all cells that are currently forest (1) but were non-forest (2–5) at least once in the past.
 # Stable cells (1 or other) → all other cells keep their current value.
-# Otherwise:	Keep current land-cover value at year
+# Otherwise: Keep current land-cover value at year
 
 # Reclassify cumulative transitions into reforestation (6) and deforestation (7)
 reclass_cumulative_transitions <- function(cumulative_transitions) {
@@ -295,80 +352,20 @@ reclass_cumulative_transitions <- function(cumulative_transitions) {
 }
 
 # Example usage:
-reclass_list <- reclass_cumulative_transitions(cumulative_transitions)
+reclass_cumul_trans <- reclass_cumulative_transitions(cumulative_transitions)
 
 # Quick check
-freq(reclass_list[[1]])
-freq(reclass_list[[35]])
+freq(reclass_cumul_trans[[1]]) # 1990
+freq(reclass_cumul_trans[[35]]) # 2024
 
 
-## 4. RECLASS OTHER MATRIX TYPES USING THEIR CURRENT VALUE
-# Simple merge: keep 1, 6, 7; replace others with original values
-merge_reclass_with_rasters <- function(reclass_list, rasters, years) {
-  # Rename rasters with corresponding years
-  names(rasters) <- as.character(years)
-  
-  merged_list <- vector("list", length(reclass_list))
-  
-  for (i in seq_along(reclass_list)) {
-    year <- names(reclass_list)[i]
-    message("Reclassifying raster for year ", year)
-    
-    r_reclass <- reclass_list[[i]]
-    r_orig <- rasters[[which(names(rasters) == year)]]
-    
-    vals_reclass <- values(r_reclass)
-    vals_orig <- values(r_orig)
-    
-    # Keep 1, 6, 7; replace others with original values
-    vals_merged <- ifelse(vals_reclass %in% c(1, 6, 7), vals_reclass, vals_orig)
-    
-    merged_list[[i]] <- setValues(r_reclass, vals_merged)
-    names(merged_list[[i]]) <- year
-  }
-  
-  names(merged_list) <- names(reclass_list)
-  return(merged_list)
-}
-
-# Example usage:
-merged_list <- merge_reclass_with_rasters(reclass_list, rasters, years)
-
-# Check
-plot(merged_list[[1]], main=names(merged_list[[1]]), col=c("#32a65e", "#ad975a", "#FFFFB2", "#0000FF", "#d4271e", "chartreuse", "pink"))
-freq(merged_list[[1]])
-freq(rasters[[36]])
-plot(merged_list[[35]], main=names(merged_list[[35]]), col=c("#32a65e", "#ad975a", "#FFFFB2", "#0000FF", "#d4271e", "chartreuse", "pink"))
-freq(merged_list[[35]]) # Check that 1 + 6 = 1 in rasters[[36]]
-
-# Focus
-# We check that deforested cells by pipelines are identified as deforested
-# Coordinates of interest
-pt <- c(746130.9, 7499828.2)
-
-# Select the raster for 2010
-r2010 <- merged_list[[which(names(merged_list) == "2010")]]
-
-# Define a small window around the point (in map units, e.g. meters)
-buffer <- 1000  # adjust for zoom level
-xrange <- c(pt[1] - buffer, pt[1] + buffer)
-yrange <- c(pt[2] - buffer, pt[2] + buffer)
-
-# Crop the raster around the point
-r_crop <- crop(r2010, ext(xrange, yrange))
-
-# Plot the cropped raster
-plot(r_crop, 
-     main = paste0("Year ", names(r2010), " (around point)"),
-     col = c("#32a65e", "#ad975a", "#FFFFB2", "#0000FF", "#d4271e", "chartreuse", "pink"))
-
-
-## 5. DETECT YEAR OF LULCC
+##### 4. DETECT YEAR OF LULCC ----------
 # For each reforested or deforested cell, we identify WHEN (which year) the change occurred
 # To do so, these cells take the value of the year a cell has changed (e.g., 1998)
 # NB: some cells changed several times (reforested-deforested-reforested, etc.), hence we create several rasters
 # The first is the first time of change; the second, the second time the cell changed, etc.
 
+# Function
 detect_all_forest_changes <- function(reclass_list) {
   message("Detecting all deforestation / reforestation events (only true transitions)...")
   
@@ -445,16 +442,16 @@ detect_all_forest_changes <- function(reclass_list) {
 }
 
 # Example usage:
-changes_all <- detect_all_forest_changes(reclass_list)
+years_forest_change <- detect_all_forest_changes(reclass_cumul_trans)
 
 # Inspect results
-head(changes_all$change_table, n=100)
-plot(changes_all$year_change_rasters[[1]], main="Year of 1st forest change")
+head(years_forest_change$change_table, n=100)
+plot(years_forest_change$year_change_rasters[[1]], main="Year of 1st forest change")
 
 ## Check (focusing on a cell)
 # Randomly select one changed cell (first change)
 set.seed(1)
-first_changes <- changes_all$change_table %>%
+first_changes <- years_forest_change$change_table %>%
   dplyr::filter(change_order == 1)
 
 chosen <- first_changes[sample(nrow(first_changes), 1), ]
@@ -472,8 +469,8 @@ message("   → Comparing ", year_before, " (before) vs ", year_change, " (after
 # Extract rasters from the correct list indices
 r_before <- rasters[[year_idx - 1]]
 r_after  <- rasters[[year_idx]]
-merged_after <- merged_list[[year_idx]]
-year_change_r <- changes_all$year_change_rasters[[1]]  # first change raster
+merged_after <- reclass_cumul_trans[[year_idx]]
+year_change_r <- years_forest_change$year_change_rasters[[1]]  # first change raster
 
 # Get coordinates of the chosen cell
 xy_chosen <- xyFromCell(r_before, chosen$cell_id)
@@ -506,7 +503,7 @@ points(xy_chosen, pch = 16, cex = 1.2)
 
 plot(merged_after_crop,
      main = paste("Merged (", year_change, ")", sep=""),
-     col = c("#32a65e", "#FFFFB2", "#d4271e", "chartreuse"))
+     col = c("#32a65e", "#FFFFB2", "chartreuse", "pink"))
 points(xy_chosen, pch = 16, cex = 1.2)
 
 plot(year_change_crop,
@@ -516,11 +513,94 @@ points(xy_chosen, pch = 16, cex = 1.2)
 par(mfrow = c(1, 1))
 
 
-#### Summary statistics — last raster ------
+##### Visual demo of all steps ---------
+
+# Central coordinates
+x_center <- 778151.2
+y_center <- 7508862.8
+
+# Zoom window
+buffer_size <- 1200
+zoom_ext <- ext(
+  x_center - buffer_size, x_center + buffer_size,
+  y_center - buffer_size, y_center + buffer_size
+)
+
+# Choose a year index in rasters (1–36)
+index_demo <- 7 # do not select the first raster (to plot changes, we need at least the first year + 1)
+year_demo  <- years[index_demo]
+
+cat("Raster year selected:", year_demo, "\n")
+
+### STEP 0 – Raw imported raster (no corrections)
+r_step0 <- crop(rasters[[index_demo]], zoom_ext)
+
+### STEP 2 – Cumulative transitions (exists only from index 2)
+r_step2 <- crop(cumulative_transitions[[index_demo - 1]], zoom_ext)
+
+### STEP 3 – Re/deforestation classification
+r_step3 <- crop(reclass_cumul_trans[[index_demo - 1]], zoom_ext)
+
+### STEP 4 – Year of 1st change
+r_step4 <- crop(years_forest_change$year_change_rasters[[1]], zoom_ext)
+
+
+### PLOT
+
+png(here("outputs","plot","01i_tm_lulc_demo.png"), width = 3000, height = 2000, res = 300)
+par(mfrow = c(2, 2), mar = c(2, 2, 2, 2))
+
+## STEP 0 – Raw imported
+plot(
+  r_step0,
+  main = paste0("Step 0 – Raw imported (", year_demo, ")"),
+  col = c("#32a65e", "#ad975a", "#FFFFB2", "#d4271e")
+)
+points(x_center, y_center, pch=16, col="red")
+
+## STEP 2 – Cumulative transitions
+vals2 <- unique(values(r_step2))
+n_classes <- length(vals2[!is.na(vals2)])
+plot(
+  r_step2,
+  main = "Step 2 – Cumulative trajectory code",
+  col = brewer.pal(max(3, min(n_classes, 8)), "Pastel1")
+)
+points(x_center, y_center, pch=16, col="red")
+
+## STEP 3 – Re/deforestation classification
+plot(
+  r_step3,
+  main = "Step 3 – Re/deforestation classification",
+  col = c(
+    "#32a65e",     # 1 = forest
+    "#ad975a",     # 2
+    "#FFFFB2",     # 3
+    "#d4271e",     # 5
+    "chartreuse",  # 6 = reforest
+    "pink"      # 7 = deforest
+  )
+)
+points(x_center, y_center, pch=16, col="red")
+
+## STEP 4 – Year of 1st change
+vals4 <- unique(values(r_step4))
+n_classes <- length(vals4[!is.na(vals4)])
+plot(
+  r_step4,
+  main = "Step 4 – Year of 1st forest change",
+  col = brewer.pal(max(3, min(n_classes, 8)), "Greys")
+)
+points(x_center, y_center, pch=16, col="red")
+
+par(mfrow = c(1,1))
+dev.off()
+
+##### Summary statistics — last raster ------
 
 ## Select last raster
-r_last <- merged_list[[length(merged_list)]]
-year_label <- names(merged_list)[length(merged_list)]
+r_last <- reclass_cumul_trans[[length(reclass_cumul_trans)]]
+year_label <- names(reclass_cumul_trans)[length(reclass_cumul_trans)]
 
 message("🟩 Computing summary statistics for year ", year_label, " ...")
 
@@ -637,12 +717,57 @@ ggplot(forest, aes(x = 2, y = perc_tot, fill = class)) +
     plot.title = element_text(size = 14, face = "bold")
   )
 
+##### Export rasters -----------
+message("Exporting rasters...")
+
+# Define output folder
+output_dir = here("outputs", "data", "MapBiomas", "Rasters_cumulative_tm")
 
 
-#### Transition matrix --------
-# Below, we compute a transition matrix on the rasters to identify the changes in land use across the landscape and through time
-## On all rasters (year-to-year changes)
+# Export reclass_cumul_trans (starts from year 2)
+message("Exporting reclass_cumul_trans rasters (re/deforestation classes)...")
 
+for (i in seq_along(reclass_cumul_trans)) {
+  year_i <- years[i + 1]  # because element 1 = transition from years[1]→years[2]
+  output_path <- file.path(output_dir, paste0("raster_reclass_cumul_tm_", year_i, ".tif"))
+  
+  message("  - Writing reclass raster for year ", year_i)
+  
+  terra::writeRaster(
+    reclass_cumul_trans[[i]],
+    filename = output_path,
+    overwrite = TRUE,
+    wopt = list(datatype = "INT1U", gdal = c("COMPRESS=LZW"))
+  )
+}
+
+
+# Export years_forest_change rasters
+
+message("Exporting rasters for years of forest change...")
+
+for (i in seq_along(years_forest_change$year_change_rasters)) {
+  
+  output_path <- file.path(
+    output_dir,
+    sprintf("raster_year_lulc_change_%02d.tif", i) # nicely padded index
+  )
+  
+  message("  - Writing change-event raster #", i)
+  
+  terra::writeRaster(
+    years_forest_change$year_change_rasters[[i]],
+    filename = output_path,
+    overwrite = TRUE,
+    wopt = list(datatype = "INT2U", gdal = c("COMPRESS=LZW"))
+  )
+}
+
+
+# #### Non-spatial trajectories --------
+# # Below, we compute a transition matrix on the rasters to identify the changes in land use across the landscape and through time
+# ## On all rasters (year-to-year changes)
+# 
 # transition_matrix = lapply(1:(length(rasters_merged) - 1), function(i) {
 #   # Display progress message
 #   message("Computing transition matrix: ", years[i], " → ", years[i + 1])
@@ -652,154 +777,167 @@ ggplot(forest, aes(x = 2, y = perc_tot, fill = class)) +
 #   list(year_from = years[i], year_to = years[i + 1], table = t)
 # })
 # transition_matrix[[1]]
-
-## For selected years
-
-# Define years of interest
-target_years = c(1989, 2000, 2012, 2023)
-
-# Get their indices in your final_list
-idx = match(target_years, years)
-
-# Function to compute transition matrix between two rasters
-transition_stats = function(r1, r2, year1, year2) {
-  
-  # Cross-tabulate transitions
-  tab = terra::crosstab(c(r1, r2), long = TRUE)
-  colnames(tab) = c("from", "to", "n_cells")
-  
-  # Compute area (1 cell = resolution_x * resolution_y, convert m² → ha)
-  res_m = res(r1)
-  cell_area_ha = prod(res_m) / 10000
-  
-  # Add area and percentages
-  total_cells = sum(tab$n_cells)
-  tab = tab %>%
-    dplyr::mutate(area_ha = n_cells * cell_area_ha,
-           perc = 100 * n_cells / total_cells,
-           transition = paste0(from, "_to_", to),
-           period = paste0(year1, "-", year2))
-  
-  return(tab)
-}
-
-# Compute transitions for all intervals
-transitions = list()
-for (i in 1:(length(idx) - 1)) {
-  transitions[[i]] <- transition_stats(
-    final_list[[idx[i]]],
-    final_list[[idx[i + 1]]],
-    target_years[i],
-    target_years[i + 1]
-  )
-}
-
-# Combine results
-transition_df = bind_rows(transitions)
-
-# Add category names for readability ---
-class_labels = c("1"="Forest", "10"="Matrix", "6"="Reforested", "7"="Deforested")
-transition_df = transition_df %>%
-  dplyr::mutate(from_class = class_labels[as.character(from)],
-         to_class   = class_labels[as.character(to)]) %>%
-  dplyr::select(period, from_class, to_class, n_cells, area_ha, perc)
-
-
-### Plot transition matrix ----
-
-## With PantaRhei
-# Extract year pairs
-transition_df = transition_df %>%
-  tidyr::separate(period, into = c("year_from", "year_to"), sep = "-", convert = TRUE)
-
-# Build flows
-flows = transition_df %>%
-  dplyr::mutate(
-    from = paste0(from_class, "_", year_from),
-    to = paste0(to_class, "_", year_to),
-    substance = case_when(
-      from_class == "Forest" & to_class == "Forest" ~ "Forest_stay",
-      from_class == "Matrix" & to_class == "Matrix" ~ "Matrix_stay",
-      from_class == "Forest" & to_class == "Deforested" ~ "Deforestation",
-      from_class == "Matrix" & to_class == "Reforested" ~ "Reforestation",
-      from_class == "Deforested" & to_class == "Deforested" ~ "Deforested_stay",
-      from_class == "Reforested" & to_class == "Reforested" ~ "Reforested_stay",
-      from_class == "Deforested" & to_class == "Reforested" ~ "Reforestation",
-      from_class == "Reforested" & to_class == "Deforested" ~ "Deforestation",
-      from_class == "Forest" & to_class == "Reforested" ~ "Reforestation",
-      from_class == "Matrix" & to_class == "Deforested" ~ "Deforestation",
-      TRUE ~ "Other"
-    ),
-    quantity = perc
-  ) %>%
-  dplyr::select(from, to, substance, quantity)
-
-# Build nodes
-# This defines the structure and positions for plotting
-nodes = tibble::tribble(
-  ~ID, ~label, ~label_pos, ~label_align, ~x, ~y, ~dir,
-  
-  # 1989 (start year)
-  "Forest_1989", "Forest 1989", "left", "", -6, 2, "right",
-  "Matrix_1989", "Matrix 1989", "left", "", -6, -2, "right",
-  
-  # 2000 (second year)
-  "Forest_2000", "Forest 2000", "below", "left", -3.5, 2, "right",
-  "Matrix_2000", "Matrix 2000", "below", "left", -3.5, -2, "right",
-  "Deforested_2000", "Deforested 2000", "below", "left", -3.5, 0.5, "right",
-  "Reforested_2000", "Reforested 2000", "below", "left", -3.5, -0.5, "right",
-  
-  # 2012
-  "Forest_2012", "Forest 2012", "below", "left", -1, 2, "right",
-  "Matrix_2012", "Matrix 2012", "below", "left", -1, -2, "right",
-  "Deforested_2012", "Deforested 2012", "below", "left", -1, 0.5, "right",
-  "Reforested_2012", "Reforested 2012", "below", "left", -1, -0.5, "right",
-  
-  # 2023
-  "Forest_2023", "Forest 2023", "right", "", 2, 2, "right",
-  "Matrix_2023", "Matrix 2023", "right", "", 2, -2, "right",
-  "Deforested_2023", "Deforested 2023", "right", "", 2, 0.5, "right",
-  "Reforested_2023", "Reforested 2023 (Secondary forest)", "right", "", 2, -0.5, "right"
-)
-
-# Define palette
-palette = tibble::tribble(
-  ~substance, ~color,
-  "Forest_stay", "#32a65e",
-  "Matrix_stay", "#7B68EE",
-  "Reforestation", "#61FA95",
-  "Deforestation", "#D95F02",
-  "Deforested_stay", "orange",
-  "Reforested_stay", "lightgreen"
-)
-
-# Node style and title
-ns = list(
-  type = "arrow",
-  gp = grid::gpar(fill = "#00008B", col = "white", lwd = 2),
-  length = 0.7,
-  label_gp = grid::gpar(col = "#00008B", fontsize = 9),
-  mag_pos = "label",
-  mag_fmt = "%.1f %%", # Define the label (for ha: %.0f ha means 0 decimal followed by ha; for percentages: %.1f %% means 1 decimal followed by %)
-  mag_gp = grid::gpar(fontsize = 9, fontface = "bold", col = "#00008B")
-)
-
-title_txt = "Forest dynamics (1989–2023)"
-attr(title_txt, "gp") = grid::gpar(fontsize = 16, fontface = "bold", col = "#00008B")
-
-# Plot Sankey diagram
-sankey_plot = PantaRhei::sankey(
-  nodes, flows, palette,
-  node_style = ns,
-  max_width = 0.1,
-  rmin = 0.5,
-  legend = FALSE,
-  page_margin = c(0.15, 0.05, 0.25, 0.20),
-  title = title_txt
-)
-
+# 
+# ## For selected years
+# 
+# # Reclass rasters where matrix types 2-5 -> 10
+# reclass_cumul_trans_mat10 <- lapply(reclass_cumul_trans, function(r) {
+#   v <- values(r)
+#   v[v %in% 2:5] <- 10             # collapse matrix types into class 10
+#   r2 <- setValues(r, v)
+#   return(r2)
+# })
+# names(reclass_cumul_trans_mat10) <- names(reclass_cumul_trans)  # preserve year names
+# 
+# # Find indices of the target years inside the reclass list
+# # reclass_cumul_trans elements are named by year
+# target_years = c(1990, 2000, 2012, 2023)
+# years_reclass <- as.numeric(names(reclass_cumul_trans_mat10))
+# idx_reclass <- match(target_years, years_reclass)
+# 
+# # Transition_stats function
+# transition_stats <- function(r1, r2, year1, year2) {
+#   # Cross-tabulate transitions (long format)
+#   tab <- terra::crosstab(c(r1, r2), long = TRUE)
+#   colnames(tab) <- c("from", "to", "n_cells")
+# 
+#   # Compute area (1 cell = resolution_x * resolution_y, convert m² → ha)
+#   res_m <- res(r1)
+#   cell_area_ha <- prod(res_m) / 10000
+# 
+#   # Add area and percentages
+#   total_cells <- sum(tab$n_cells)
+#   tab <- tab %>%
+#     dplyr::mutate(area_ha = n_cells * cell_area_ha,
+#                   perc = 100 * n_cells / total_cells,
+#                   transition = paste0(from, "_to_", to),
+#                   period = paste0(year1, "-", year2))
+# 
+#   return(tab)
+# }
+# 
+# # Compute transitions using the MAT10 reclass list
+# transitions <- list()
+# for (i in seq_len(length(idx_reclass) - 1)) {
+#   r1 <- reclass_cumul_trans_mat10[[ idx_reclass[i] ]]
+#   r2 <- reclass_cumul_trans_mat10[[ idx_reclass[i + 1] ]]
+# 
+#   transitions[[i]] <- transition_stats(
+#     r1, r2,
+#     year1 = target_years[i],
+#     year2 = target_years[i + 1]
+#   )
+# }
+# 
+# # Combine results and add readable class labels
+# transition_df <- bind_rows(transitions)
+# 
+# # Recompute class labels: now matrix types collapsed as 10
+# class_labels <- c("1" = "Forest", "10" = "Matrix", "6" = "Reforested", "7" = "Deforested")
+# 
+# transition_df <- transition_df %>%
+#   dplyr::mutate(
+#     from_class = class_labels[as.character(from)],
+#     to_class   = class_labels[as.character(to)]
+#   ) %>%
+#   dplyr::select(period, from_class, to_class, n_cells, area_ha, perc)
+# 
+# 
+# ##### Plot Sankey diagram of transition matrix
+# 
+# ## With PantaRhei
+# # Extract year pairs
+# transition_df = transition_df %>%
+#   tidyr::separate(period, into = c("year_from", "year_to"), sep = "-", convert = TRUE)
+# 
+# # Build flows
+# flows = transition_df %>%
+#   dplyr::mutate(
+#     from = paste0(from_class, "_", year_from),
+#     to = paste0(to_class, "_", year_to),
+#     substance = case_when(
+#       from_class == "Forest" & to_class == "Forest" ~ "Forest_stay",
+#       from_class == "Matrix" & to_class == "Matrix" ~ "Matrix_stay",
+#       from_class == "Forest" & to_class == "Deforested" ~ "Deforestation",
+#       from_class == "Matrix" & to_class == "Reforested" ~ "Reforestation",
+#       from_class == "Deforested" & to_class == "Deforested" ~ "Deforested_stay",
+#       from_class == "Reforested" & to_class == "Reforested" ~ "Reforested_stay",
+#       from_class == "Deforested" & to_class == "Reforested" ~ "Reforestation",
+#       from_class == "Reforested" & to_class == "Deforested" ~ "Deforestation",
+#       from_class == "Forest" & to_class == "Reforested" ~ "Reforestation",
+#       from_class == "Matrix" & to_class == "Deforested" ~ "Deforestation",
+#       TRUE ~ "Other"
+#     ),
+#     quantity = perc
+#   ) %>%
+#   dplyr::select(from, to, substance, quantity)
+# 
+# # Build nodes
+# # This defines the structure and positions for plotting
+# nodes = tibble::tribble(
+#   ~ID, ~label, ~label_pos, ~label_align, ~x, ~y, ~dir,
+# 
+#   # 1990
+#   "Forest_1990", "Forest 1990", "left", "", -6, 2, "right",
+#   "Matrix_1990", "Matrix 1990", "left", "", -6, -2, "right",
+# 
+#   # 2000
+#   "Forest_2000", "Forest 2000", "below", "left", -3.5, 2, "right",
+#   "Matrix_2000", "Matrix 2000", "below", "left", -3.5, -2, "right",
+#   "Deforested_2000", "Deforested 2000", "below", "left", -3.5, 0.5, "right",
+#   "Reforested_2000", "Reforested 2000", "below", "left", -3.5, -0.5, "right",
+# 
+#   # 2012
+#   "Forest_2012", "Forest 2012", "below", "left", -1, 2, "right",
+#   "Matrix_2012", "Matrix 2012", "below", "left", -1, -2, "right",
+#   "Deforested_2012", "Deforested 2012", "below", "left", -1, 0.5, "right",
+#   "Reforested_2012", "Reforested 2012", "below", "left", -1, -0.5, "right",
+# 
+#   # 2023
+#   "Forest_2023", "Forest 2023", "right", "", 2, 2, "right",
+#   "Matrix_2023", "Matrix 2023", "right", "", 2, -2, "right",
+#   "Deforested_2023", "Deforested 2023", "right", "", 2, 0.5, "right",
+#   "Reforested_2023", "Reforested 2023 (Secondary forest)", "right", "", 2, -0.5, "right"
+# )
+# 
+# # Define palette
+# palette = tibble::tribble(
+#   ~substance, ~color,
+#   "Forest_stay", "#32a65e",
+#   "Matrix_stay", "#7B68EE",
+#   "Reforestation", "#61FA95",
+#   "Deforestation", "#D95F02",
+#   "Deforested_stay", "orange",
+#   "Reforested_stay", "lightgreen"
+# )
+# 
+# # Node style and title
+# ns = list(
+#   type = "arrow",
+#   gp = grid::gpar(fill = "#00008B", col = "white", lwd = 2),
+#   length = 0.7,
+#   label_gp = grid::gpar(col = "#00008B", fontsize = 9),
+#   mag_pos = "label",
+#   mag_fmt = "%.1f %%", # Define the label (for ha: %.0f ha means 0 decimal followed by ha; for percentages: %.1f %% means 1 decimal followed by %)
+#   mag_gp = grid::gpar(fontsize = 9, fontface = "bold", col = "#00008B")
+# )
+# 
+# title_txt = "Forest dynamics (1990–2023)"
+# attr(title_txt, "gp") = grid::gpar(fontsize = 16, fontface = "bold", col = "#00008B")
+# 
+# # Plot Sankey diagram
+# sankey_plot = PantaRhei::sankey(
+#   nodes, flows, palette,
+#   node_style = ns,
+#   max_width = 0.1,
+#   rmin = 0.5,
+#   legend = FALSE,
+#   page_margin = c(0.15, 0.05, 0.25, 0.20),
+#   title = title_txt
+# )
+# 
 # # Export PDF
-# pdf("sankey_forest_trajectories_1989_2023.pdf", width = 13, height = 7)
+# pdf("sankey_forest_trajectories_1990_2023.pdf", width = 13, height = 7)
 # PantaRhei::sankey(
 #   nodes, flows, palette,
 #   node_style = ns,
@@ -810,72 +948,3 @@ sankey_plot = PantaRhei::sankey(
 #   title = title_txt
 # )
 # dev.off()
-
-### Doughnut plot
-# Summarize land use composition per year and class
-# 1989
-initial_year = transition_df %>%
-  dplyr::filter(year_from == min(year_from)) %>%
-  dplyr::group_by(from_class) %>%
-  dplyr::summarise(area_ha = sum(area_ha), .groups = "drop") %>%
-  dplyr::mutate(year = min(transition_df$year_from)) %>%
-  dplyr::rename(class = from_class)
-
-# Compute composition for other years
-subsequent_years = transition_df %>%
-  dplyr::group_by(year = year_to, class = to_class) %>%
-  dplyr::summarise(area_ha = sum(area_ha), .groups = "drop")
-
-# Combine all years
-donut_df = dplyr::bind_rows(initial_year, subsequent_years) %>%
-  dplyr::group_by(year) %>%
-  dplyr::mutate(perc = area_ha / sum(area_ha) * 100) %>%
-  dplyr::ungroup()
-
-# Doughnut plot
-# Same colors as Sankey
-category_colors = c(
-  "Forest" = "#32a65e",
-  "Matrix" = "#7B68EE",
-  "Reforested" = "#61FA95",
-  "Deforested" = "#D95F02"
-)
-
-ggplot(donut_df, aes(x = 2, y = perc, fill = class)) +
-  geom_bar(stat = "identity", width = 1, color = "white") +
-  coord_polar(theta = "y") +
-  xlim(0.5, 2.5) +
-  geom_text(aes(label = paste0(round(perc, 1), "%")),
-            position = position_stack(vjust = 0.5),
-            color = "white", size = 3.5) +
-  facet_wrap(~year, nrow = 1) +
-  scale_fill_manual(values = category_colors) +
-  theme_void() +
-  ggtitle("Land-use composition by year") +
-  theme(
-    legend.position = "bottom",
-    plot.title = element_text(size = 14, face = "bold", color = "#00008B"),
-    strip.text = element_text(size = 11, face = "bold")
-  )
-
-
-### Export rasters -----------
-message("Exporting rasters...")
-
-# Define output folder
-output_dir = here("outputs", "data", "MapBiomas", "Rasters_cumulative_tm")
-
-# Export each raster with year in the filename
-for (i in seq_along(final_list)) {
-  year_i <- years[i]
-  output_path <- file.path(output_dir, paste0("raster_cumul_tm_", year_i, ".tif"))
-  
-  message("  - Writing raster for year ", year_i)
-  
-  terra::writeRaster(
-    final_list[[i]],
-    filename = output_path,
-    overwrite = TRUE, # Overwrite existing files or not
-    wopt = list(datatype = "INT1U", gdal = c("COMPRESS=LZW"))
-  )
-}

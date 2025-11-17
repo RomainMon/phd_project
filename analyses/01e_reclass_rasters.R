@@ -695,7 +695,7 @@ rasters_lm <- purrr::map2(rasters_plantios2, years, function(r, yr) {
   r_lin <- apply_linear_feature_single(r_lin, yr, power_lines, buffer_width = 50, value = 2, use_date = FALSE)
   r_lin <- apply_linear_feature_single(r_lin, yr, pipelines, buffer_width = 15, value = 2, use_date = TRUE)
   r_lin <- apply_linear_feature_single(r_lin, yr, roads, buffer_width = 20, value = 5, use_date = TRUE)
-  r_lin <- apply_linear_feature_single(r_lin, yr, bridges, buffer_width = 15, value = 15, use_date = TRUE) # Here, bridges are distinguished from forest
+  r_lin <- apply_linear_feature_single(r_lin, yr, bridges, buffer_width = 15, value = 15, use_date = TRUE) # ! Here, bridges are distinguished from forest (value 15)
   r_lin
 })
 
@@ -760,10 +760,10 @@ rasters_final2 <- lapply(rasters_lm, function(r){
   # 2) plantios inside CAR become 12
   r <- assign_if_intersect(r, car, target_values = 10, new_value = 12)
   
-  # 3) reserves override original forest
+  # 3) reserves override original forest (become 13)
   r <- assign_if_intersect(r, rbind(uniao,pda), target_values = 1, new_value = 13)
   
-  # 4) private override original forest
+  # 4) private override original forest (become 14)
   r <- assign_if_intersect(r, car, target_values = 1, new_value = 14)
   
   r
