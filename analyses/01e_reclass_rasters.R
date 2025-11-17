@@ -148,13 +148,14 @@ apply_temporal_threshold <- function(rasters, years) {
 # It is replaced by the majority value among its neighbors (excluding NA).
 
 remove_isolated_cells <- function(rasters, years) {
-  message("Removing isolated noisy cells (spatial only)...")
+  
+  message("Removing isolated cells...")
   n <- length(rasters)
   if (n != length(years)) stop("rasters and years must have same length")
   
   # Ensure integer rasters (NA preserved)
   rasters <- lapply(rasters, function(r) {
-    r_int <- clamp(r, -Inf, Inf, values=TRUE) # keep structure
+    r_int <- clamp(r, -Inf, Inf, values = TRUE)  # keep structure
     values(r_int) <- as.integer(values(r))
     r_int
   })
@@ -166,16 +167,17 @@ remove_isolated_cells <- function(rasters, years) {
   center_index <- ceiling(length(w) / 2)
   
   for (i in seq_len(n)) {
+    
     r <- rasters[[i]]
     message(" Processing year ", years[i], " (", i, "/", n, ")")
     
     vals <- values(r)
     
-    # 1) count neighbors equal to center (subtract 1 to exclude center)
+    # 1) Count neighbors equal to center (subtract 1 to exclude center)
     same_count_r <- terra::focal(
       r, w,
       fun = function(x, ...) {
-        centre <- x[ceiling(length(x)/2)]
+        centre <- x[ceiling(length(x) / 2)]
         sum(x == centre, na.rm = TRUE) - 1
       },
       na.policy = "omit",
@@ -185,10 +187,10 @@ remove_isolated_cells <- function(rasters, years) {
     
     same_count <- values(same_count_r)
     
-    # Only spatial isolation now
+    # Spatial isolation
     is_isolated <- !is.na(vals) & (same_count == 0)
-    
     target_idx <- which(is_isolated)
+    
     message("  -> flagged pixels: ", length(target_idx))
     
     if (length(target_idx) == 0) {
@@ -196,11 +198,11 @@ remove_isolated_cells <- function(rasters, years) {
       next
     }
     
-    # 2) compute neighbor MODE (excluding center)
+    # 2) Compute neighbor MODE (excluding center)
     neighbor_mode_r <- terra::focal(
       r, w,
       fun = function(x, ...) {
-        center_pos <- ceiling(length(x)/2)
+        center_pos <- ceiling(length(x) / 2)
         neighs <- x[-center_pos]
         neighs <- neighs[!is.na(neighs)]
         if (length(neighs) == 0) return(NA_integer_)
@@ -214,15 +216,16 @@ remove_isolated_cells <- function(rasters, years) {
     
     neighbor_mode <- values(neighbor_mode_r)
     
-    # 3) replacement = neighbor mode
+    # 3) Replacement = neighbor mode
     replacement_vals <- neighbor_mode[target_idx]
     
-    # if neighbor mode is NA, keep original value (no temporal fallback anymore)
+    # If neighbor mode is NA, keep original value
     fixed_vals <- vals
     fixed_vals[target_idx] <- replacement_vals
     
     r_fixed <- setValues(r, fixed_vals)
     names(r_fixed) <- as.character(years[i])
+    
     out_list[[i]] <- r_fixed
   }
   
@@ -441,7 +444,7 @@ par(mfrow = c(1,1))
 
 ##### Step 4 – Add plantios ------
 message("Step 4: Adding plantios to rasters...")
-rasters_plantios <- purrr::map2(rasters_filtered, years, function(r, yr) {
+rasters_plantios <- purrr::map2(rasters_spatial_clean, years, function(r, yr) {
   message("  - Adding plantios for year ", yr)
   add_plantios(r, yr, plantios, plantio_value = 1) # Plantios are not differentiated from other forests
 })
@@ -548,9 +551,84 @@ for (i in subset_indices) {
   par(mfrow=c(1,1))
 }
 
+##### Visual demo of all steps ---------
+# Quick final summary
+freq(rasters_final[[35]])
 
-# Quick summary
-freq(rasters_final[[36]])
+# Central coordinates
+x_center <- 778151.2
+y_center <- 7508862.8
+
+# Zoom window
+buffer_size <- 1200
+zoom_ext <- extent(
+  x_center - buffer_size, x_center + buffer_size,
+  y_center - buffer_size, y_center + buffer_size
+)
+
+# Choose which raster/year to illustrate
+index_demo <- 35
+
+# Step 1 - Reclassify
+r_step1 <- crop(rasters_reclass[[index_demo]], zoom_ext)
+
+# Step 2 - Temporal filter
+r_step2 <- crop(rasters_filtered[[index_demo]], zoom_ext)
+
+# Step 3 - Spatial filter
+r_step3 <- crop(rasters_spatial_clean[[index_demo]], zoom_ext)
+
+# Step 4 - Add plantios
+r_step4 <- crop(rasters_plantios[[index_demo]], zoom_ext)
+
+# Step 5 - Dilatation erosion
+r_step5 <- crop(rasters_dilate[[index_demo]], zoom_ext)
+
+# Step 6 - Linear features
+r_step6 <- crop(rasters_final[[index_demo]], zoom_ext)
+
+roads_sub       <- crop(roads, zoom_ext)
+power_lines_sub <- crop(power_lines, zoom_ext)
+bridges_sub     <- crop(bridges, zoom_ext)
+pipelines_sub   <- crop(pipelines, zoom_ext)
+
+
+# Plot all steps together
+
+png(here("outputs","plot","01e_reclass_rasters_demo.png"), width = 3000, height = 2000, res = 300)
+
+par(mfrow = c(2, 3), mar = c(2,2,2,2))
+
+# Step 1
+plot(r_step1, main = paste0("Step 1 – Reclassify (", years[index_demo], ")"),
+     col=c("#32a65e", "#FFFFB2", "#d4271e"))
+
+# Step 2
+plot(r_step2, main = "Step 2 – Temporal filter",
+     col=c("#32a65e", "#FFFFB2", "#d4271e"))
+
+# Step 3
+plot(r_step3, main = "Step 3 – Spatial filter",
+     col=c("#32a65e", "#FFFFB2", "#d4271e"))
+
+# Step 4
+plot(r_step4, main = "Step 4 – Add plantios",
+     col=c("#32a65e", "#FFFFB2", "#d4271e"))
+
+# Step 5
+plot(r_step5, main = "Step 5 – Dilatation–Erosion",
+     col=c("#32a65e", "#FFFFB2", "#d4271e"))
+
+# Step 6
+plot(r_step6, main = "Step 6 – Linear features",
+     col=c("#32a65e", "#ad975a", "#FFFFB2", "#d4271e"))
+plot(roads_sub,       add=TRUE, col="black")
+plot(power_lines_sub, add=TRUE, col="red")
+plot(bridges_sub,     add=TRUE, col="blue")
+plot(pipelines_sub,   add=TRUE, col="orange")
+
+par(mfrow = c(1,1))
+dev.off()
 
 ##### Export rasters ---------
 message("Exporting rasters...")
@@ -579,7 +657,7 @@ for (i in seq_along(rasters_final)) {
 
 ##### Step 1 – Add plantios ------------
 message("Adding plantios to rasters...")
-# We use the output of dilatation erosion process (step 3 above)
+# We use the output of dilatation erosion process
 rasters_plantios <- purrr::map2(rasters_dilate, years, function(r, yr) {
   message("  - Adding plantios for year ", yr)
   add_plantios(r, yr, plantios, plantio_value = 10) # Plantios are not differentiated from other forests
