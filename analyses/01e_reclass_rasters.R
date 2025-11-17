@@ -658,7 +658,7 @@ for (i in seq_along(rasters_final)) {
 ##### Step 1 – Add plantios ------------
 message("Adding plantios to rasters...")
 # We use the output of dilatation erosion process
-rasters_plantios <- purrr::map2(rasters_dilate, years, function(r, yr) {
+rasters_plantios2 <- purrr::map2(rasters_dilate, years, function(r, yr) {
   message("  - Adding plantios for year ", yr)
   add_plantios(r, yr, plantios, plantio_value = 10) # Plantios are not differentiated from other forests
 })
@@ -678,7 +678,7 @@ if (nrow(pl) > 0) {
   par(mfrow=c(1, length(idx)))
   for (j in seq_along(idx)) {
     yr <- years_to_plot[j]
-    r_zoom <- crop(rasters_plantios[[idx[j]]], ext_zoom)
+    r_zoom <- crop(rasters_plantios2[[idx[j]]], ext_zoom)
     plot(r_zoom, col=c("#32a65e", "#ad975a", "#FFFFB2", "#0000FF", "#d4271e"), main=as.character(yr))
     plot(pl, border="black", lwd=2, add=TRUE)
   }
@@ -689,7 +689,7 @@ if (nrow(pl) > 0) {
 
 ##### Step 2 – Apply linear features on top of raster layers -----
 message("Applying linear features...")
-rasters_lm <- purrr::map2(rasters_plantios, years, function(r, yr) {
+rasters_lm <- purrr::map2(rasters_plantios2, years, function(r, yr) {
   message("  - Applying linear features for year ", yr)
   r_lin <- r
   r_lin <- apply_linear_feature_single(r_lin, yr, power_lines, buffer_width = 50, value = 2, use_date = FALSE)
@@ -719,7 +719,7 @@ subset_indices <- c(1, 17, 35)
 # Loop over selected rasters
 for (i in subset_indices) {
   # Crop rasters
-  r_before <- crop(rasters_plantios[[i]], zoom_ext)
+  r_before <- crop(rasters_plantios2[[i]], zoom_ext)
   r_after  <- crop(rasters_lm[[i]], zoom_ext)
   
   # Crop linear features
