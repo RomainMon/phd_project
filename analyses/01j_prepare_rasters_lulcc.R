@@ -9,26 +9,53 @@ library(here)
 library(terra)
 library(sf)
 library(landscapemetrics)
-library(multilandr)
+library(data.table)
+library(stringr)
 
 ### Import rasters -------
+
 ## Land use
+base_path = here("outputs", "data", "MapBiomas", "Rasters_reclass")
+raster_files = list.files(base_path, pattern = "\\.tif$", full.names = TRUE)
+
+# Extract years
+years_lulc = stringr::str_extract(basename(raster_files), "(?<!\\d)\\d{4}(?!\\d)")
+# Create a dataframe to link files and years
+raster_df = data.frame(file = raster_files, years_lulc = as.numeric(years_lulc)) %>%
+  dplyr::arrange(years_lulc)
+# Load rasters in chronological order
+rasters_reclass = lapply(raster_df$file, terra::rast)
+years_lulc = raster_df$years_lulc
+# Check
+for (i in seq_along(rasters_reclass)) {
+  cat("Year", years_lulc[i], " → raster name:", basename(raster_df$file[i]), "\n")
+}
+plot(rasters_reclass[[35]], col=c("#32a65e", "#ad975a", "#FFFFB2", "#0000FF", "#d4271e"))
+
+## Cumulative rasters
 base_path = here("outputs", "data", "MapBiomas", "Rasters_cumulative_tm")
 raster_files = list.files(base_path, pattern = "\\.tif$", full.names = TRUE)
 
 # Extract years
-years = stringr::str_extract(basename(raster_files), "(?<!\\d)\\d{4}(?!\\d)")
+years_tm = stringr::str_extract(basename(raster_files), "(?<!\\d)\\d{4}(?!\\d)")
 # Create a dataframe to link files and years
-raster_df = data.frame(file = raster_files, year = as.numeric(years)) %>%
-  dplyr::arrange(year)
+raster_df = data.frame(file = raster_files, years_tm = as.numeric(years_tm)) %>%
+  dplyr::arrange(years_tm)
 # Load rasters in chronological order
-rasters = lapply(raster_df$file, terra::rast)
-years = raster_df$year
+rasters_tm = lapply(raster_df$file, terra::rast)
+years_tm = raster_df$years_tm
 # Check
-for (i in seq_along(rasters)) {
-  cat("Year", years[i], " → raster name:", basename(raster_df$file[i]), "\n")
+for (i in seq_along(rasters_tm)) {
+  cat("Year", years_tm[i], " → raster name:", basename(raster_df$file[i]), "\n")
 }
-plot(rasters[[35]], col=c("#32a65e", "#ad975a", "#FFFFB2", "#0000FF", "#d4271e", "lightgreen", "pink"))
+plot(rasters_tm[[35]], col=c("#32a65e", "#ad975a", "#FFFFB2", "#0000FF", "#d4271e", "lightgreen", "pink"))
+
+
+## Years of change
+base_path = here("outputs", "data", "MapBiomas", "Rasters_years_forest_change")
+raster_files = list.files(base_path, pattern = "\\.tif$", full.names = TRUE)
+lulcc_years = lapply(raster_files, terra::rast)
+plot(lulcc_years[[1]])
 
 ## Slope
 slope = terra::rast(here("data", "geo", "TOPODATA", "work", "slope_bbox.tif"))
@@ -92,305 +119,252 @@ apa_mld = terra::project(apa_mld, "EPSG:31983")
 plot(apa_mld)
 apa_mld_sf = sf::st_as_sf(apa_mld)
 
+
+
 ### Prepare the cell-based dataset -----
+# Rationale:
+# Start from rasters_tm[[35]] (cells that changed at least once).
+# For each changed cell, extract up to X change events from lulcc_years (one row per event: cell_id, change_rank, change_year).
+# For each event row compute the requested groups of covariates: 
+# Legal status (public_reserve / private / urban / reserva_legal)
+# APA intersection
+# Distances (roads - time-aware, rivers, urban centroids, forest edges - computed from rasters_reclass for the event year)
+# Mean slope
+# PLAND (percent cover per class in 1 km) computed on rasters_reclass for event year
 
-#### Polygonize land use -------
-# Select 2023
-lulc_2023 = rasters[[35]]
-lulc_2023[!(lulc_2023 %in% c(1,6,7))] = NA # Put all values different to NA
-plot(lulc_2023)
 
-# A sample
-# sample 2% of non-NA cells
-cells = which(!is.na(lulc_2023[]))
-sample_cells = sample(cells, size = round(length(cells) * 0.02))
+# Parameters
+change_codes = c(6,7) # reforest=6, deforest=7 in rasters_tm
+pland_radius_m = 1000 # radius for PLAND (meters)
+pland_classes = c(1,2,3,4,5) # classes present in rasters_reclass (adjust)
+template_rast = rasters_reclass[[35]]  # general template/resolution/extent (adjust if needed)
+roads_year_col <- "date_crea" # column name in roads_sf with creation year
+out_rds <- "changed_cells_all_events.rds"
+out_csv <- "changed_cells_all_events.csv"
 
-# mask everything except sampled cells
-lulc_sample = lulc_2023
-lulc_sample[-sample_cells] = NA
 
-# polygonize
-lulc_2023_poly = terra::as.polygons(lulc_sample, aggregate=FALSE, values=TRUE, na.rm=TRUE) # If aggregate=TRUE, cells are dissolved based on their value and proximity
-plot(lulc_2023_poly)
+# Basic checks & reprojection (meters)
+# Ensure vectors are in raster CRS
+ensure_crs <- function(sf_obj, target_crs) {
+  if(is.null(sf_obj)) return(NULL)
+  if(st_crs(sf_obj) != target_crs) return(st_transform(sf_obj, target_crs))
+  return(sf_obj)
+}
+r_crs = crs(template_rast) # terra CRS object (projstring)
 
-# to sf
-lulc_2023_sf = sf::st_as_sf(lulc_2023_poly)
-
-# Make sure polygons have an ID
-lulc_2023_sf = lulc_2023_sf %>% dplyr::mutate(cell_id = row_number())
-
-#### Determine legal status for each raster cell -----
-
-##### 1st classification -----
-## FIRST, we determine whether cells are public (reserve), private (car), or urban
-
-# Ensure all layers share the same CRS
-stopifnot(st_crs(lulc_2023_sf) == sf::st_crs(car_sf))
-stopifnot(st_crs(uniao_sf) == sf::st_crs(pda_sf))
-stopifnot(sf::st_crs(urb_sf) == sf::st_crs(car_sf))
-
-# Combine public reserves into one layer
-public_reserves_sf = dplyr::bind_rows(
+# Reproject the sf layers (if they exist)
+car_sf <- ensure_crs(car_sf, r_crs)
+uniao_sf <- ensure_crs(uniao_sf, r_crs)
+pda_sf <- ensure_crs(pda_sf, r_crs)
+public_reserves_sf <- dplyr::bind_rows(
   uniao_sf %>% dplyr::mutate(source = "uniao"),
-  pda_sf   %>% dplyr::mutate(source = "pda")
+  pda_sf %>% dplyr::mutate(source = "pda")
 )
+urb_sf <- ensure_crs(urb_sf, r_crs)
+rl_sf <- ensure_crs(rl_sf, r_crs)
+apa_mld_sf <- ensure_crs(apa_mld_sf, r_crs)
+roads_sf <- ensure_crs(roads_sf, r_crs)
+rivers_sf <- ensure_crs(rivers_sf, r_crs)
+urb_centers_sf <- ensure_crs(urb_centers_sf, r_crs)
 
-# Intersection with CAR (private)
-inter_car = sf::st_intersection(
-  lulc_2023_sf %>% dplyr::select(cell_id, geometry),
-  car_sf %>% dplyr::select(geometry)
-) %>%
-  dplyr::mutate(
-    area_overlap = as.numeric(sf::st_area(geometry)),
-    legal_status = "private"
-  )
+# Helpers
+# rasterize vectors to binary raster (must specify if the background is 0 or NA)
+rasterize_binary <- function(sf_obj, template_rast, value = 1, background = NA) {
+  if (is.null(sf_obj) || nrow(sf_obj) == 0) {
+    r <- rast(template_rast)
+    values(r) <- background
+    return(r)
+  }
+  v <- terra::vect(sf_obj)
+  r <- terra::rasterize(v, template_rast, field = value, background = background)
+  return(r)
+}
 
-# Intersection with public reserves (uniao + pda)
-inter_public = sf::st_intersection(
-  lulc_2023_sf %>% dplyr::select(cell_id, geometry),
-  public_reserves_sf %>% dplyr::select(geometry, source)
-) %>%
-  dplyr::mutate(
-    area_overlap = as.numeric(sf::st_area(geometry)),
-    legal_status = "public_reserve"
-  )
+# safe extract wrapper returning vector of values
+extract_values <- function(spatr, coords_df) {
+  if(is.null(spatr)) return(rep(NA_real_, nrow(coords_df)))
+  ex = terra::extract(spatr, coords_df)
+  # terra::extract returns ID column then values; if single-layer returns matrix
+  if(is.matrix(ex) || is.data.frame(ex)) {
+    if(ncol(ex) >= 2) return(as.vector(ex[,2]))
+    if(ncol(ex) == 1) return(as.vector(ex[,1]))
+  }
+  # fallback
+  return(as.vector(ex))
+}
 
-# Intersection with urban centers (urb)
-inter_urban = sf::st_intersection(
-  lulc_2023_sf %>% dplyr::select(cell_id, geometry),
-  urb_sf %>% dplyr::select(geometry)
-) %>%
-  dplyr::mutate(
-    area_overlap = as.numeric(sf::st_area(geometry)),
-    legal_status = "urban"
-  )
+#### SECTION 0 — Identify changed cells (cells with >=1 change) --------
+cat("SECTION 0: identify changed cells from rasters_tm[[35]]\n")
 
-# Combine all intersection results
-inter_all = dplyr::bind_rows(inter_car, inter_public, inter_urban)
+cumulative_mask <- rasters_tm[[35]]
+# Extract only transitions 6 (reforest) and 7 (deforest)
+vals <- terra::values(cumulative_mask)
+changed_cell_ids <- which(vals %in% c(6, 7))
+head(changed_cell_ids)
 
-# For cells that intersect multiple zones, keep the one with the largest overlap or private if it intersects "private"
-legal_status_df = inter_all %>%
-  dplyr::group_by(cell_id) %>%
-  dplyr::slice_max(order_by = area_overlap, n = 1, with_ties = FALSE) %>%
-  dplyr::ungroup() %>%
-  dplyr::mutate(
-    legal_status = ifelse(cell_id %in% inter_car$cell_id, 
-                          "private", 
-                          legal_status)
-  ) %>%
-  dplyr::select(cell_id, legal_status)
+cat(" Number of changed cells:", length(changed_cell_ids), "\n")
 
-# Join back to raster cell polygons
-lulc_2023_sf = lulc_2023_sf %>%
-  dplyr::left_join(sf::st_drop_geometry(legal_status_df), by = "cell_id")
 
-# Replace NAs by "none" if some cells don’t intersect anything
-lulc_2023_sf = lulc_2023_sf %>%
-  dplyr::mutate(legal_status = tidyr::replace_na(legal_status, "none"))
+#### SECTION 1 — Build master table of all change events --------
+# For each changed cell, read the up to 10 lulcc_years rasters and convert to long table
+cat("SECTION 1: building event table from lulcc_years\n")
 
-# Quick check
-table(lulc_2023_sf$legal_status)
+# extract values of each lulcc_year raster at changed cells
+vals_list <- lapply(lulcc_years, function(r) {
+  # r is a SpatRaster (values are years or NA)
+  terra::values(r)[changed_cell_ids]
+})
+vals_mat <- do.call(cbind, vals_list) # rows = changed cells, cols = change_ranks (1..10)
+colnames(vals_mat) <- paste0("rank_", seq_len(ncol(vals_mat)))
+head(vals_mat)
 
-##### 2nd classification  ------
-### reserve ; urban ; private_reserve ; private_no_status
+# Build data.table
+dt0 <- as.data.table(vals_mat)
+dt0[, cell_id := changed_cell_ids]
 
-# TRUE/FALSE vector: does each cell intersect at least 1 RL polygon?
-hits = sf::st_intersects(lulc_2023_sf, rl_sf)
-lulc_2023_sf$rl = lengths(hits) > 0
+# convert wide -> long (only non-NA rows)
+dt_long <- data.table::melt(dt0,
+                id.vars = "cell_id",
+                variable.name = "change_rank",
+                value.name = "change_year",
+                variable.factor = FALSE)
 
-# now the new legal_status2 rules
-lulc_2023_sf = lulc_2023_sf %>%
-  dplyr::mutate(
-    legal_status2 =
-      dplyr::case_when(
-        legal_status == "public_reserve" ~ "public_reserve",
-        legal_status == "urban"          ~ "urban",
-        rl %in% TRUE                     ~ "private_reserve",
-        legal_status == "private"        ~ "private_no_status",
-        TRUE                             ~ "none"
-      )
-  )
+# convert change_rank strings to integer rank
+dt_long[, change_rank := as.integer(stringr::str_extract(change_rank, "\\d+"))]
+# keep only non-NA events
+dt_long <- dt_long[!is.na(change_year)]
+setorder(dt_long, cell_id, change_rank)
+# add coordinates (x,y)
+xy_coords <- terra::xyFromCell(template_rast, dt_long$cell_id)
+dt_long[, `:=`(x = xy_coords[,1], y = xy_coords[,2])]
 
-# Quick check
-table(lulc_2023_sf$legal_status)
-table(lulc_2023_sf$legal_status2)
+# add change type (from rasters_tm value at the cell in cumulative mask; 6 or 7)
+# we assume rasters_tm[[35]] keeps code per cell; extract values
+mask_vals <- terra::values(cumulative_mask)[dt_long$cell_id]
+dt_long[, change_code := mask_vals]
+dt_long[, change_type := ifelse(change_code == 6, "reforest", ifelse(change_code == 7, "deforest", NA_character_))]
+# create unique event id
+dt_long[, event_id := .I]
 
-##### Intersects APA -----
-# intersection
-inter_apa = sf::st_intersects(
-  lulc_2023_sf %>% dplyr::select(cell_id, geometry),
-  apa_mld_sf %>% dplyr::select(geometry),
-  sparse = FALSE
-)
+cat(" Events to process:", nrow(dt_long), " (", length(unique(dt_long$cell_id)), " unique cells )\n")
 
-lulc_2023_sf = lulc_2023_sf %>%
-  dplyr::mutate(apa_mld = ifelse(apply(inter_apa, 1, any), 1, 0))
+# Convert to data.table for speed if not already
+setDT(dt_long)
+head(dt_long)
 
-#### Distance to features -------
 
-##### Centroids ---------
-# compute pixel centroids
-lulc_centroids = sf::st_centroid(lulc_2023_sf)
+#### SECTION 2 — LEGAL STATUS (public_reserve, private, urban, reserva_legal) --------
+# We rasterize the polygon layers once and extract values at event coords
+cat("SECTION 2: computing legal status and reserva legal\n")
+car_r <- rasterize_binary(car_sf, template_rast, value = 1, background = 0)
+pub_r <- rasterize_binary(public_reserves_sf, template_rast, value = 1, background = 0)
+urb_r <- rasterize_binary(urb_sf, template_rast, value = 1, background = 0)
+rl_r  <- rasterize_binary(rl_sf, template_rast, value = 1, background = 0)
 
-##### Distance computation -----
-# roads: distance to nearest road
-d_road = sf::st_distance(lulc_centroids, roads_sf)
-dist_to_road = apply(d_road, 1, min)
+coords_df <- dt_long[, .(x,y)]
+dt_long[, in_car := as.integer(extract_values(car_r, coords_df) == 1)]
+dt_long[, in_public := as.integer(extract_values(pub_r, coords_df) == 1)]
+dt_long[, in_urban := as.integer(extract_values(urb_r, coords_df) == 1)]
+dt_long[, in_rl := as.logical(extract_values(rl_r, coords_df) == 1)]
 
-# rivers: distance to nearest river
-d_water = sf::st_distance(lulc_centroids, rivers_sf)
-dist_to_water = apply(d_water, 1, min)
+# Determine legal_status with priority: urban > public_reserve > private > none
+dt_long[, legal_status := fifelse(in_urban == 1, "urban",
+                                  fifelse(in_public == 1, "public_reserve",
+                                          fifelse(in_car == 1, "private", "none")))]
+dt_long %>% dplyr::group_by(legal_status) %>% dplyr::summarise(n=dplyr::n_distinct(cell_id))
+cat(" Legal status assigned.\n")
 
-# urban: distance to nearest urban centroid
-d_urban = sf::st_distance(lulc_centroids, urb_centers_sf)
-dist_to_urban = apply(d_urban, 1, min)
 
-# join distances
-# put distances in a data.frame with cell_id
-dist_df = data.frame(
-  cell_id = lulc_2023_sf$cell_id,
-  dist_road_m  = as.numeric(dist_to_road),
-  dist_water_m = as.numeric(dist_to_water),
-  dist_urban_m = as.numeric(dist_to_urban)
-)
+#### SECTION 3 — INTERSECT WITH APA (binary) --------
+cat("SECTION 3: APA intersection\n")
+apa_r <- car_r <- rasterize_binary(apa_mld_sf, template_rast, value = 1, background = 0)
+dt_long[, in_APA := as.integer(extract_values(apa_r, coords_df) == 1)]
+dt_long %>% 
+  dplyr::filter(in_APA == 1) %>% 
+  dplyr::summarise(n=dplyr::n_distinct(cell_id))
 
-# now join by cell_id
-lulc_2023_sf = lulc_2023_sf %>%
-  dplyr::left_join(dist_df, by = "cell_id")
+cat(" APA computed.\n")
 
-#### Distance to forest edges -------
-# forest mask
-forest_2023 = rasters[[35]] == 1
-forest_2023[rasters[[35]] != 1] = NA
-plot(forest_2023)
+#### SECTION 4 — DISTANCES --------
+cat("SECTION 4: computing distances (rivers, urban centers, roads, forest edges)\n")
 
-# compute patches (raster -> list of rasters, one per patch group)
-p = landscapemetrics::get_patches(forest_2023, class = 1, directions = 8)
+coords_dt <- dt_long[, .(x, y)]
 
-# convert them to a single terra SpatVector
-patch_raster = p[[1]][[1]]  # layer_1$class_1 equivalent
-patch_raster[is.na(patch_raster)] = NA
+# 4.1 Distance to rivers
+rivers_bin <- rasterize_binary(rivers_sf, template_rast, value = 1, background = NA) # Distance only works if background = NA (not 0)
+dist_rivers_r <- terra::distance(rivers_bin)
+dt_long[, dist_water_m := extract_values(dist_rivers_r, coords_dt)]
 
-# extract edges
-edge = landscapemetrics::get_boundaries(patch_raster, as_NA = TRUE)
-plot(edge[[1]], col="lightpink")
-edge_raster = edge[[1]]
 
-# Polygonize edges (dissolve identical patch IDs)
-edge_vect = terra::as.polygons(edge_raster, dissolve = TRUE, na.rm = TRUE)
+# 4.2 Distance to urban centers
+urban_bin <- rasterize_binary(urb_centers_sf, template_rast, value = 1, background = NA)
+dist_urban_r <- terra::distance(urban_bin)
+dt_long[, dist_urban_m := extract_values(dist_urban_r, coords_dt)]
 
-# Convert to sf
-edge_sf = sf::st_as_sf(edge_vect)
 
-# distance to forest edges
-d_edge = sf::st_distance(lulc_centroids, edge_sf)
-dist_to_edge = apply(d_edge, 1, min)  # nearest per pixel
+# 4.3 Distance to roads (dynamic by year)
+dt_long[, dist_road_m := NA_real_]   # initialize
 
-# join back
-dist_edge_df = data.frame(
-  cell_id = lulc_2023_sf$cell_id,
-  dist_edge_m = as.numeric(dist_to_edge)
-)
+unique_years <- sort(unique(dt_long$change_year))
 
-lulc_2023_sf = lulc_2023_sf %>%
-  dplyr::left_join(dist_edge_df, by = "cell_id")
+for (yr in unique_years) {
+  
+  # subset rows for this year
+  idx <- which(dt_long$change_year == yr)
+  if (length(idx) == 0) next
+  
+  # subset coords
+  coords_year <- dt_long[idx, .(x, y)]
+  
+  # rasterize roads existing that year
+  roads_sub <- roads_sf[roads_sf[[roads_year_col]] <= yr, ]
+  if (nrow(roads_sub) == 0) {
+    dt_long[idx, dist_road_m := NA_real_]
+    next
+  }
+  
+  roads_bin <- rasterize_binary(roads_sub, template_rast, value = 1, background = NA)
+  dist_r <- terra::distance(roads_bin)
+  
+  # extract only for those rows
+  dt_long[idx, dist_road_m := extract_values(dist_r, coords_year)]
+}
 
-#### Slope -----
-# extract mean slope inside each cell polygon
-mean_slope = terra::extract(slope, lulc_2023_poly, fun = mean, na.rm = TRUE)
-mean_slope = mean_slope %>%
-  dplyr::rename(mean_slope = slope_bbox) %>%
-  dplyr::mutate(cell_id = lulc_2023_sf$cell_id)
 
-# join back
-lulc_2023_sf = lulc_2023_sf %>%
-  dplyr::left_join(mean_slope %>% dplyr::select(cell_id, mean_slope), by = "cell_id")
+# 4.4 Distance to forest edges (dynamic by year)
+# # forest mask 
+# forest_2023 = rasters[[35]] == 1 
+# forest_2023[rasters[[35]] != 1] = NA 
+# plot(forest_2023) 
+# # compute patches (raster -> list of rasters, one per patch group) 
+# p = landscapemetrics::get_patches(forest_2023, class = 1, directions = 8) 
+# # convert them to a single terra SpatVector 
+# patch_raster = p[[1]][[1]] # layer_1$class_1 equivalent 
+# patch_raster[is.na(patch_raster)] = NA 
+# # extract edges 
+# edge = landscapemetrics::get_boundaries(patch_raster, as_NA = TRUE) 
+# plot(edge[[1]], col="lightpink") 
+# edge_raster = edge[[1]] 
+# # Polygonize edges (dissolve identical patch IDs) 
+# edge_vect = terra::as.polygons(edge_raster, dissolve = TRUE, na.rm = TRUE) 
+# # Convert to sf 
+# edge_sf = sf::st_as_sf(edge_vect) 
+# # distance to forest edges 
+# d_edge = sf::st_distance(lulc_centroids, edge_sf) 
+# dist_to_edge = apply(d_edge, 1, min) # nearest per pixel 
+# # join back 
+# dist_edge_df = data.frame( cell_id = lulc_2023_sf$cell_id, dist_edge_m = as.numeric(dist_to_edge) ) 
+# lulc_2023_sf = lulc_2023_sf %>% dplyr::left_join(dist_edge_df, by = "cell_id")
 
-#### Land use in buffers -----
 
-##### With multilandr ------
-# 1. Create multiland object
-# Rasters and points objects
-r2023 = rasters[[35]] # SpatRaster object
-points = terra::vect(lulc_centroids)
-points = sample(points, 100)
+cat(" Distances computed.\n")
 
-# Class names
-cl_names = c(1, "Forest",
-             2, "Notforest",
-             3, "Agriculture",
-             4, "Water",
-             5, "Urban",
-             6, "Reforested",
-             7, "Deforested") 
+#### SECTION 5 — SLOPE --------
+cat("SECTION 5: extracting slope values\n")
 
-# Multiland object
-buff_centroids = mland(points_layer = points,
-                  rast_layer = r2023,
-                  radii = 1000,
-                  class_names = list(cl_names),
-                  site_ref = "cell_id",
-                  on_the_fly = TRUE,
-                  bufftype = "round",
-                  progress = TRUE)
 
-# 2. Plot Multiland object
-mland_plot(buff_centroids, points=10) # plot an example
-
-# 3. Calculation of metrics
-ml_metrics = mland_metrics(buff_centroids, 
-                            level = "class", 
-                            metric = c("pland"),
-                            absence_values = list("pland" = 0))
-ml_metrics
-head(ml_metrics@data)
-
-# 4. Join back to dataset
-# clean df of metrics
-ml_df = ml_metrics@data %>% 
-  dplyr::as_tibble() %>% 
-  dplyr::rename(cell_id = site) %>% 
-  dplyr::select(cell_id, classname, value) %>% 
-  tidyr::pivot_wider(names_from = classname,
-              values_from = value,
-              names_prefix = "pland_")
-
-# join
-lulc_2023_sf = lulc_2023_sf %>% 
-  dplyr::left_join(ml_df, by = "cell_id")
-
-# quick check
-### set 1 random point to inspect
-set.seed(42)
-check1 = lulc_2023_sf2 %>% 
-  dplyr::filter(!is.na(pland_Forest)) %>%
-  dplyr::slice_sample(n=1)
-
-### 1 km buffer
-buff = sf::st_buffer(check1, dist = 1000)
-
-### crop raster around the buffer (slightly bigger so you see context)
-r_zoom = terra::crop(r2023, vect(sf::st_buffer(buff, 200)))
-
-cols = c("#32a65e", "#ad975a", "#FFFFB2", "#0000FF", "#d4271e", "chartreuse", "pink")
-plot(r_zoom, col=cols, legend=TRUE, main="MapBiomas 2023, 1 km QA/QC")
-
-plot(buff$geometry, border="black", lwd=2, add=TRUE)
-plot(check1$geometry, pch=19, col="black", cex=1, add=TRUE)
-
-### add PLAND values
-txt = paste0(
-  "cell_id = ", check1$cell_id, "\n",
-  "Forest = ", round(check1$pland_Forest,1), "%\n",
-  "Notforest = ", round(check1$pland_Notforest, 1), "%\n",
-  "Agriculture = ", round(check1$pland_Agriculture,1), "%\n",
-  "Water = ", round(check1$pland_Water,1), "%\n",
-  "Urban = ", round(check1$pland_Urban,1), "%\n",
-  "Reforested = ", round(check1$pland_Reforested,1), "%\n",
-  "Deforested = ", round(check1$pland_Deforested,1), "%"
-)
-
-legend("top", legend=txt, bty="n")
+#### SECTION 6 — LULC --------
+cat("SECTION 6: computing PLAND in buffer\n")
 
 
 ## Prepare the property-based dataset ----------

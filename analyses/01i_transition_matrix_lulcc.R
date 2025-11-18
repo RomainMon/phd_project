@@ -720,11 +720,11 @@ ggplot(forest, aes(x = 2, y = perc_tot, fill = class)) +
 ##### Export rasters -----------
 message("Exporting rasters...")
 
+
+# Export reclass_cumul_trans (starts from year 2)
 # Define output folder
 output_dir = here("outputs", "data", "MapBiomas", "Rasters_cumulative_tm")
 
-
-# Export reclass_cumul_trans (starts from year 2)
 message("Exporting reclass_cumul_trans rasters (re/deforestation classes)...")
 
 for (i in seq_along(reclass_cumul_trans)) {
@@ -743,6 +743,8 @@ for (i in seq_along(reclass_cumul_trans)) {
 
 
 # Export years_forest_change rasters
+# Define output folder
+output_dir = here("outputs", "data", "MapBiomas", "Rasters_years_forest_change")
 
 message("Exporting rasters for years of forest change...")
 
