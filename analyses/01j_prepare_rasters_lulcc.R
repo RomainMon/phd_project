@@ -11,6 +11,8 @@ library(sf)
 library(data.table)
 library(stringr)
 library(landscapemetrics)
+library(ggplot2)
+library(cowplot)
 
 ### Import rasters -------
 
@@ -221,6 +223,10 @@ cat(" • Events:", nrow(dt_long), "\n")
 
 
 #### SECTION 2 — Select controls (i.e., intact forests) by year ---------
+# We select balanced controls (i.e., intact forests)
+# We determine how many reforest events and deforest events occurred.
+# We identify cells with intact forest (value = 1 in rasters_tm[[year]]).
+# We randomly sample exactly the same number of intact cells.
 
 cat("\nSECTION 2: Selecting intact control cells\n")
 
@@ -435,6 +441,7 @@ data_defor[, dist_water_m := extract_values(dist_rivers_r, coords_defor)]
 data_defor[, dist_urban_m := extract_values(dist_urban_r, coords_defor)]
 
 # Distance to roads (dynamic)
+# To account for creation dates of roads, we subset roads whose creation date ≤ change year
 
 # Initialize column
 data_defor[, dist_road_m := NA_real_]
@@ -459,7 +466,10 @@ for (yr in unique_years) {
 }
 
 # Distance to forest edges (dynamic)
-# pipeline = forest raster → edge raster → terra::distance() → extract
+# To account for the forest dynamics through time, we select the corresponding LULC map from rasters_reclass
+# We build binary forest mask (r == 1)
+# We use landscapemetrics::get_boundaries() to get edge pixels
+# We compute Euclidean distance with terra::distance()
 
 # Initialize column
 data_defor[, dist_edge_m := NA_real_]
@@ -597,113 +607,207 @@ cat(" Distances computed.\n")
 # Slope value is extracted for each event location.
 cat("SECTION 7: extracting slope values\n")
 
-# Solution here : https://gis.stackexchange.com/questions/236337/calculating-proportion-of-land-cover-classes-with-moving-window-around-point-in
+## Dataset A
+data_defor[, slope_pct := extract_values(slope_r, coords_defor)]
+summary(data_defor$slope_pct)
 
-# Convert coords to SpatVector
-coords_all <- rbind(coords_defor, coords_refor)
-coords_all <- vect(coords_all, geom = c("x", "y"), crs = crs(rasters_reclass[[1]]))
+## Dataset B
+data_refor[, slope_pct := extract_values(slope_r, coords_refor)]
+summary(data_refor$slope_pct)
 
-radius_m <- 1000
-target_classes <- c(1, 3, 4, 5)
+cat(" • Slope extraction completed\n")
 
-pland_values <- list()
 
-for (i in seq_along(rasters_reclass)) {
+
+#### SECTION 8 - LAND USE AREA ----------
+
+cat("\nSECTION 8: Land use area extraction around buffers\n")
+names(rasters_reclass) <- years_lulc
+
+# Function to compute land use area (in m²) in circular buffers (moving windows) for given land use classes
+compute_landuse_buffer <- function(dt, rasters_reclass, classes, radius) {
   
-  cat("\nYear", years_lulc[i], "\n")
-  r <- rasters_reclass[[i]]
-  year <- years_lulc[i]
+  cat("\n--- Starting land use area extraction ---\n")
   
-  pland_values[[year]] <- list()
+  # resolution and pixel area
+  pixel_res  <- res(rasters_reclass[[1]])[1]
+  pixel_area <- pixel_res^2
   
-  # fetch cell values with 1 km buffer once
-  vals <- extract(r, coords_all, buffer = radius_m)
+  cat("Pixel resolution:", pixel_res, "m\n")
+  cat("Pixel area:", pixel_area, "m²\n")
   
-  # vals is a list: each element = vector of raster values inside the buffer
-  # Now compute PLAND per class
-  for (cl in target_classes) {
+  # circular weight matrix (1 km radius)
+  cat("Creating focal matrix...\n")
+  w <- terra::focalMat(rasters_reclass[[1]], type = "circle", d = radius, fillNA = TRUE)
+  
+  # list of unique years present in this dataset
+  years <- sort(unique(dt$change_year))
+  
+  # loop over years
+  for (year in years) {
     
-    pland_values[[year]][[paste0("pland_", cl)]] <-
-      sapply(vals, function(v) mean(v == cl, na.rm = TRUE) * 100)
+    cat("\nProcessing YEAR:", year, "\n")
+    
+    # select raster for this year
+    r_year <- rasters_reclass[[as.character(year)]]
+    
+    # extract the coordinates for this year
+    pts_year <- dt[change_year == year, .(x, y)]
+    pts_vect <- vect(pts_year, geom=c("x","y"), crs = crs(r_year))
+    
+    # loop over classes
+    for (cl in classes) {
+      
+      cat("   → Class", cl, "...\n")
+      
+      # binary raster for that class
+      r_bin <- r_year == cl
+      
+      # moving window sum
+      focal_count <- terra::focal(r_bin, w = w, fun = "sum", na.rm = TRUE)
+      
+      # convert pixel count to area
+      focal_area_m2 <- focal_count * pixel_area
+      
+      # extract area values for the points
+      area_values <- terra::extract(focal_area_m2, pts_vect)[,2]
+      
+      # assign back into the data.table
+      col_name <- paste0("area_m2_class_", cl)
+      dt[change_year == year, (col_name) := area_values]
+    }
   }
+  
+  cat("\n--- Extraction finished successfully ---\n")
+  return(dt)
 }
 
-# # Combine coords_defor + coords_refor into one
-# coords_all <- rbind(coords_defor, coords_refor)
-# 
-# # Convert to SpatVector
-# coords_all <- vect(coords_all, geom = c("x", "y"), crs = crs(rasters_reclass[[1]]))
-# 
-# # List of land-use classes to compute PLAND for 
-# target_classes <- c(1, 3, 5)
-# 
-# radius_m <- 1000  # buffer radius
-# 
-# # Output list
-# pland_values <- list()
-# 
-# for (i in seq_along(rasters_reclass)) {
-#   
-#   cat("\nProcessing year", years_lulc[i], "\n")
-#   r <- rasters_reclass[[i]]
-#   year <- years_lulc[i]
-#   
-#   pland_values[[as.character(year)]] <- list()
-#   
-#   for (cl in target_classes) {
-#     
-#     cat("  → class", cl, "\n")
-#     
-#     # Binary raster (class = 1, others = 0)
-#     r_bin <- r == cl
-#     
-#     # storage vector for this class/year
-#     npts <- nrow(coords_all)
-#     pland_vec <- numeric(npts)
-#     
-#     # loop on points (can be parallelized!)
-#     for (j in seq_len(npts)) {
-#       
-#       pt <- coords_all[j, ]
-#       
-#       # Build a circular buffer around the point
-#       win_poly <- buffer(pt, width = radius_m)
-#       
-#       # Crop binary raster using the circular window
-#       win <- crop(r_bin, win_poly)
-#       
-#       # Extract values
-#       v <- values(win, mat = FALSE)
-#       
-#       # PLAND = % of pixels equal to 1
-#       pland_vec[j] <- mean(v == 1, na.rm = TRUE) * 100
-#     }
-#     
-#     # Store results
-#     pland_values[[as.character(year)]][[paste0("pland_", cl)]] <- pland_vec
-#   }
-# }
+data_defor <- compute_landuse_buffer(data_defor, rasters_reclass, classes = c(1,3,5), radius = 1000)
+data_refor <- compute_landuse_buffer(data_refor, rasters_reclass, classes = c(1,3,5), radius = 1000)
 
-cat("PLAND computation complete.\n")
+data_defor %>% dplyr::group_by(change_code) %>% dplyr::summarise_at(vars(starts_with("area")), mean, na.rm = TRUE)
+data_refor %>% dplyr::group_by(change_code) %>% dplyr::summarise_at(vars(starts_with("area")), mean, na.rm = TRUE)
+
+cat("Land use area computation complete.\n")
+
+#### Export datasets ----------
+saveRDS(data_defor,
+        here("outputs", "data", "Mapbiomas", "LULCC_datasets", "data_defor.rds"))
+
+saveRDS(data_refor,
+        here("outputs", "data", "Mapbiomas", "LULCC_datasets", "data_refor.rds"))
+
+#### Illustration ----------
+### Select one point from each dataset
+set.seed(123)
+
+pt_def   <- data_defor[sample(.N, 1)]
+pt_refor <- data_refor[sample(.N, 1)]
+
+cat(" • Selected defor point:", pt_def$cell_id, "year:", pt_def$change_year, "\n")
+cat(" • Selected refor point:", pt_refor$cell_id, "year:", pt_refor$change_year, "\n")
+
+### Helper function to make map for 1 point
+make_point_plot <- function(pt, rasters_reclass, years_lulc,
+                            roads_sf, rivers_sf, car_sf, rl_sf, urb_sf,
+                            public_reserves_sf, apa_mld_sf,
+                            radius = 1000) {
+  
+  year <- pt$change_year
+  r_year <- rasters_reclass[[which(years_lulc == year)]]
+  
+  # convert point → sf
+  pt_sf <- st_as_sf(pt, coords = c("x","y"), crs = crs(r_year))
+  
+  # 1 km buffer
+  buf <- st_buffer(pt_sf, dist = radius)
+  
+  # crop raster to 2 km window for clarity
+  r_crop <- terra::crop(r_year, vect(st_buffer(pt_sf, 2000)))
+  
+  # convert raster → dataframe for ggplot
+  r_df <- as.data.frame(r_crop, xy = TRUE)
+  colnames(r_df)[3] <- "lulc"
+  
+  # crop vectors
+  roads_c  <- st_intersection(roads_sf, st_buffer(pt_sf, 2000))
+  rivers_c <- st_intersection(rivers_sf, st_buffer(pt_sf, 2000))
+  car_c    <- st_intersection(car_sf, st_buffer(pt_sf, 2000))
+  rl_c     <- st_intersection(rl_sf, st_buffer(pt_sf, 2000))
+  urb_c    <- st_intersection(urb_sf, st_buffer(pt_sf, 2000))
+  pub_c    <- st_intersection(public_reserves_sf, st_buffer(pt_sf, 2000))
+  apa_c    <- st_intersection(apa_mld_sf, st_buffer(pt_sf, 2000))
+  
+  # COLORS for lulc: same as your plot
+  lut <- c("#32a65e", "#ad975a", "#FFFFB2", "#0000FF", "#d4271e")
+  names(lut) <- as.character(sort(unique(r_df$lulc)))
+  
+  # Make ggplot
+  p <- ggplot() +
+    geom_raster(data = r_df, aes(x, y, fill = factor(lulc))) +
+    scale_fill_manual(values = lut, name = "LULC") +
+    geom_sf(data = roads_c,  color = "black", size = 0.4) +
+    geom_sf(data = rivers_c, color = "blue", size = 0.5) +
+    geom_sf(data = car_c,    fill = NA, color = "brown", linetype = 3) +
+    geom_sf(data = rl_c,     fill = NA, color = "green3", linetype = 2) +
+    geom_sf(data = urb_c,    fill = NA, color = "magenta", alpha = 0.4) +
+    geom_sf(data = pub_c,    fill = NA, color = "red", size = 0.7) +
+    geom_sf(data = apa_c,    fill = NA, color = "orange", linetype = 2) +
+    
+    geom_sf(data = buf, fill = NA, color = "yellow", linetype = 2, size = 1) +
+    geom_sf(data = pt_sf, shape = 21, fill = "red", size = 3) +
+    coord_sf() +
+    theme_minimal()
+  
+  ### Covariate text box
+  txt <- paste0(
+    "change_code = ", pt$change_code, "\n",
+    "legal = ", pt$legal_status, "\n",
+    "dist_water_m = ", round(pt$dist_water_m), "\n",
+    "dist_urban_m = ", round(pt$dist_urban_m), "\n",
+    "dist_road_m = ", round(pt$dist_road_m), "\n",
+    "dist_edge_m = ", round(pt$dist_edge_m), "\n",
+    "slope_pct = ", round(pt$slope_pct, 1), "\n",
+    "area_class_1 = ", round(pt$area_m2_class_1), "\n",
+    "area_class_3 = ", round(pt$area_m2_class_3), "\n",
+    "area_class_5 = ", round(pt$area_m2_class_5)
+  )
+  
+  p_label <- ggdraw() + draw_label(txt, x = 0, y = 1, hjust = 0, vjust = 1, size = 11)
+  
+  return(plot_grid(p, p_label, ncol = 2, rel_widths = c(1.3, 0.9)))
+}
 
 
+### Generate both plots
+p_def   <- make_point_plot(pt_def,   rasters_reclass, years_lulc,
+                           roads_sf, rivers_sf, car_sf, rl_sf, urb_sf,
+                           public_reserves_sf, apa_mld_sf)
+
+p_refor <- make_point_plot(pt_refor, rasters_reclass, years_lulc,
+                           roads_sf, rivers_sf, car_sf, rl_sf, urb_sf,
+                           public_reserves_sf, apa_mld_sf)
+
+### Show side-by-side
+final_plot <- plot_grid(
+  p_def,
+  p_refor,
+  ncol = 1,
+  labels = c("DEFORESTATION SAMPLE", "REFORESTATION SAMPLE"),
+  label_size = 14
+)
+
+print(final_plot)
+
+# Export PNG (high resolution)
+ggsave(
+  filename = here("outputs", "plot", "01j_defor_refor_dataset_demo.png"),
+  plot = final_plot,
+  width = 12,
+  height = 16,
+  dpi = 300,
+  bg="white"
+)
 
 
 ## Prepare the property-based dataset ----------
-### Compute the forest proportion on CAR properties ------- 
-# mask forest only (value == 1)
-forest_2023 = rasters[[35]] == 1
-
-# compute fraction of forest per property
-forest_frac = terra::extract(forest_2023, car, fun = mean, na.rm = TRUE)
-
-# extract returns a data.frame: first column is ID
-forest_frac = forest_frac %>%
-  dplyr::rename(car_forest_pct = layer)
-
-# convert to percent
-forest_frac$car_forest_pct = forest_frac$car_forest_pct * 100
-
-# join back into car_sf
-car_sf = car_sf %>%
-  dplyr::left_join(forest_frac, by = c("car_id" = "ID"))
