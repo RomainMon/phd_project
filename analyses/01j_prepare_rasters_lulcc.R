@@ -1,6 +1,6 @@
 #------------------------------------------------#
 # Author: Romain Monassier
-# Objective: Prepare rasters for lulcc analysis
+# Objective: Prepare datasets for lulcc analysis
 #------------------------------------------------#
 
 ### Load packages ------
@@ -13,6 +13,7 @@ library(stringr)
 library(landscapemetrics)
 library(ggplot2)
 library(cowplot)
+library(exactextractr)
 
 ### Import rasters -------
 
@@ -125,19 +126,6 @@ apa_mld_sf = sf::st_as_sf(apa_mld)
 public_reserves_sf = dplyr::bind_rows(uniao_sf, pda_sf)
 plot(st_geometry(public_reserves_sf))
 
-### Prepare the cell-based dataset -----
-# Rationale:
-# The workflow starts from rasters_tm[[35]], a raster identifying all cells that experienced at least one land-use/land-cover (LULC) change event during the study period. These “changed cells” form the core sample on which all covariates will be calculated.
-# For each event row, the pipeline computes a set of covariates that describe biophysical, legal, and landscape-context characteristics of the cell at the time of its change. All covariates are extracted or computed dynamically with respect to the event year.
-# Dataset A: reforested (6) cells + a random sample of intact cells (value = 1 in rasters_tm). Sample must match the number of 6-cells per year.
-# Dataset B: deforested (7) cells + a random sample of intact cells (value = 1 in rasters_tm). Sample must match the number of 7-cells per year.
-
-#### Parameters ----------
-change_codes = c(6,7) # reforest=6, deforest=7 in rasters_tm
-template_rast = rasters_reclass[[35]]  # general template/resolution/extent
-roads_year_col <- "date_crea" # column name in roads_sf with creation year (may be date/character/numeric)
-
-
 ### Helpers -----------
 # Reproject if needed
 ensure_crs <- function(sf_obj, target_crs) {
@@ -171,6 +159,17 @@ extract_values <- function(r, coords_df) {
 }
 
 
+### Prepare the cell-based dataset -----
+# Rationale:
+# The workflow starts from rasters_tm[[35]], a raster identifying all cells that experienced at least one land-use/land-cover (LULC) change event during the study period. These “changed cells” form the core sample on which all covariates will be calculated.
+# For each event row, the pipeline computes a set of covariates that describe biophysical, legal, and landscape-context characteristics of the cell at the time of its change. All covariates are extracted or computed dynamically with respect to the event year.
+# Dataset A: reforested (6) cells + a random sample of intact cells (value = 1 in rasters_tm). Sample must match the number of 6-cells per year.
+# Dataset B: deforested (7) cells + a random sample of intact cells (value = 1 in rasters_tm). Sample must match the number of 7-cells per year.
+
+#### Parameters ----------
+change_codes = c(6,7) # reforest=6, deforest=7 in rasters_tm
+template_rast = rasters_reclass[[35]]  # general template/resolution/extent
+roads_year_col <- "date_crea" # column name in roads_sf with creation year (may be date/character/numeric)
 
 #### SECTION 0 — Identify changed cells (cells with >=1 change) --------
 cat("\nSECTION 0: Identify changed cells\n")
@@ -692,10 +691,10 @@ cat("Land use area computation complete.\n")
 
 #### Export datasets ----------
 saveRDS(data_defor,
-        here("outputs", "data", "Mapbiomas", "LULCC_datasets", "data_defor.rds"))
+        here("outputs", "data", "Mapbiomas", "LULCC_datasets", "data_defor_pixel.rds"))
 
 saveRDS(data_refor,
-        here("outputs", "data", "Mapbiomas", "LULCC_datasets", "data_refor.rds"))
+        here("outputs", "data", "Mapbiomas", "LULCC_datasets", "data_refor_pixel.rds"))
 
 #### Illustration ----------
 ### Select one point from each dataset
@@ -811,3 +810,469 @@ ggsave(
 
 
 ## Prepare the property-based dataset ----------
+# Here, the spatial unit is the private property (features in CAR)
+# We measure covariates at the property scale
+
+# Base dataset from car_sf
+car_dt <- data.table(
+  car_id = car_sf$car_id,
+  cod_imovel = car_sf$cod_imovel,
+  car_area_m2 = car_sf$car_area_m2,
+  car_area_ha = car_sf$car_area_ha
+)
+
+# Pixel area
+r <- rasters_tm[[35]]
+px_area_m2 <- terra::res(r)[1] * terra::res(r)[2]
+px_area_ha <- px_area_m2 / 10000
+px_area_ha
+
+# Remove properties < 1 pixel
+car_dt = car_dt %>% 
+  dplyr::filter(car_area_m2 > px_area_m2)
+
+# Properties filtered to match car_dt
+car_sf_filtered <- car_sf %>%
+  dplyr::filter(car_id %in% car_dt$car_id)
+
+#### SECTION 1 — Compute reforestation and deforestation areas ------
+
+# Use the last transition map
+tm_last <- rasters_tm[[length(rasters_tm)]]
+
+# Extract values for each CAR property
+ext_vals <- terra::extract(tm_last, vect(car_sf))
+
+# Convert to data.table
+ext_dt <- data.table(ext_vals)
+val_col <- setdiff(names(ext_dt), "ID")
+setnames(ext_dt, val_col, "value")
+
+# Count pixels per CAR
+pixel_summary <- ext_dt[, .(
+  n_deforest  = sum(value == 7, na.rm = TRUE),
+  n_reforest  = sum(value == 6, na.rm = TRUE),
+  n_total_pix = sum(!is.na(value))
+), by = ID]
+
+# Rename ID → car_id for consistent join
+setnames(pixel_summary, "ID", "car_id")
+
+# Merge with base property table
+car_dt <- merge(
+  car_dt,
+  pixel_summary,
+  by = "car_id",
+  all.x = TRUE
+)
+
+# Compute reforested/deforested surface areas in ha
+car_dt[, `:=`(
+  area_deforest_ha = round(n_deforest * px_area_ha, 2),
+  area_reforest_ha = round(n_reforest * px_area_ha, 2)
+)]
+
+# Compute proportions
+car_dt[, `:=`(
+  prop_deforest = round(n_deforest / n_total_pix, 2),
+  prop_reforest = round(n_reforest / n_total_pix, 2)
+)]
+
+
+#### SECTION 2 — Compute land use on properties --------
+# Use first land-use raster (1989)
+lu1989 <- rasters_reclass[[1]]
+
+# Extract values per property
+ext_vals_1989 <- terra::extract(lu1989, vect(car_sf))
+
+# Convert to data.table
+dt1989 <- data.table(ext_vals_1989)
+
+# Identify the value column
+val_col <- setdiff(names(dt1989), "ID")
+setnames(dt1989, val_col, "value")
+
+# Keep only the classes of interest
+dt1989 <- dt1989[value %in% c(1, 3, 5)]
+
+# Count per class and property
+lu1989_summary <- dt1989[, .(
+  n_forest       = sum(value == 1),
+  n_agriculture  = sum(value == 3),
+  n_urban        = sum(value == 5),
+  
+  ha_forest      = round(sum(value == 1) * px_area_ha, 2),
+  ha_agriculture = round(sum(value == 3) * px_area_ha, 2),
+  ha_urban       = round(sum(value == 5) * px_area_ha, 2)
+), by = ID]
+
+# Rename ID → car_id to merge properly
+setnames(lu1989_summary, "ID", "car_id")
+
+# Merge with car_dt
+car_dt <- merge(
+  car_dt,
+  lu1989_summary,
+  by = "car_id",
+  all.x = TRUE
+)
+
+# Remove potential NAs
+car_dt[is.na(n_forest), n_forest := 0]
+car_dt[is.na(n_agriculture), n_agriculture := 0]
+car_dt[is.na(n_urban), n_urban := 0]
+car_dt[is.na(ha_forest), ha_forest := 0]
+car_dt[is.na(ha_agriculture), ha_agriculture := 0]
+car_dt[is.na(ha_urban), ha_urban := 0]
+
+# Add proportions
+car_dt[, `:=`(
+  prop_forest      = round(n_forest / n_total_pix, 3),
+  prop_agriculture = round(n_agriculture / n_total_pix, 3),
+  prop_urban       = round(n_urban / n_total_pix, 3)
+)]
+
+# Quick correlations
+cor(car_dt$n_deforest, car_dt$n_forest)
+cor(car_dt$n_deforest, car_dt$n_agriculture)
+cor(car_dt$n_deforest, car_dt$n_urban)
+cor(car_dt$n_reforest, car_dt$n_forest)
+cor(car_dt$n_reforest, car_dt$n_agriculture)
+cor(car_dt$n_reforest, car_dt$n_urban)
+
+
+#### SECTION 3 — Compute land use around properties --------
+# 1 km buffer (in metres)
+car_buffer <- terra::buffer(vect(car_sf), width = 1000)
+plot(car_buffer)
+
+# Extract land use (first year)
+# 1989 raster
+lu1989 <- rasters_reclass[[1]]
+
+# Extract values inside buffers
+ext1989 <- terra::extract(lu1989, car_buffer)
+
+dt1989_buf <- data.table(ext1989)
+val_col <- setdiff(names(dt1989_buf), "ID")
+setnames(dt1989_buf, val_col, "value")
+
+# Keep only classes 1, 3, 5
+dt1989_buf <- dt1989_buf[value %in% c(1, 3, 5)]
+
+# Summarize
+buf1989_summary <- dt1989_buf[, .(
+  buf1989_n_forest = sum(value == 1),
+  buf1989_n_agriculture = sum(value == 3),
+  buf1989_n_urban = sum(value == 5),
+  
+  buf1989_ha_forest = round(sum(value == 1) * px_area_ha, 2),
+  buf1989_ha_agriculture = round(sum(value == 3) * px_area_ha, 2),
+  buf1989_ha_urban = round(sum(value == 5) * px_area_ha, 2)
+), by = ID]
+setnames(buf1989_summary, "ID", "car_id")
+
+# Extract land use (last year)
+lu2024 <- rasters_reclass[[length(rasters_reclass)]]
+
+ext2024 <- terra::extract(lu2024, car_buffer)
+
+dt2024_buf <- data.table(ext2024)
+val_col <- setdiff(names(dt2024_buf), "ID")
+setnames(dt2024_buf, val_col, "value")
+
+dt2024_buf <- dt2024_buf[value %in% c(1, 3, 5)]
+
+buf2024_summary <- dt2024_buf[, .(
+  buf2024_n_forest = sum(value == 1),
+  buf2024_n_agriculture = sum(value == 3),
+  buf2024_n_urban = sum(value == 5),
+  
+  buf2024_ha_forest = round(sum(value == 1) * px_area_ha, 2),
+  buf2024_ha_agriculture = round(sum(value == 3) * px_area_ha, 2),
+  buf2024_ha_urban = round(sum(value == 5) * px_area_ha, 2)
+), by = ID]
+setnames(buf2024_summary, "ID", "car_id")
+
+# Merge
+car_dt <- merge(car_dt, buf1989_summary, by = "car_id", all.x = TRUE)
+car_dt <- merge(car_dt, buf2024_summary, by = "car_id", all.x = TRUE)
+
+# Compute % evolution
+car_dt <- car_dt %>%
+  dplyr::mutate(
+    # Absolute change in PIXELS
+    buf_change_pix_forest      = buf2024_n_forest      - buf1989_n_forest,
+    buf_change_pix_agriculture = buf2024_n_agriculture - buf1989_n_agriculture,
+    buf_change_pix_urban       = buf2024_n_urban       - buf1989_n_urban,
+    
+    # Replace all NAs with 0 BEFORE pct calculations
+    buf1989_n_forest      = dplyr::if_else(is.na(buf1989_n_forest), 0L, buf1989_n_forest),
+    buf1989_n_agriculture = dplyr::if_else(is.na(buf1989_n_agriculture), 0L, buf1989_n_agriculture),
+    buf1989_n_urban       = dplyr::if_else(is.na(buf1989_n_urban), 0L, buf1989_n_urban),
+    
+    buf2024_n_forest      = dplyr::if_else(is.na(buf2024_n_forest), 0L, buf2024_n_forest),
+    buf2024_n_agriculture = dplyr::if_else(is.na(buf2024_n_agriculture), 0L, buf2024_n_agriculture),
+    buf2024_n_urban       = dplyr::if_else(is.na(buf2024_n_urban), 0L, buf2024_n_urban),
+    
+    # Percent change = (Δpixels / initial pixels) * 100
+    buf_change_pct_forest      = dplyr::if_else(buf1989_n_forest      > 0, 
+                                                100 * buf_change_pix_forest      / buf1989_n_forest,      0),
+    buf_change_pct_agriculture = dplyr::if_else(buf1989_n_agriculture > 0, 
+                                                100 * buf_change_pix_agriculture / buf1989_n_agriculture, 0),
+    buf_change_pct_urban       = dplyr::if_else(buf1989_n_urban       > 0, 
+                                                100 * buf_change_pix_urban       / buf1989_n_urban,       0),
+    # Change in HECTARES
+    buf_change_ha_forest      = buf_change_pix_forest      * px_area_ha,
+    buf_change_ha_agriculture = buf_change_pix_agriculture * px_area_ha,
+    buf_change_ha_urban       = buf_change_pix_urban       * px_area_ha
+  )
+
+# Correlations with reforested pixels
+cor_reforest <- c(
+  forest      = cor(car_dt$n_reforest, car_dt$buf_change_pix_forest),
+  agriculture = cor(car_dt$n_reforest, car_dt$buf_change_pix_agriculture),
+  urban       = cor(car_dt$n_reforest, car_dt$buf_change_pix_urban)
+)
+
+# Correlations with deforested pixels
+cor_deforest <- c(
+  forest      = cor(car_dt$n_deforest, car_dt$buf_change_pix_forest),
+  agriculture = cor(car_dt$n_deforest, car_dt$buf_change_pix_agriculture),
+  urban       = cor(car_dt$n_deforest, car_dt$buf_change_pix_urban)
+)
+
+cor_reforest
+cor_deforest
+
+
+#### SECTION 4 — Compute distances --------
+
+## Centroids (sf)
+car_centroids_sf <- car_sf_filtered %>%
+  dplyr::mutate(geometry = sf::st_centroid(geometry))
+
+
+### 1. Distance to urban centers
+dist_urban <- sf::st_distance(car_centroids_sf, urb_centers_sf)
+dist_urban_min <- apply(dist_urban, 1, min)
+
+dist_urb_dt <- data.table(
+  car_id = car_sf_filtered$car_id,
+  dist_to_urban_m = as.numeric(dist_urban_min)
+)
+
+car_dt <- merge(car_dt, dist_urb_dt, by = "car_id", all.x = TRUE)
+
+
+
+### 2. Distance to ROADS
+dist_roads <- sf::st_distance(car_centroids_sf, roads_sf)
+dist_roads_min <- apply(dist_roads, 1, min)
+
+dist_roads_dt <- data.table(
+  car_id = car_sf_filtered$car_id,
+  dist_to_road_m = as.numeric(dist_roads_min)
+)
+
+car_dt <- merge(car_dt, dist_roads_dt, by = "car_id", all.x = TRUE)
+
+
+
+### 3. Distance to RIVERS
+dist_rivers <- sf::st_distance(car_centroids_sf, rivers_sf)
+dist_rivers_min <- apply(dist_rivers, 1, min)
+
+dist_rivers_dt <- data.table(
+  car_id = car_sf_filtered$car_id,
+  dist_to_river_m = as.numeric(dist_rivers_min)
+)
+
+car_dt <- merge(car_dt, dist_rivers_dt, by = "car_id", all.x = TRUE)
+
+### 4. Distance to forest edges (1989 vs 2024)
+# Helper function
+compute_edge_distance <- function(rast) {
+  
+  # Forest mask: 1 = forest, NA otherwise
+  forest_mask <- rast == 1
+  forest_mask[forest_mask != 1] <- NA
+  
+  # Compute forest boundaries (edge pixels)
+  edge_list <- landscapemetrics::get_boundaries(forest_mask, as_NA = TRUE)
+  edge_rast <- edge_list[[1]]
+  
+  # If no boundaries → return NA
+  if (all(is.na(terra::values(edge_rast)))) {
+    return(rep(NA_real_, nrow(car_centroids_sf)))
+  }
+  
+  # Distance raster: Euclidean distance to nearest edge
+  dist_r <- terra::distance(edge_rast)
+  
+  # Extract distances to property centroids
+  d <- terra::extract(dist_r, vect(car_centroids_sf))[,2]
+  return(as.numeric(d))
+}
+
+
+### Compute distance for 1989 (first raster)
+lu1989 <- rasters_reclass[[1]]
+dist_edge_1989 <- compute_edge_distance(lu1989)
+
+### Compute distance for 2024 (last raster)
+lu2024 <- rasters_reclass[[length(rasters_reclass)]]
+dist_edge_2024 <- compute_edge_distance(lu2024)
+
+### Bind to car_dt
+dist_edge_dt <- data.table(
+  car_id = car_sf_filtered$car_id,
+  dist_edge_1989_m = dist_edge_1989,
+  dist_edge_2024_m = dist_edge_2024
+)
+
+car_dt <- merge(car_dt, dist_edge_dt, by = "car_id", all.x = TRUE)
+
+
+### Compute change category
+car_dt <- car_dt %>%
+  dplyr::mutate(
+    forest_edge_change_m = dist_edge_2024_m - dist_edge_1989_m,
+    forest_edge_change = dplyr::case_when(
+      forest_edge_change_m < 0  ~ "closer",
+      forest_edge_change_m > 0  ~ "further",
+      TRUE                      ~ "same"
+    )
+  )
+
+# Quick correlations
+cor(car_dt$n_reforest, car_dt$dist_to_urban_m)
+cor(car_dt$n_reforest, car_dt$dist_to_road_m)
+cor(car_dt$n_reforest, car_dt$dist_to_river_m)
+cor(car_dt$n_reforest, car_dt$dist_edge_1989_m)
+cor(car_dt$n_reforest, car_dt$forest_edge_change_m)
+car_dt %>% dplyr::group_by(forest_edge_change) %>% dplyr::summarise(mean=mean(n_reforest))
+
+cor(car_dt$n_deforest, car_dt$dist_to_urban_m)
+cor(car_dt$n_deforest, car_dt$dist_to_road_m)
+cor(car_dt$n_deforest, car_dt$dist_to_river_m)
+cor(car_dt$n_deforest, car_dt$dist_edge_1989_m)
+cor(car_dt$n_deforest, car_dt$forest_edge_change_m)
+car_dt %>% dplyr::group_by(forest_edge_change) %>% dplyr::summarise(mean=mean(n_deforest))
+
+
+#### SECTION 5 — Intersects properties with spatial vectors --------
+# helper that returns a named data.table
+compute_intersection <- function(car_sf, target_sf, colname) {
+  
+  inter <- sf::st_intersects(car_sf, target_sf, sparse = TRUE)
+  
+  dt <- data.table(
+    car_id = car_sf$car_id,
+    flag   = as.integer(lengths(inter) > 0)
+  )
+  
+  setnames(dt, "flag", colname)
+  
+  return(dt)
+}
+
+# 1. Rivers
+int_rivers <- compute_intersection(
+  car_sf_filtered,
+  rivers_sf,
+  "intersects_river"
+)
+
+# 2. APA
+int_apa <- compute_intersection(
+  car_sf_filtered,
+  apa_mld_sf,
+  "intersects_apa"
+)
+
+# 3. Public reserves (PDA + Uniao merged)
+int_public <- compute_intersection(
+  car_sf_filtered,
+  public_reserves_sf,
+  "intersects_public_reserve"
+)
+
+# Merge
+car_dt <- car_dt %>%
+  dplyr::left_join(int_rivers, by = "car_id") %>%
+  dplyr::left_join(int_apa, by = "car_id") %>%
+  dplyr::left_join(int_public, by = "car_id")
+
+# Quick correlations
+cor(car_dt$n_deforest, car_dt$intersects_river)
+cor(car_dt$n_deforest, car_dt$intersects_apa)
+cor(car_dt$n_deforest, car_dt$intersects_public_reserve)
+
+cor(car_dt$n_reforest, car_dt$intersects_river)
+cor(car_dt$n_reforest, car_dt$intersects_apa)
+cor(car_dt$n_reforest, car_dt$intersects_public_reserve)
+
+
+
+#### SECTION 6 — Reserva legal coverage --------
+# Get intersection between CAR and RL
+rl_inter <- sf::st_intersection(
+  car_sf_filtered %>% dplyr::select(car_id, geometry),
+  rl_sf %>% dplyr::select(geometry)
+)
+
+# Compute area of the intersected region (in m2)
+rl_inter$rl_area_m2 <- as.numeric(sf::st_area(rl_inter$geometry))
+rl_inter$rl_area_ha <- round(rl_inter$rl_area_m2 / 10000, 2)
+
+# Sum per property
+# Intersection can produce multiple polygons → we aggregate
+rl_summary <- rl_inter %>%
+  dplyr::group_by(car_id) %>%
+  dplyr::summarise(
+    rl_area_m2 = sum(rl_area_m2),
+    rl_area_ha = sum(rl_area_ha)
+  ) %>%
+  dplyr::ungroup()
+
+# Drop the geometry
+rl_summary_clean <- rl_summary %>%
+  sf::st_drop_geometry() %>% # drop geometry here
+  dplyr::select(car_id, rl_area_m2, rl_area_ha)
+
+# Join
+car_dt <- car_dt %>%
+  dplyr::left_join(rl_summary_clean, by = "car_id") %>%
+  dplyr::mutate(
+    rl_area_m2 = dplyr::coalesce(rl_area_m2, 0),
+    rl_area_ha = dplyr::coalesce(rl_area_ha, 0),
+    rl_prop = round(rl_area_ha / car_area_ha, 2)
+  )
+
+# Quick correlation
+cor(car_dt$n_deforest, car_dt$rl_area_ha)
+cor(car_dt$n_reforest, car_dt$rl_area_ha)
+
+
+#### SECTION 7 — Mean slope --------
+# Compute mean slope per property
+mean_slope <- exact_extract(slope_r, car_sf_filtered, 'mean')
+
+# Add the results to car_sf
+car_sf_filtered$mean_slope <- mean_slope
+
+# Join 
+car_dt = car_sf_filtered %>% 
+  sf::st_drop_geometry() %>% 
+  dplyr::select(car_id, mean_slope) %>% 
+  dplyr::right_join(car_dt)
+
+# Quick correlations
+cor(car_dt$n_deforest, car_dt$mean_slope, use = "complete.obs")
+cor(car_dt$n_reforest, car_dt$mean_slope, use = "complete.obs")
+
+#### Export datasets ----------
+saveRDS(car_dt,
+        here("outputs", "data", "Mapbiomas", "LULCC_datasets", "data_defor_refor_car.rds"))
