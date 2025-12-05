@@ -201,7 +201,7 @@ compute_cumulative_transitions <- function(rasters, years) {
     # Extract values as numeric
     prev_vals <- as.numeric(values(prev_r))
     curr_vals <- as.numeric(values(curr_r))
-    cum_vals  <- as.numeric(values(cumulative_r))
+    cum_vals <- as.numeric(values(cumulative_r))
     
     # Identify valid (non-NA) cells
     valid <- !is.na(prev_vals) & !is.na(curr_vals)

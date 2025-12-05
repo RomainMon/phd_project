@@ -297,7 +297,7 @@ for (i in seq_along(rasters_reclass_w_mspa2)) {
 # edge_dist <- 100     # distance to consider 'core' from edge (m)
 # min_core_ha <- 10    # minimal core patch area (ha) to be kept as core
 # 
-# ##### Function -----
+# ##### Function
 # patch_corridor_analysis <- function(raster_input, edge_dist, min_core_ha) {
 #   
 #   # 1. Binary forest
@@ -386,7 +386,7 @@ for (i in seq_along(rasters_reclass_w_mspa2)) {
 # }
 # 
 # 
-# ##### On an example ---------
+# ##### On an example
 # # Select one raster for testing
 # example <- rasters[[35]] ### DEFINE RASTER FILE
 # # Select a sample of the raster

@@ -784,7 +784,7 @@ compute_patch_metrics <- function(r, year,
 
 # Loop
 regions_buffer = sf::st_buffer(regions_sf, 500)
-minbbox2000    = terra::buffer(minbbox, width=2000)
+minbbox2000 = terra::buffer(minbbox, width=2000)
 all_years_metrics = purrr::map2(rasters_mspa, years,
                                 ~ compute_patch_metrics(r=.x,
                                                         year=.y,

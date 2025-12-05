@@ -181,7 +181,7 @@ changed_cell_ids <- which(vals %in% change_codes)
 
 stopifnot(length(changed_cell_ids) > 0)
 
-cat(" • Changed cells:", length(changed_cell_ids), "\n")
+cat("Changed cells:", length(changed_cell_ids), "\n")
 
 
 #### SECTION 1 — Build master table of all change events --------
@@ -217,7 +217,7 @@ dt_long[, change_type :=
                  ifelse(change_code == 7, "deforest", NA_character_))]
 head(dt_long)
 
-cat(" • Events:", nrow(dt_long), "\n")
+cat("Events:", nrow(dt_long), "\n")
 
 
 
@@ -331,8 +331,8 @@ head(data_defor)
 data_refor %>% dplyr::group_by(change_code) %>% dplyr::summarise(n=n())
 data_defor %>% dplyr::group_by(change_code) %>% dplyr::summarise(n=n())
 
-cat(" • Dataset A rows:", nrow(data_refor), "\n")
-cat(" • Dataset B rows:", nrow(data_defor), "\n")
+cat("Dataset A rows:", nrow(data_refor), "\n")
+cat("Dataset B rows:", nrow(data_defor), "\n")
 
 
 
@@ -392,7 +392,7 @@ data_refor[, legal_status :=
                              fifelse(in_car == 1, "private", "none")))]
 table(data_refor$change_code, data_refor$legal_status)
 
-cat(" • Legal status computed\n")
+cat("Legal status computed\n")
 
 
 #### SECTION 5 — INTERSECT WITH APA (binary) --------
@@ -411,7 +411,7 @@ table(data_defor$change_code, data_defor$in_APA)
 data_refor[, in_APA := as.integer(extract_values(apa_r, coords_refor) == 1)]
 table(data_refor$change_code, data_refor$in_APA)
 
-cat(" • APA intersection done\n")
+cat("APA intersection done\n")
 
 
 #### SECTION 6 — DISTANCES --------
@@ -614,7 +614,7 @@ summary(data_defor$slope_pct)
 data_refor[, slope_pct := extract_values(slope_r, coords_refor)]
 summary(data_refor$slope_pct)
 
-cat(" • Slope extraction completed\n")
+cat("Slope extraction completed\n")
 
 
 
@@ -928,9 +928,9 @@ car_dt[is.na(ha_urban), ha_urban := 0]
 
 # Add proportions
 car_dt[, `:=`(
-  prop_forest      = round(n_forest / n_total_pix, 3),
+  prop_forest = round(n_forest / n_total_pix, 3),
   prop_agriculture = round(n_agriculture / n_total_pix, 3),
-  prop_urban       = round(n_urban / n_total_pix, 3)
+  prop_urban = round(n_urban / n_total_pix, 3)
 )]
 
 # Quick correlations
@@ -1079,7 +1079,6 @@ dist_roads_dt <- data.table(
 car_dt <- merge(car_dt, dist_roads_dt, by = "car_id", all.x = TRUE)
 
 
-
 ### 3. Distance to RIVERS
 dist_rivers <- sf::st_distance(car_centroids_sf, rivers_sf)
 dist_rivers_min <- apply(dist_rivers, 1, min)
@@ -1091,7 +1090,7 @@ dist_rivers_dt <- data.table(
 
 car_dt <- merge(car_dt, dist_rivers_dt, by = "car_id", all.x = TRUE)
 
-### 4. Distance to forest edges (1989 vs 2024)
+### 4. Distance to FOREST EDGES (1989 vs 2024)
 # Helper function
 compute_edge_distance <- function(rast) {
   
