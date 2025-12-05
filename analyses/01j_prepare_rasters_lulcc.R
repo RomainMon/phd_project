@@ -174,6 +174,7 @@ roads_year_col <- "date_crea" # column name in roads_sf with creation year (may 
 #### SECTION 0 — Identify changed cells (cells with >=1 change) --------
 cat("\nSECTION 0: Identify changed cells\n")
 
+# we select the last cumulative raster
 cumulative_mask <- rasters_tm[[35]]
 
 vals <- terra::values(cumulative_mask)
@@ -185,7 +186,7 @@ cat("Changed cells:", length(changed_cell_ids), "\n")
 
 
 #### SECTION 1 — Build master table of all change events --------
-# For each changed cell, read the up to 10 lulcc_years rasters and convert to long table
+# For each changed cell, read the 10 lulcc_years rasters and convert to long table
 cat("\nSECTION 1: Build event table\n")
 
 vals_list <- lapply(lulcc_years, function(r) terra::values(r)[changed_cell_ids])
@@ -194,27 +195,42 @@ colnames(vals_mat) <- paste0("rank_", seq_len(ncol(vals_mat)))
 head(vals_mat)
 
 dt0 <- as.data.table(vals_mat)
-dt0[, cell_id := changed_cell_ids]
+dt0 <- dt0 %>%
+  dplyr::mutate(cell_id = changed_cell_ids)
 
-dt_long <- melt(dt0, id.vars = "cell_id",
-                variable.name = "change_rank",
-                value.name = "change_year")
-
-dt_long <- dt_long[!is.na(change_year)]
-dt_long[, change_rank := as.integer(stringr::str_extract(change_rank, "\\d+"))]
+# to long format
+dt_long <- dt0 %>%
+  tidyr::pivot_longer(
+    cols = -cell_id,
+    names_to = "change_rank",
+    values_to = "change_year"
+  ) %>%
+  dplyr::filter(!is.na(change_year)) %>%
+  dplyr::mutate(
+    change_rank = stringr::str_extract(change_rank, "\\d+") %>% as.integer()
+  )
 head(dt_long)
 
 # add coordinates
 xy <- terra::xyFromCell(template_rast, dt_long$cell_id)
-dt_long[, `:=`(x = xy[,1], y = xy[,2])]
+dt_long <- dt_long %>%
+  dplyr::mutate(
+    x = xy[, 1],
+    y = xy[, 2]
+  )
 head(dt_long)
 
 # add change code & type
 mask_vals <- vals[dt_long$cell_id]
-dt_long[, change_code := mask_vals]
-dt_long[, change_type :=
-          ifelse(change_code == 6, "reforest",
-                 ifelse(change_code == 7, "deforest", NA_character_))]
+dt_long <- dt_long %>%
+  dplyr::mutate(
+    change_code = mask_vals,
+    change_type = dplyr::case_when(
+      change_code == 6 ~ "reforest",
+      change_code == 7 ~ "deforest",
+      TRUE ~ NA_character_
+    )
+  )
 head(dt_long)
 
 cat("Events:", nrow(dt_long), "\n")
@@ -239,12 +255,14 @@ names(intact_list) <- years_tm
 head(intact_list$`1990`)
 
 # Step 2: Count changed cells of each type per year
-events_per_year <- dt_long[, .N, by = .(change_year, change_code)]
+events_per_year <- dt_long %>%
+  dplyr::count(change_year, change_code, name = "N")
 colnames(events_per_year)[3] <- "n_events"
 head(events_per_year)
 
 # Keep only codes 6 (reforest) and 7 (deforest)
-events_per_year = events_per_year[change_code %in% c(6,7)]
+events_per_year <- events_per_year %>%
+  dplyr::filter(change_code %in% c(6, 7))
 head(events_per_year)
 
 # Step 3: Year-stratified sampling function
@@ -259,69 +277,98 @@ sample_intact <- function(year, n_needed){
 }
 
 # Step 4: Select intact controls for reforest (=6)
-reforest_events <- events_per_year[change_code == 6]
-reforest_controls <- reforest_events[, .(
-  sampled_cells = list(
-    sample_intact(change_year, n_events)
+# subset reforest events
+reforest_events <- events_per_year %>%
+  dplyr::filter(change_code == 6)
+# create reforest_controls
+reforest_controls <- reforest_events %>%
+  dplyr::group_by(change_year) %>%
+  dplyr::summarise(
+    sampled_cells = list(
+      sample_intact(change_year, n_events)
+    ),
+    .groups = "drop"
   )
-), by = change_year]
 head(reforest_controls)
 
 # Flatten
-reforest_controls_dt <- data.table(
-  cell_id = unlist(reforest_controls$sampled_cells),
-  change_year = rep(reforest_controls$change_year,
-                    times = lengths(reforest_controls$sampled_cells))
-)
-reforest_controls_dt[, change_type := "control"]
-reforest_controls_dt[, change_code := 1]  # intact
+# reforest_controls$sampled_cells is a list where each element contains a vector of sampled cell IDs for a given year.
+# reforest_controls$change_year is a vector of years (one per list element).
+reforest_controls_dt <- tibble::tibble(
+  cell_id = unlist(reforest_controls$sampled_cells), # unlist() flattens the list into one long vector of all sampled cell IDs.
+  change_year = rep(
+    reforest_controls$change_year,
+    times = lengths(reforest_controls$sampled_cells) # lengths(reforest_controls$sampled_cells) gives, for each year, how many sampled cells were drawn.
+    # rep(..., times = ...) repeats each year as many times as the number of sampled cells for that year — so each sampled cell gets the correct year.
+  )
+) %>%
+  dplyr::mutate(
+    change_type = "control",
+    change_code = 1 # intact forest
+  )
 head(reforest_controls_dt)
 
 # Add coordinates
 xy_ref <- terra::xyFromCell(template_rast, reforest_controls_dt$cell_id)
-reforest_controls_dt[, `:=`(
-  x = xy_ref[,1],
-  y = xy_ref[,2]
-)]
+reforest_controls_dt <- reforest_controls_dt %>%
+  dplyr::mutate(
+    x = xy_ref[, 1],
+    y = xy_ref[, 2]
+  )
 head(reforest_controls_dt)
 
 # Step 5: Select intact controls for deforest (=7)
-deforest_events <- events_per_year[change_code == 7]
+deforest_events <- events_per_year %>%
+  dplyr::filter(change_code == 7)
 
-deforest_controls <- deforest_events[, .(
-  sampled_cells = list(
-    sample_intact(change_year, n_events)
+# create deforest_controls by sampling intact cells per year
+deforest_controls <- deforest_events %>%
+  dplyr::group_by(change_year) %>%
+  dplyr::summarise(
+    sampled_cells = list(
+      sample_intact(change_year, n_events)
+    ),
+    .groups = "drop"
   )
-), by = change_year]
 
-deforest_controls_dt <- data.table(
+# convert list of sampled cells into a long data frame
+deforest_controls_dt <- tibble::tibble(
   cell_id = unlist(deforest_controls$sampled_cells),
-  change_year = rep(deforest_controls$change_year,
-                    times = lengths(deforest_controls$sampled_cells))
-)
-deforest_controls_dt[, change_type := "control"]
-deforest_controls_dt[, change_code := 1]
+  change_year = rep(
+    deforest_controls$change_year,
+    times = lengths(deforest_controls$sampled_cells)
+  )
+) %>%
+  dplyr::mutate(
+    change_type = "control",  # label as control cells
+    change_code = 1            # intact cells
+  )
 
 # Add coordinates
 xy_def <- terra::xyFromCell(template_rast, deforest_controls_dt$cell_id)
-deforest_controls_dt[, `:=`(
-  x = xy_def[,1],
-  y = xy_def[,2]
-)]
+deforest_controls_dt <- deforest_controls_dt %>%
+  dplyr::mutate(
+    x = xy_def[, 1],
+    y = xy_def[, 2]
+  )
 head(deforest_controls_dt)
 
 #### SECTION 3 — Build final datasets for modelling -------
 
-# Dataset A: Reforest + controls
-data_refor <- rbind(
-  dt_long[change_code == 6][, .(cell_id, change_year, change_code, change_type, x, y)],
+# Dataset A: Reforest events + control cells
+data_refor <- dplyr::bind_rows(
+  dt_long %>%
+    dplyr::filter(change_code == 6) %>%
+    dplyr::select(cell_id, change_year, change_code, change_type, x, y),
   reforest_controls_dt
 )
 head(data_refor)
 
-# Dataset B: Deforest + controls
-data_defor <- rbind(
-  dt_long[change_code == 7][, .(cell_id, change_year, change_code, change_type, x, y)],
+# Dataset B: Deforest events + control cells
+data_defor <- dplyr::bind_rows(
+  dt_long %>%
+    dplyr::filter(change_code == 7) %>%
+    dplyr::select(cell_id, change_year, change_code, change_type, x, y),
   deforest_controls_dt
 )
 head(data_defor)
@@ -346,50 +393,68 @@ cat("\nSECTION 4: Legal status\n")
 car_r <- rasterize_binary(car_sf, template_rast, value = 1, background = 0)
 pub_r <- rasterize_binary(public_reserves_sf, template_rast, value = 1, background = 0)
 urb_r <- rasterize_binary(urb_sf, template_rast, value = 1, background = 0)
-rl_r  <- rasterize_binary(rl_sf,  template_rast, value = 1, background = 0)
+rl_r <- rasterize_binary(rl_sf,  template_rast, value = 1, background = 0)
 
 ## Dataset A
-coords_defor <- data_defor[, .(x,y)]
+coords_defor <- data_defor %>%
+  dplyr::select(x, y)
 
-data_defor[, in_car    := extract_values(car_r, coords_defor)]
-data_defor[, in_public := extract_values(pub_r, coords_defor)]
-data_defor[, in_urban  := extract_values(urb_r, coords_defor)]
-data_defor[, in_rl     := extract_values(rl_r,  coords_defor)]
+data_defor <- data_defor %>%
+  dplyr::mutate(
+    in_car    = extract_values(car_r, coords_defor),
+    in_public = extract_values(pub_r, coords_defor),
+    in_urban  = extract_values(urb_r, coords_defor),
+    in_rl     = extract_values(rl_r,  coords_defor)
+  )
 
-data_defor[, `:=`(
-  in_car    = as.integer(in_car == 1),
-  in_public = as.integer(in_public == 1),
-  in_urban  = as.integer(in_urban == 1),
-  in_rl     = as.logical(in_rl == 1)
-)]
+data_defor <- data_defor %>%
+  dplyr::mutate(
+    in_car    = as.integer(in_car == 1),
+    in_public = as.integer(in_public == 1),
+    in_urban  = as.integer(in_urban == 1),
+    in_rl     = as.logical(in_rl == 1)
+  )
 
 # Categorize
-data_defor[, legal_status :=
-          fifelse(in_urban == 1, "urban",
-                  fifelse(in_public == 1, "public_reserve",
-                          fifelse(in_car == 1, "private", "none")))]
+data_defor <- data_defor %>%
+  dplyr::mutate(
+    legal_status = dplyr::case_when(
+      in_urban  == 1 ~ "urban",
+      in_public == 1 ~ "public_reserve",
+      in_car    == 1 ~ "private",
+      TRUE            ~ "none"
+    )
+  )
 table(data_defor$change_code, data_defor$legal_status)
 
 ## Dataset B
-coords_refor <- data_refor[, .(x,y)]
+# Extract coordinates
+coords_refor <- data_refor %>%
+  dplyr::select(x, y)
 
-data_refor[, in_car    := extract_values(car_r, coords_refor)]
-data_refor[, in_public := extract_values(pub_r, coords_refor)]
-data_refor[, in_urban  := extract_values(urb_r, coords_refor)]
-data_refor[, in_rl     := extract_values(rl_r,  coords_refor)]
-
-data_refor[, `:=`(
-  in_car    = as.integer(in_car == 1),
-  in_public = as.integer(in_public == 1),
-  in_urban  = as.integer(in_urban == 1),
-  in_rl     = as.logical(in_rl == 1)
-)]
-
-# Categorize
-data_refor[, legal_status :=
-             fifelse(in_urban == 1, "urban",
-                     fifelse(in_public == 1, "public_reserve",
-                             fifelse(in_car == 1, "private", "none")))]
+# Extract raster values and recode columns
+data_refor <- data_refor %>%
+  dplyr::mutate(
+    in_car    = extract_values(car_r, coords_refor),
+    in_public = extract_values(pub_r, coords_refor),
+    in_urban  = extract_values(urb_r, coords_refor),
+    in_rl     = extract_values(rl_r,  coords_refor)
+  ) %>%
+  dplyr::mutate(
+    in_car    = as.integer(in_car == 1),
+    in_public = as.integer(in_public == 1),
+    in_urban  = as.integer(in_urban == 1),
+    in_rl     = as.logical(in_rl == 1)
+  ) %>%
+  # Categorize legal status
+  dplyr::mutate(
+    legal_status = dplyr::case_when(
+      in_urban  == 1 ~ "urban",
+      in_public == 1 ~ "public_reserve",
+      in_car    == 1 ~ "private",
+      TRUE            ~ "none"
+    )
+  )
 table(data_refor$change_code, data_refor$legal_status)
 
 cat("Legal status computed\n")
@@ -404,11 +469,17 @@ cat("\nSECTION 5: APA intersection\n")
 apa_r <- rasterize_binary(apa_mld_sf, template_rast, value = 1, background = 0)
 
 ## Dataset A
-data_defor[, in_APA := as.integer(extract_values(apa_r, coords_defor) == 1)]
+data_defor <- data_defor %>%
+  dplyr::mutate(
+    in_APA = as.integer(extract_values(apa_r, coords_defor) == 1)
+  )
 table(data_defor$change_code, data_defor$in_APA)
 
 ## Dataset B
-data_refor[, in_APA := as.integer(extract_values(apa_r, coords_refor) == 1)]
+data_refor <- data_refor %>%
+  dplyr::mutate(
+    in_APA = as.integer(extract_values(apa_r, coords_refor) == 1)
+  )
 table(data_refor$change_code, data_refor$in_APA)
 
 cat("APA intersection done\n")
@@ -433,36 +504,43 @@ plot(dist_urban_r)
 
 
 ## Dataset A
-
-# Distance to rivers (static)
-data_defor[, dist_water_m := extract_values(dist_rivers_r, coords_defor)]
-# Distance to urban centers (static)
-data_defor[, dist_urban_m := extract_values(dist_urban_r, coords_defor)]
+data_defor <- data_defor %>%
+  dplyr::mutate(
+    dist_water_m = extract_values(dist_rivers_r, coords_defor),  # distance to rivers
+    dist_urban_m = extract_values(dist_urban_r, coords_defor)    # distance to urban centers
+  )
 
 # Distance to roads (dynamic)
 # To account for creation dates of roads, we subset roads whose creation date ≤ change year
 
 # Initialize column
-data_defor[, dist_road_m := NA_real_]
-
-unique_years <- sort(unique(data_defor$change_year))
+data_defor$dist_road_m <- NA_real_
 
 for (yr in unique_years) {
+  
+  # indices of rows for this year
   idx <- which(data_defor$change_year == yr)
   if (length(idx) == 0) next
   
+  # subset roads up to this year
   roads_sub <- roads_sf[roads_sf[[roads_year_col]] <= yr, ]
   
   if (nrow(roads_sub) == 0) {
-    data_defor[idx, dist_road_m := NA_real_]
+    data_defor$dist_road_m[idx] <- NA_real_
     next
   }
   
+  # rasterize roads and compute distance raster
   roads_bin <- rasterize_binary(roads_sub, template_rast, 1, NA)
   dist_r <- terra::distance(roads_bin)
   
-  data_defor[idx, dist_road_m := extract_values(dist_r, data_defor[idx, .(x,y)])]
+  # extract distances for the points of this year
+  extracted_dist <- extract_values(dist_r, data_defor[idx, c("x", "y")])
+  
+  # assign distances directly to the subset of rows
+  data_defor$dist_road_m[idx] <- extracted_dist
 }
+
 
 # Distance to forest edges (dynamic)
 # To account for the forest dynamics through time, we select the corresponding LULC map from rasters_reclass
@@ -471,7 +549,9 @@ for (yr in unique_years) {
 # We compute Euclidean distance with terra::distance()
 
 # Initialize column
-data_defor[, dist_edge_m := NA_real_]
+data_defor <- data_defor %>%
+  dplyr::mutate(dist_edge_m = NA_real_)
+
 
 # Unique years to loop over
 unique_years <- sort(unique(data_defor$change_year))
@@ -492,67 +572,78 @@ for (yr in unique_years) {
   forest_mask <- r_year == 1
   forest_mask[forest_mask != 1] <- NA
   
-  # landscapemetrics: compute forest boundaries
-  # Returns a raster where edge pixels are 1, others NA
-  edge_list <- landscapemetrics::get_boundaries(forest_mask,
-                                                as_NA = TRUE)
-  
-  # Result is a list: extract first layer
+  # Compute forest edges
+  edge_list <- landscapemetrics::get_boundaries(forest_mask, as_NA = TRUE)
   edge_rast <- edge_list[[1]]
   
   # Skip if edges missing
-  if (all(is.na(values(edge_rast)))) {
-    data_defor[idx, dist_edge_m := NA_real_]
+  if (all(is.na(terra::values(edge_rast)))) {
+    data_defor$dist_edge_m[idx] <- NA_real_
     next
   }
   
   # Compute distance raster
-  # Distance to nearest edge pixel
   dist_edge_r <- terra::distance(edge_rast)
   
-  # Extract distances only for rows of this year
-  coords_year <- coords_defor[idx]
-  data_defor[idx, dist_edge_m := extract_values(dist_edge_r, coords_year)]
+  # Extract distances for rows of this year
+  coords_year <- coords_defor[idx, ]
+  extracted_dist <- extract_values(dist_edge_r, coords_year)
+  
+  # Assign distances directly to the relevant rows
+  data_defor$dist_edge_m[idx] <- extracted_dist
 }
 
 data_defor %>% dplyr::group_by(change_code) %>% dplyr::summarise_at(vars(starts_with("dist")), mean, na.rm = TRUE)
 
-## Dataset B
 
-# Distance to rivers (static)
-data_refor[, dist_water_m := extract_values(dist_rivers_r, coords_refor)]
-# Distance to urban centers (static)
-data_refor[, dist_urban_m := extract_values(dist_urban_r, coords_refor)]
+## Dataset B
+data_refor <- data_refor %>%
+  dplyr::mutate(
+    dist_water_m = extract_values(dist_rivers_r, coords_refor),  # distance to rivers
+    dist_urban_m = extract_values(dist_urban_r, coords_refor)    # distance to urban centers
+  )
 
 # Distance to roads (dynamic)
+# To account for creation dates of roads, we subset roads whose creation date ≤ change year
 
 # Initialize column
-data_refor[, dist_road_m := NA_real_]
-
-unique_years <- sort(unique(data_refor$change_year))
+data_refor$dist_road_m <- NA_real_
 
 for (yr in unique_years) {
+  
+  # indices of rows for this year
   idx <- which(data_refor$change_year == yr)
   if (length(idx) == 0) next
   
+  # subset roads up to this year
   roads_sub <- roads_sf[roads_sf[[roads_year_col]] <= yr, ]
   
   if (nrow(roads_sub) == 0) {
-    data_refor[idx, dist_road_m := NA_real_]
+    data_refor$dist_road_m[idx] <- NA_real_
     next
   }
   
+  # rasterize roads and compute distance raster
   roads_bin <- rasterize_binary(roads_sub, template_rast, 1, NA)
   dist_r <- terra::distance(roads_bin)
   
-  data_refor[idx, dist_road_m := extract_values(dist_r, data_refor[idx, .(x,y)])]
+  # extract distances for the points of this year
+  extracted_dist <- extract_values(dist_r, data_refor[idx, c("x", "y")])
+  
+  # assign distances directly to the subset of rows
+  data_refor$dist_road_m[idx] <- extracted_dist
 }
 
+
 # Distance to forest edges (dynamic)
-# pipeline = forest raster → edge raster → terra::distance() → extract
+# To account for the forest dynamics through time, we select the corresponding LULC map from rasters_reclass
+# We build binary forest mask (r == 1)
+# We use landscapemetrics::get_boundaries() to get edge pixels
+# We compute Euclidean distance with terra::distance()
 
 # Initialize column
-data_refor[, dist_edge_m := NA_real_]
+data_refor <- data_refor %>%
+  dplyr::mutate(dist_edge_m = NA_real_)
 
 # Unique years to loop over
 unique_years <- sort(unique(data_refor$change_year))
@@ -573,27 +664,25 @@ for (yr in unique_years) {
   forest_mask <- r_year == 1
   forest_mask[forest_mask != 1] <- NA
   
-  # landscapemetrics: compute forest boundaries
-  # Returns a raster where edge pixels are 1, others NA
-  edge_list <- landscapemetrics::get_boundaries(forest_mask,
-                                                as_NA = TRUE)
-  
-  # Result is a list: extract first layer
+  # Compute forest edges
+  edge_list <- landscapemetrics::get_boundaries(forest_mask, as_NA = TRUE)
   edge_rast <- edge_list[[1]]
   
   # Skip if edges missing
-  if (all(is.na(values(edge_rast)))) {
-    data_refor[idx, dist_edge_m := NA_real_]
+  if (all(is.na(terra::values(edge_rast)))) {
+    data_refor$dist_edge_m[idx] <- NA_real_
     next
   }
   
   # Compute distance raster
-  # Distance to nearest edge pixel
   dist_edge_r <- terra::distance(edge_rast)
   
-  # Extract distances only for rows of this year
-  coords_year <- coords_refor[idx]
-  data_refor[idx, dist_edge_m := extract_values(dist_edge_r, coords_year)]
+  # Extract distances for rows of this year
+  coords_year <- coords_refor[idx, ]
+  extracted_dist <- extract_values(dist_edge_r, coords_year)
+  
+  # Assign distances directly to the relevant rows
+  data_refor$dist_edge_m[idx] <- extracted_dist
 }
 
 data_refor %>% dplyr::group_by(change_code) %>% dplyr::summarise_at(vars(starts_with("dist")), mean, na.rm = TRUE)
@@ -601,17 +690,22 @@ data_refor %>% dplyr::group_by(change_code) %>% dplyr::summarise_at(vars(starts_
 cat(" Distances computed.\n")
 
 
-
 #### SECTION 7 — SLOPE --------
 # Slope value is extracted for each event location.
 cat("SECTION 7: extracting slope values\n")
 
 ## Dataset A
-data_defor[, slope_pct := extract_values(slope_r, coords_defor)]
+data_defor <- data_defor %>%
+  dplyr::mutate(
+    slope_pct = extract_values(slope_r, coords_defor)
+  )
 summary(data_defor$slope_pct)
 
 ## Dataset B
-data_refor[, slope_pct := extract_values(slope_r, coords_refor)]
+data_refor <- data_refor %>%
+  dplyr::mutate(
+    slope_pct = extract_values(slope_r, coords_refor)
+  )
 summary(data_refor$slope_pct)
 
 cat("Slope extraction completed\n")
@@ -623,7 +717,6 @@ cat("Slope extraction completed\n")
 cat("\nSECTION 8: Land use area extraction around buffers\n")
 names(rasters_reclass) <- years_lulc
 
-# Function to compute land use area (in m²) in circular buffers (moving windows) for given land use classes
 compute_landuse_buffer <- function(dt, rasters_reclass, classes, radius) {
   
   cat("\n--- Starting land use area extraction ---\n")
@@ -651,8 +744,11 @@ compute_landuse_buffer <- function(dt, rasters_reclass, classes, radius) {
     r_year <- rasters_reclass[[as.character(year)]]
     
     # extract the coordinates for this year
-    pts_year <- dt[change_year == year, .(x, y)]
-    pts_vect <- vect(pts_year, geom=c("x","y"), crs = crs(r_year))
+    pts_year <- dt %>%
+      dplyr::filter(change_year == year) %>%
+      dplyr::select(x, y)
+    
+    pts_vect <- terra::vect(pts_year, geom = c("x", "y"), crs = crs(r_year))
     
     # loop over classes
     for (cl in classes) {
@@ -669,11 +765,11 @@ compute_landuse_buffer <- function(dt, rasters_reclass, classes, radius) {
       focal_area_m2 <- focal_count * pixel_area
       
       # extract area values for the points
-      area_values <- terra::extract(focal_area_m2, pts_vect)[,2]
+      area_values <- terra::extract(focal_area_m2, pts_vect)[, 2]
       
-      # assign back into the data.table
+      # assign values back into the dataframe
       col_name <- paste0("area_m2_class_", cl)
-      dt[change_year == year, (col_name) := area_values]
+      dt[[col_name]][dt$change_year == year] <- area_values
     }
   }
   
@@ -696,15 +792,16 @@ saveRDS(data_defor,
 saveRDS(data_refor,
         here("outputs", "data", "Mapbiomas", "LULCC_datasets", "data_refor_pixel.rds"))
 
+
 #### Illustration ----------
 ### Select one point from each dataset
 set.seed(123)
 
-pt_def   <- data_defor[sample(.N, 1)]
-pt_refor <- data_refor[sample(.N, 1)]
+pt_def <- data_defor %>% dplyr::slice_sample(n = 1)
+pt_refor <- data_refor %>% dplyr::slice_sample(n = 1)
 
-cat(" • Selected defor point:", pt_def$cell_id, "year:", pt_def$change_year, "\n")
-cat(" • Selected refor point:", pt_refor$cell_id, "year:", pt_refor$change_year, "\n")
+cat("Selected defor point:", pt_def$cell_id, "year:", pt_def$change_year, "\n")
+cat("Selected refor point:", pt_refor$cell_id, "year:", pt_refor$change_year, "\n")
 
 ### Helper function to make map for 1 point
 make_point_plot <- function(pt, rasters_reclass, years_lulc,
@@ -809,12 +906,13 @@ ggsave(
 )
 
 
+
 ## Prepare the property-based dataset ----------
 # Here, the spatial unit is the private property (features in CAR)
 # We measure covariates at the property scale
 
 # Base dataset from car_sf
-car_dt <- data.table(
+car_dt <- tibble::tibble(
   car_id = car_sf$car_id,
   cod_imovel = car_sf$cod_imovel,
   car_area_m2 = car_sf$car_area_m2,
@@ -843,20 +941,27 @@ tm_last <- rasters_tm[[length(rasters_tm)]]
 # Extract values for each CAR property
 ext_vals <- terra::extract(tm_last, vect(car_sf))
 
-# Convert to data.table
-ext_dt <- data.table(ext_vals)
+# Convert
+ext_dt <- tibble::as_tibble(ext_vals)
+# Identify the value column (all columns except "ID")
 val_col <- setdiff(names(ext_dt), "ID")
-setnames(ext_dt, val_col, "value")
+# Rename that column to "value"
+ext_dt <- ext_dt %>%
+  dplyr::rename(value = dplyr::all_of(val_col))
 
 # Count pixels per CAR
-pixel_summary <- ext_dt[, .(
-  n_deforest  = sum(value == 7, na.rm = TRUE),
-  n_reforest  = sum(value == 6, na.rm = TRUE),
-  n_total_pix = sum(!is.na(value))
-), by = ID]
+pixel_summary <- ext_dt %>%
+  dplyr::group_by(ID) %>%
+  dplyr::summarise(
+    n_deforest  = sum(value == 7, na.rm = TRUE),
+    n_reforest  = sum(value == 6, na.rm = TRUE),
+    n_total_pix = sum(!is.na(value)),
+    .groups = "drop"
+  )
 
 # Rename ID → car_id for consistent join
-setnames(pixel_summary, "ID", "car_id")
+pixel_summary <- pixel_summary %>%
+  dplyr::rename(car_id = ID)
 
 # Merge with base property table
 car_dt <- merge(
@@ -867,16 +972,18 @@ car_dt <- merge(
 )
 
 # Compute reforested/deforested surface areas in ha
-car_dt[, `:=`(
-  area_deforest_ha = round(n_deforest * px_area_ha, 2),
-  area_reforest_ha = round(n_reforest * px_area_ha, 2)
-)]
+car_dt <- car_dt %>%
+  dplyr::mutate(
+    area_deforest_ha = round(n_deforest * px_area_ha, 2),
+    area_reforest_ha = round(n_reforest * px_area_ha, 2)
+  )
 
 # Compute proportions
-car_dt[, `:=`(
-  prop_deforest = round(n_deforest / n_total_pix, 2),
-  prop_reforest = round(n_reforest / n_total_pix, 2)
-)]
+car_dt <- car_dt %>%
+  dplyr::mutate(
+    prop_deforest  = round(n_deforest / n_total_pix, 2),
+    prop_reforest  = round(n_reforest / n_total_pix, 2)
+  )
 
 
 #### SECTION 2 — Compute land use on properties --------
@@ -886,29 +993,32 @@ lu1989 <- rasters_reclass[[1]]
 # Extract values per property
 ext_vals_1989 <- terra::extract(lu1989, vect(car_sf))
 
-# Convert to data.table
-dt1989 <- data.table(ext_vals_1989)
-
-# Identify the value column
-val_col <- setdiff(names(dt1989), "ID")
-setnames(dt1989, val_col, "value")
-
-# Keep only the classes of interest
-dt1989 <- dt1989[value %in% c(1, 3, 5)]
+# Convert
+dt1989 <- tibble::as_tibble(ext_vals_1989)
+dt1989 <- dt1989 %>%
+  # Identify the value column and rename it to "value"
+  dplyr::rename(value = dplyr::all_of(setdiff(names(dt1989), "ID"))) %>%
+  # Keep only the classes of interest
+  dplyr::filter(value %in% c(1, 3, 5))
 
 # Count per class and property
-lu1989_summary <- dt1989[, .(
-  n_forest       = sum(value == 1),
-  n_agriculture  = sum(value == 3),
-  n_urban        = sum(value == 5),
-  
-  ha_forest      = round(sum(value == 1) * px_area_ha, 2),
-  ha_agriculture = round(sum(value == 3) * px_area_ha, 2),
-  ha_urban       = round(sum(value == 5) * px_area_ha, 2)
-), by = ID]
+lu1989_summary <- dt1989 %>%
+  dplyr::group_by(ID) %>%
+  dplyr::summarise(
+    n_forest       = sum(value == 1, na.rm = TRUE),
+    n_agriculture  = sum(value == 3, na.rm = TRUE),
+    n_urban        = sum(value == 5, na.rm = TRUE),
+    
+    ha_forest      = round(sum(value == 1, na.rm = TRUE) * px_area_ha, 2),
+    ha_agriculture = round(sum(value == 3, na.rm = TRUE) * px_area_ha, 2),
+    ha_urban       = round(sum(value == 5, na.rm = TRUE) * px_area_ha, 2),
+    
+    .groups = "drop"
+  )
 
 # Rename ID → car_id to merge properly
-setnames(lu1989_summary, "ID", "car_id")
+lu1989_summary <- lu1989_summary %>%
+  dplyr::rename(car_id = ID)
 
 # Merge with car_dt
 car_dt <- merge(
@@ -919,19 +1029,23 @@ car_dt <- merge(
 )
 
 # Remove potential NAs
-car_dt[is.na(n_forest), n_forest := 0]
-car_dt[is.na(n_agriculture), n_agriculture := 0]
-car_dt[is.na(n_urban), n_urban := 0]
-car_dt[is.na(ha_forest), ha_forest := 0]
-car_dt[is.na(ha_agriculture), ha_agriculture := 0]
-car_dt[is.na(ha_urban), ha_urban := 0]
+car_dt <- car_dt %>%
+  dplyr::mutate(
+    n_forest = dplyr::coalesce(n_forest, 0),
+    n_agriculture  = dplyr::coalesce(n_agriculture, 0),
+    n_urban = dplyr::coalesce(n_urban, 0),
+    ha_forest = dplyr::coalesce(ha_forest, 0),
+    ha_agriculture = dplyr::coalesce(ha_agriculture, 0),
+    ha_urban  = dplyr::coalesce(ha_urban, 0)
+  )
 
 # Add proportions
-car_dt[, `:=`(
-  prop_forest = round(n_forest / n_total_pix, 3),
-  prop_agriculture = round(n_agriculture / n_total_pix, 3),
-  prop_urban = round(n_urban / n_total_pix, 3)
-)]
+car_dt <- car_dt %>%
+  dplyr::mutate(
+    prop_forest = round(n_forest / n_total_pix, 3),
+    prop_agriculture = round(n_agriculture / n_total_pix, 3),
+    prop_urban = round(n_urban / n_total_pix, 3)
+  )
 
 # Quick correlations
 cor(car_dt$n_deforest, car_dt$n_forest)
@@ -954,46 +1068,60 @@ lu1989 <- rasters_reclass[[1]]
 # Extract values inside buffers
 ext1989 <- terra::extract(lu1989, car_buffer)
 
-dt1989_buf <- data.table(ext1989)
+dt1989_buf <- tibble::as_tibble(ext1989)
+# Identify the value column and rename it to "value"
 val_col <- setdiff(names(dt1989_buf), "ID")
-setnames(dt1989_buf, val_col, "value")
+dt1989_buf <- dt1989_buf %>%
+  dplyr::rename(value = dplyr::all_of(val_col))
 
 # Keep only classes 1, 3, 5
-dt1989_buf <- dt1989_buf[value %in% c(1, 3, 5)]
+dt1989_buf <- dt1989_buf %>%
+  dplyr::filter(value %in% c(1, 3, 5))
 
 # Summarize
-buf1989_summary <- dt1989_buf[, .(
-  buf1989_n_forest = sum(value == 1),
-  buf1989_n_agriculture = sum(value == 3),
-  buf1989_n_urban = sum(value == 5),
-  
-  buf1989_ha_forest = round(sum(value == 1) * px_area_ha, 2),
-  buf1989_ha_agriculture = round(sum(value == 3) * px_area_ha, 2),
-  buf1989_ha_urban = round(sum(value == 5) * px_area_ha, 2)
-), by = ID]
-setnames(buf1989_summary, "ID", "car_id")
+buf1989_summary <- dt1989_buf %>%
+  dplyr::group_by(ID) %>%
+  dplyr::summarise(
+    buf1989_n_forest      = sum(value == 1, na.rm = TRUE),
+    buf1989_n_agriculture = sum(value == 3, na.rm = TRUE),
+    buf1989_n_urban       = sum(value == 5, na.rm = TRUE),
+    
+    buf1989_ha_forest      = round(sum(value == 1, na.rm = TRUE) * px_area_ha, 2),
+    buf1989_ha_agriculture = round(sum(value == 3, na.rm = TRUE) * px_area_ha, 2),
+    buf1989_ha_urban       = round(sum(value == 5, na.rm = TRUE) * px_area_ha, 2),
+    
+    .groups = "drop"
+  ) %>%
+  dplyr::rename(car_id = ID)
 
 # Extract land use (last year)
 lu2024 <- rasters_reclass[[length(rasters_reclass)]]
 
 ext2024 <- terra::extract(lu2024, car_buffer)
 
-dt2024_buf <- data.table(ext2024)
+dt2024_buf <- tibble::as_tibble(ext2024)
+
+# Identify the value column and rename it to "value"
 val_col <- setdiff(names(dt2024_buf), "ID")
-setnames(dt2024_buf, val_col, "value")
+dt2024_buf <- dt2024_buf %>%
+  dplyr::rename(value = dplyr::all_of(val_col)) %>%
+  dplyr::filter(value %in% c(1, 3, 5))
 
-dt2024_buf <- dt2024_buf[value %in% c(1, 3, 5)]
-
-buf2024_summary <- dt2024_buf[, .(
-  buf2024_n_forest = sum(value == 1),
-  buf2024_n_agriculture = sum(value == 3),
-  buf2024_n_urban = sum(value == 5),
-  
-  buf2024_ha_forest = round(sum(value == 1) * px_area_ha, 2),
-  buf2024_ha_agriculture = round(sum(value == 3) * px_area_ha, 2),
-  buf2024_ha_urban = round(sum(value == 5) * px_area_ha, 2)
-), by = ID]
-setnames(buf2024_summary, "ID", "car_id")
+# Summarise counts and areas per class
+buf2024_summary <- dt2024_buf %>%
+  dplyr::group_by(ID) %>%
+  dplyr::summarise(
+    buf2024_n_forest      = sum(value == 1, na.rm = TRUE),
+    buf2024_n_agriculture = sum(value == 3, na.rm = TRUE),
+    buf2024_n_urban       = sum(value == 5, na.rm = TRUE),
+    
+    buf2024_ha_forest      = round(sum(value == 1, na.rm = TRUE) * px_area_ha, 2),
+    buf2024_ha_agriculture = round(sum(value == 3, na.rm = TRUE) * px_area_ha, 2),
+    buf2024_ha_urban       = round(sum(value == 5, na.rm = TRUE) * px_area_ha, 2),
+    
+    .groups = "drop"
+  ) %>%
+  dplyr::rename(car_id = ID)
 
 # Merge
 car_dt <- merge(car_dt, buf1989_summary, by = "car_id", all.x = TRUE)
@@ -1058,8 +1186,8 @@ car_centroids_sf <- car_sf_filtered %>%
 dist_urban <- sf::st_distance(car_centroids_sf, urb_centers_sf)
 dist_urban_min <- apply(dist_urban, 1, min)
 
-dist_urb_dt <- data.table(
-  car_id = car_sf_filtered$car_id,
+dist_urb_dt <- tibble::tibble(
+  car_id          = car_sf_filtered$car_id,
   dist_to_urban_m = as.numeric(dist_urban_min)
 )
 
@@ -1071,8 +1199,8 @@ car_dt <- merge(car_dt, dist_urb_dt, by = "car_id", all.x = TRUE)
 dist_roads <- sf::st_distance(car_centroids_sf, roads_sf)
 dist_roads_min <- apply(dist_roads, 1, min)
 
-dist_roads_dt <- data.table(
-  car_id = car_sf_filtered$car_id,
+dist_roads_dt <- tibble::tibble(
+  car_id        = car_sf_filtered$car_id,
   dist_to_road_m = as.numeric(dist_roads_min)
 )
 
@@ -1083,8 +1211,8 @@ car_dt <- merge(car_dt, dist_roads_dt, by = "car_id", all.x = TRUE)
 dist_rivers <- sf::st_distance(car_centroids_sf, rivers_sf)
 dist_rivers_min <- apply(dist_rivers, 1, min)
 
-dist_rivers_dt <- data.table(
-  car_id = car_sf_filtered$car_id,
+dist_rivers_dt <- tibble::tibble(
+  car_id          = car_sf_filtered$car_id,
   dist_to_river_m = as.numeric(dist_rivers_min)
 )
 
@@ -1125,12 +1253,11 @@ lu2024 <- rasters_reclass[[length(rasters_reclass)]]
 dist_edge_2024 <- compute_edge_distance(lu2024)
 
 ### Bind to car_dt
-dist_edge_dt <- data.table(
+dist_edge_dt <- tibble::tibble(
   car_id = car_sf_filtered$car_id,
   dist_edge_1989_m = dist_edge_1989,
   dist_edge_2024_m = dist_edge_2024
 )
-
 car_dt <- merge(car_dt, dist_edge_dt, by = "car_id", all.x = TRUE)
 
 
@@ -1167,7 +1294,7 @@ compute_intersection <- function(car_sf, target_sf, colname) {
   
   inter <- sf::st_intersects(car_sf, target_sf, sparse = TRUE)
   
-  dt <- data.table(
+  dt <- tibble::tibble(
     car_id = car_sf$car_id,
     flag   = as.integer(lengths(inter) > 0)
   )
