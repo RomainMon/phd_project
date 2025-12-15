@@ -10,7 +10,6 @@ library(terra)
 library(ggplot2)
 library(raster)
 library(sf)
-library(PantaRhei) # For the Sankey diagram
 library(RColorBrewer)
 
 ### Import rasters -------

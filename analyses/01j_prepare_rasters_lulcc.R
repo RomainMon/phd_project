@@ -126,8 +126,10 @@ apa_mld_sf = sf::st_as_sf(apa_mld)
 public_reserves_sf = dplyr::bind_rows(uniao_sf, pda_sf)
 plot(st_geometry(public_reserves_sf))
 
+
+
 ### Helpers -----------
-# Reproject if needed
+# Reproject an sf object only if CRS differs from target
 ensure_crs <- function(sf_obj, target_crs) {
   if (is.null(sf_obj)) return(NULL)
   if (st_crs(sf_obj) != target_crs) return(st_transform(sf_obj, target_crs))
@@ -145,16 +147,12 @@ rasterize_binary <- function(sf_obj, template_rast, value = 1, background = NA) 
                    field = value, background = background)
 }
 
-# Simple extractor: always return a numeric vector of values
+# Extract raster values at coordinates, always returning a numeric vector
 extract_values <- function(r, coords_df) {
   if (is.null(r)) return(rep(NA_real_, nrow(coords_df)))
   out <- terra::extract(r, coords_df)
-  if (is.data.frame(out) && ncol(out) >= 2) {
-    return(out[[2]])
-  }
-  if (is.data.frame(out) && ncol(out) == 1) {
-    return(out[[1]])
-  }
+  if (is.data.frame(out) && ncol(out) >= 2) return(out[[2]])
+  if (is.data.frame(out) && ncol(out) == 1) return(out[[1]])
   as.numeric(out)
 }
 
@@ -174,12 +172,13 @@ roads_year_col <- "date_crea" # column name in roads_sf with creation year (may 
 #### SECTION 0 — Identify changed cells (cells with >=1 change) --------
 cat("\nSECTION 0: Identify changed cells\n")
 
-# we select the last cumulative raster
-cumulative_mask <- rasters_tm[[35]]
+# Use last raster in the list to get all changes
+cumulative_mask <- rasters_tm[[length(rasters_tm)]]
 
-vals <- terra::values(cumulative_mask)
-changed_cell_ids <- which(vals %in% change_codes)
+# Get indices of cells with reforest/deforest events
+changed_cell_ids <- which(values(cumulative_mask) %in% change_codes)
 
+# Sanity check
 stopifnot(length(changed_cell_ids) > 0)
 
 cat("Changed cells:", length(changed_cell_ids), "\n")
