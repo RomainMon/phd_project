@@ -58,6 +58,7 @@ terra::coltab(raster2024) <- cbind(vals_after, cols_after)
 plot(raster2024)
 freq(raster2024)
 
+
 ### Transition matrix -----
 #### Spatial trajectories (rasters) -------
 
@@ -82,95 +83,10 @@ for (i in seq_along(rasters)) {
 }
 
 
-##### 2a. YEAR-TO-YEAR TRANSITIONS -------
+##### 2. CUMULATIVE TRANSITIONS -------
 # Create a set of transition rasters where each cell encodes its land-use change from the previous year
 # These rasters show all annual land-use transitions.
-# The output value = (prev * 10) + curr (for instance, 13 = Previously forest, now agriculture)
-
-# Function to compute year-to-year land-use transitions
-compute_transitions <- function(rasters, years) {
-  # Check inputs
-  if (length(rasters) != length(years)) {
-    stop("Length of 'rasters' and 'years' must be the same.")
-  }
-  
-  # Initialize list for transition rasters
-  transition_list <- vector("list", length(rasters) - 1)
-  
-  # Loop through consecutive pairs of years
-  for (i in 2:length(rasters)) {
-    message("Processing transition: ", years[i - 1], " → ", years[i])
-    
-    prev <- rasters[[i - 1]]
-    curr <- rasters[[i]]
-    
-    # Compute transition code (e.g. 13 = 1→3)
-    transition <- (prev * 10) + curr
-    
-    # Assign name to the SpatRaster layer
-    names(transition) <- paste0("t", years[i - 1], "_", years[i])
-    
-    # Store in list with meaningful name
-    transition_list[[i - 1]] <- transition
-  }
-  
-  # Assign names to list elements
-  names(transition_list) <- paste0("t", years[-length(years)], "_", years[-1])
-  
-  # Return list of SpatRasters
-  return(transition_list)
-}
-
-# Example usage:
-yty_transitions <- compute_transitions(rasters_corrected, years)
-plot(yty_transitions[[1]], main = names(yty_transitions)[1])
-unique(values(yty_transitions[[1]]))
-
-## Check
-# Choose a transition code you want to inspect (e.g., 15 = 1→5)
-target_transition <- 15
-
-# Select the transition raster to inspect
-trans_rast <- yty_transitions[[1]]   # example for tYYYY_YYYY
-
-# Find ALL cell indices where the transition occurred
-cells_changed <- which(values(trans_rast) == target_transition)
-
-# Choose ONE cell at random (or the first one)
-cell_id <- cells_changed[1]
-
-# Get coordinates of that raster cell
-cell_xy <- xyFromCell(trans_rast, cell_id)
-
-# Create a geographic buffer around that point
-# Buffer radius in map units
-buffer_radius <- 200
-buf <- buffer(vect(cell_xy, crs=crs(trans_rast)), width = buffer_radius)
-
-# Crop rasters to the buffered window
-prev <- rasters[[1]]
-curr <- rasters[[2]]
-
-# Plot
-prev_crop <- crop(prev, buf)
-curr_crop <- crop(curr, buf)
-trans_crop <- crop(trans_rast, buf)
-par(mfrow=c(1,3))
-
-plot(prev_crop, main="Before")
-points(cell_xy[1], cell_xy[2], pch=20, col="red", cex=1.5)
-
-plot(curr_crop, main="After")
-points(cell_xy[1], cell_xy[2], pch=20, col="red", cex=1.5)
-
-plot(trans_crop, main=paste("Transition =", target_transition))
-points(cell_xy[1], cell_xy[2], pch=20, col="red", cex=1.5)
-
-par(mfrow=c(1,1))
-
-
-##### 2b. CUMULATIVE TRANSITIONS -------
-# Contrary to 1a, here the transitions are cumulative, i.e., the cell value appends each time the cell land use changes.
+# IMPORTANT: Transitions are cumulative, i.e., the cell value appends each time the cell land use changes.
 # Rules:
 # If the pixel does not change, its value stays the same.
 # If it does change, the new transition code is appended (e.g., 1 → 2 → 1 becomes 121).
@@ -205,7 +121,7 @@ compute_cumulative_transitions <- function(rasters, years) {
   out
 }
 
-# Example usage:
+# Apply
 cumulative_transitions <- compute_cumulative_transitions(rasters_corrected, years)
 plot(cumulative_transitions[[1]], main = names(cumulative_transitions)[1])
 freq(cumulative_transitions[[1]])
@@ -283,54 +199,48 @@ par(mfrow=c(1,1))
 reclass_cumulative_transitions <- function(cumulative_transitions) {
   
   out <- vector("list", length(cumulative_transitions))
+  names(out) <- names(cumulative_transitions)
   
   for (i in seq_along(cumulative_transitions)) {
+    
     message("Reclassifying cumulative raster #", i,
             " (", names(cumulative_transitions)[i], ")")
     
-    tr   <- cumulative_transitions[[i]]
+    tr <- cumulative_transitions[[i]]
     vals <- values(tr)
     
-    # Convert cumulative code to character
-    sval <- as.character(vals)
+    # Initialize output as NA
+    newvals <- rep(NA_integer_, length(vals))
     
-    # Extract the most recent land-cover value (last digit)
-    last_digit <- as.numeric(substr(sval, nchar(sval), nchar(sval)))
+    # Identify valid cells
+    ok <- !is.na(vals)
+    sval <- as.character(vals[ok])
     
-    # Re-initialize output values: default = current land cover
-    newvals <- last_digit
+    # Last land-cover class (current state)
+    last_digit <- as.integer(substr(sval, nchar(sval), nchar(sval)))
     
-    # Extract history string (all digits except the last)
+    # Default: keep current class
+    newvals[ok] <- last_digit
+    
+    # History (excluding last digit)
     history <- substr(sval, 1, nchar(sval) - 1)
     
-    # Detect reforestation (6): now 1, but history contains 2–5
-    reforest_idx <- which(
-      !is.na(sval) &
-        last_digit == 1 &
-        grepl("[2-5]", history)
-    )
+    # Reforestation: now forest (1), previously non-forest (2–5)
+    reforest <- last_digit == 1 & grepl("[2-5]", history)
     
-    # Detect deforestation (7): now 2–5, but history contains 1
-    deforest_idx <- which(
-      !is.na(sval) &
-        last_digit %in% 2:5 &
-        grepl("1", history)
-    )
+    # Deforestation: now non-forest (2–5), previously forest (1)
+    deforest <- last_digit %in% 2:5 & grepl("1", history)
     
-    # Apply reclassification
-    newvals[reforest_idx] <- 6
-    newvals[deforest_idx] <- 7
+    newvals[ok][reforest] <- 6L
+    newvals[ok][deforest] <- 7L
     
-    # Write reclassified raster
     out[[i]] <- setValues(tr, newvals)
-    names(out[[i]]) <- names(cumulative_transitions)[i]
   }
   
-  names(out) <- names(cumulative_transitions)
   out
 }
 
-# Example usage:
+# Apply
 reclass_cumul_trans <- reclass_cumulative_transitions(cumulative_transitions)
 
 # Quick check
@@ -343,79 +253,83 @@ freq(reclass_cumul_trans[[35]]) # 2024
 # To do so, these cells take the value of the year a cell has changed (e.g., 1998)
 # NB: some cells changed several times (reforested-deforested-reforested, etc.), hence we create several rasters
 # The first is the first time of change; the second, the second time the cell changed, etc.
+# We work directly on rasters_corrected, we detect all events, and store them in a table
 
 # Function
-detect_all_forest_changes <- function(reclass_list, baseline_raster) {
-  # Template raster to match extent, resolution, and number of cells
-  r_template <- reclass_list[[1]]
+detect_forest_transitions <- function(rasters, years) {
   
-  # List to store detected changes
-  changes <- list()
+  # List to collect all transition events
+  events <- list()
   
-  # Loop over all reclassified rasters
-  for (i in seq_along(reclass_list)) {
-    curr_vals <- values(reclass_list[[i]])
+  # Loop over consecutive years (t-1 → t)
+  for (i in 2:length(rasters)) {
     
-    # Previous raster: baseline for first year, otherwise previous year
-    prev_vals <- if (i == 1) values(baseline_raster) else values(reclass_list[[i - 1]])
+    # Land-cover values at t-1 and t
+    prev <- values(rasters[[i - 1]])
+    curr <- values(rasters[[i]])
     
-    # Identify cells that changed AND are reforestation (6) or deforestation (7)
-    forest_change <- !is.na(prev_vals) & !is.na(curr_vals) & curr_vals != prev_vals & curr_vals %in% c(6, 7)
+    # Valid (non-NA) pixels
+    ok <- !is.na(prev) & !is.na(curr)
     
-    # Skip if no changes
-    if (!any(forest_change)) next
+    # Deforestation: forest (1) → non-forest (2–5)
+    events[[length(events) + 1]] <-
+      data.frame(
+        cell_id = which(ok & prev == 1 & curr %in% 2:5),
+        year = years[i],
+        change_type = 7L   # deforestation
+      )
     
-    # Store cell IDs, year, and type of forest change
-    changes[[length(changes) + 1]] <- data.frame(
-      cell_id     = which(forest_change),
-      year        = as.numeric(names(reclass_list)[i]),
-      change_type = curr_vals[forest_change]
-    )
+    # Reforestation: non-forest (2–5) → forest (1)
+    events[[length(events) + 1]] <-
+      data.frame(
+        cell_id = which(ok & prev %in% 2:5 & curr == 1),
+        year = years[i],
+        change_type = 6L   # reforestation
+      )
   }
   
-  # Combine all change records into one table and assign order per cell
-  change_table <- dplyr::bind_rows(changes) %>%
-    dplyr::arrange(cell_id, year) %>%
-    dplyr::group_by(cell_id) %>%
-    dplyr::mutate(change_order = dplyr::row_number()) %>%
+  # Merge all events and order them in time for each pixel
+  changes <- dplyr::bind_rows(events) %>% 
+    dplyr::arrange(cell_id, year) %>% 
+    dplyr::group_by(cell_id) %>% 
+    dplyr::mutate(change_order = dplyr::row_number()) %>% 
     dplyr::ungroup()
   
-  # Maximum number of changes for any cell
-  max_changes <- max(change_table$change_order)
-  
-  # Create one raster per change order
-  year_rasters <- lapply(seq_len(max_changes), function(k) {
-    r <- rast(r_template); values(r) <- NA
-    subset_k <- dplyr::filter(change_table, change_order == k)
-    if (nrow(subset_k) > 0) r[subset_k$cell_id] <- subset_k$year
-    names(r) <- paste0("year_change_", k)
+  # Create one raster per change order (1st change, 2nd change, etc.)
+  year_rasters <- lapply(seq_len(max(changes$change_order)), function(k) {
+    r <- rast(rasters[[1]])
+    values(r) <- NA
+    idx <- changes$cell_id[changes$change_order == k]
+    r[idx] <- changes$year[changes$change_order == k]
     r
   })
   
-  # Return a list: change table + rasters for each change order
-  list(change_table = change_table, year_change_rasters = year_rasters)
+  # Return transition table + year-of-change rasters
+  list(
+    change_table = changes,
+    year_rasters = year_rasters
+  )
 }
 
-
-# Example usage:
-# baseline must be the first-year raster of raw classes
-baseline_1989 <- rasters_corrected[[1]]
-years_forest_change <- detect_all_forest_changes(reclass_cumul_trans, baseline_1989)
+# Apply
+years_forest_change <- detect_forest_transitions(rasters = rasters_corrected, years = years)
 
 # Inspect results
-head(years_forest_change$change_table, n=100)
-plot(years_forest_change$year_change_rasters[[1]], main="Year of 1st forest change")
+head(years_forest_change$change_table)
+plot(years_forest_change$year_rasters[[1]])
+years_forest_change[["change_table"]][["year"]] == 1990 # Check that changes between baseline (1989) and subsequent year were taken into account
 
 ## Check (focusing on a cell)
 # Randomly select one changed cell (first change)
 set.seed(1)
+
 first_changes <- years_forest_change$change_table %>%
   dplyr::filter(change_order == 1)
 
 chosen <- first_changes[sample(nrow(first_changes), 1), ]
 chosen
 
-# Identify year of change and index of that year in your `years` vector
+# Identify year of change and index in the `years` vector
 year_change <- chosen$year
 year_idx <- which(years == year_change)
 year_before <- years[year_idx - 1]
@@ -424,11 +338,15 @@ message("Selected cell ID: ", chosen$cell_id)
 message("   → First change year: ", year_change)
 message("   → Comparing ", year_before, " (before) vs ", year_change, " (after)")
 
-# Extract rasters from the correct list indices
-r_before <- rasters[[year_idx - 1]]
-r_after  <- rasters[[year_idx]]
+# Extract rasters BEFORE and AFTER the transition
+r_before <- rasters_corrected[[year_idx - 1]]
+r_after <- rasters_corrected[[year_idx]]
+
+# Optional: cumulative / reclassified raster for visual comparison
 merged_after <- reclass_cumul_trans[[year_idx]]
-year_change_r <- years_forest_change$year_change_rasters[[1]]  # first change raster
+
+# Year-of-change raster (first change)
+year_change_r <- years_forest_change$year_rasters[[1]]
 
 # Get coordinates of the chosen cell
 xy_chosen <- xyFromCell(r_before, chosen$cell_id)
@@ -441,27 +359,27 @@ zoom_box <- ext(
   xy_chosen[2] + 250
 )
 
-# Crop for zoomed visualization
+# Crop rasters for zoomed visualization
 r_before_crop <- crop(r_before, zoom_box)
-r_after_crop <- crop(r_after, zoom_box)
+r_after_crop  <- crop(r_after, zoom_box)
 merged_after_crop <- crop(merged_after, zoom_box)
-year_change_crop <- crop(year_change_r, zoom_box)
+year_change_crop  <- crop(year_change_r, zoom_box)
 
 # Plot all panels
 par(mfrow = c(2, 2))
 
 plot(r_before_crop,
-     main = paste("Before (", year_before, ")", sep=""),
+     main = paste("Before (", year_before, ")", sep = ""),
      col = c("#32a65e", "#FFFFB2", "#d4271e"))
 points(xy_chosen, pch = 16, cex = 1.2)
 
 plot(r_after_crop,
-     main = paste("After (", year_change, ")", sep=""),
+     main = paste("After (", year_change, ")", sep = ""),
      col = c("#32a65e", "#FFFFB2", "#d4271e"))
 points(xy_chosen, pch = 16, cex = 1.2)
 
 plot(merged_after_crop,
-     main = paste("Merged (", year_change, ")", sep=""),
+     main = paste("Cumulative class (", year_change, ")", sep = ""),
      col = c("#32a65e", "#FFFFB2", "chartreuse", "pink"))
 points(xy_chosen, pch = 16, cex = 1.2)
 
@@ -502,7 +420,7 @@ r_step2 <- crop(cumulative_transitions[[index_demo - 1]], zoom_ext)
 r_step3 <- crop(reclass_cumul_trans[[index_demo - 1]], zoom_ext)
 
 ### STEP 4 – Year of 1st change
-r_step4 <- crop(years_forest_change$year_change_rasters[[1]], zoom_ext)
+r_step4 <- crop(years_forest_change$year_rasters[[1]], zoom_ext)
 
 
 ### PLOT
@@ -701,14 +619,13 @@ for (i in seq_along(reclass_cumul_trans)) {
   )
 }
 
-
 # Export years_forest_change rasters
 # Define output folder
 output_dir = here("outputs", "data", "MapBiomas", "Rasters_years_forest_change")
 
 message("Exporting rasters for years of forest change...")
 
-for (i in seq_along(years_forest_change$year_change_rasters)) {
+for (i in seq_along(years_forest_change$year_rasters)) {
   
   output_path <- file.path(
     output_dir,
@@ -718,7 +635,7 @@ for (i in seq_along(years_forest_change$year_change_rasters)) {
   message("  - Writing change-event raster #", i)
   
   terra::writeRaster(
-    years_forest_change$year_change_rasters[[i]],
+    years_forest_change$year_rasters[[i]],
     filename = output_path,
     overwrite = TRUE,
     wopt = list(datatype = "INT2U", gdal = c("COMPRESS=LZW"))
