@@ -188,70 +188,50 @@ cat("Changed cells:", length(changed_cell_ids), "\n")
 # For each changed cell, read the 10 lulcc_years rasters and convert to long table
 cat("\nSECTION 1: Build event table\n")
 
-vals_list <- lapply(lulcc_years, function(r) terra::values(r)[changed_cell_ids])
-vals_mat  <- do.call(cbind, vals_list)
-colnames(vals_mat) <- paste0("rank_", seq_len(ncol(vals_mat)))
+# extract values (always returns a matrix)
+vals_mat <- do.call(cbind,lapply(lulcc_years, function(r) terra::values(r)[changed_cell_ids, drop = FALSE]))
+colnames(vals_mat) <- seq_len(ncol(vals_mat))
 head(vals_mat)
 
-dt0 <- as.data.table(vals_mat)
-dt0 <- dt0 %>%
-  dplyr::mutate(cell_id = changed_cell_ids)
-
-# to long format
-dt_long <- dt0 %>%
-  tidyr::pivot_longer(
-    cols = -cell_id,
-    names_to = "change_rank",
-    values_to = "change_year"
-  ) %>%
-  dplyr::filter(!is.na(change_year)) %>%
-  dplyr::mutate(
-    change_rank = stringr::str_extract(change_rank, "\\d+") %>% as.integer()
-  )
+# build long event table
+dt_long <- as.data.frame(vals_mat) %>% 
+  dplyr::mutate(cell_id = changed_cell_ids) %>% 
+  tidyr::pivot_longer(cols = -cell_id,
+                      names_to = "change_rank",
+                      values_to = "change_year",
+                      values_drop_na = TRUE) %>% 
+  dplyr::mutate(change_rank = as.integer(change_rank))
 head(dt_long)
 
 # add coordinates
 xy <- terra::xyFromCell(template_rast, dt_long$cell_id)
-dt_long <- dt_long %>%
-  dplyr::mutate(
-    x = xy[, 1],
-    y = xy[, 2]
-  )
+dt_long <- dt_long %>% dplyr::mutate(x = xy[, 1], y = xy[, 2])
 head(dt_long)
 
-# add change code & type
-mask_vals <- vals[dt_long$cell_id]
-dt_long <- dt_long %>%
-  dplyr::mutate(
-    change_code = mask_vals,
-    change_type = dplyr::case_when(
-      change_code == 6 ~ "reforest",
-      change_code == 7 ~ "deforest",
-      TRUE ~ NA_character_
-    )
-  )
+# add change code and type from cumulative mask
+dt_long <- dt_long %>% 
+  dplyr::mutate(change_code = terra::values(cumulative_mask)[cell_id],
+                change_type = dplyr::case_when(change_code == 6 ~ "reforest",
+                                               change_code == 7 ~ "deforest",
+                                               TRUE ~ NA_character_))
 head(dt_long)
 
-cat("Events:", nrow(dt_long), "\n")
+cat("Number of distinct cells:", dplyr::n_distinct(dt_long$cell_id), "\n")
+cat("Events (of reforestation or deforestation):", nrow(dt_long), "\n")
 
 
 
-#### SECTION 2 — Select controls (i.e., intact forests) by year ---------
-# We select balanced controls (i.e., intact forests)
-# We determine how many reforest events and deforest events occurred.
-# We identify cells with intact forest (value = 1 in rasters_tm[[year]]).
-# We randomly sample exactly the same number of intact cells.
+#### SECTION 2 — Select controls ---------
+# We select controls, i.e., cells that were never deforested nor reforested during the study period
+# Using the last raster ensures that: controls are still intact at the end, controls never experienced LULCC, we avoid “false controls” that are intact early but changed later
+# Control cells were selected among pixels that remained intact throughout the entire study period, and were randomly sampled to match the number of events per year
 
 cat("\nSECTION 2: Selecting intact control cells\n")
 
-# Step 1: Identify all intact cells (value=1) per year
-intact_list <- lapply(seq_along(rasters_tm), function(i){
-  r <- rasters_tm[[i]]
-  vals <- terra::values(r)
-  which(vals == 1)  # intact = 1
-})
-names(intact_list) <- years_tm
-head(intact_list$`1990`)
+# Step 1: Identify intact cells from the LAST year only
+last_rast <- rasters_tm[[length(rasters_tm)]]
+intact_ids <- which(terra::values(last_rast) == 1)  # intact forest
+length(intact_ids)
 
 # Step 2: Count changed cells of each type per year
 events_per_year <- dt_long %>%
@@ -259,98 +239,65 @@ events_per_year <- dt_long %>%
 colnames(events_per_year)[3] <- "n_events"
 head(events_per_year)
 
-# Keep only codes 6 (reforest) and 7 (deforest)
-events_per_year <- events_per_year %>%
-  dplyr::filter(change_code %in% c(6, 7))
-head(events_per_year)
-
-# Step 3: Year-stratified sampling function
-sample_intact <- function(year, n_needed){
-  intact_ids <- intact_list[[as.character(year)]]
-  if(length(intact_ids) < n_needed){
-    warning("Not enough intact cells in year ", year,
-            " — taking all available.")
+# Step 3: Sampling function
+sample_intact <- function(n_needed){
+  if (length(intact_ids) < n_needed) {
+    warning("Not enough intact cells — taking all available.")
     return(intact_ids)
   }
   sample(intact_ids, n_needed)
 }
 
 # Step 4: Select intact controls for reforest (=6)
-# subset reforest events
 reforest_events <- events_per_year %>%
   dplyr::filter(change_code == 6)
-# create reforest_controls
 reforest_controls <- reforest_events %>%
   dplyr::group_by(change_year) %>%
-  dplyr::summarise(
-    sampled_cells = list(
-      sample_intact(change_year, n_events)
-    ),
-    .groups = "drop"
-  )
-head(reforest_controls)
+  dplyr::summarise(sampled_cells = list(sample_intact(n_events)),
+                   .groups = "drop")
 
-# Flatten
-# reforest_controls$sampled_cells is a list where each element contains a vector of sampled cell IDs for a given year.
-# reforest_controls$change_year is a vector of years (one per list element).
-reforest_controls_dt <- tibble::tibble(
-  cell_id = unlist(reforest_controls$sampled_cells), # unlist() flattens the list into one long vector of all sampled cell IDs.
-  change_year = rep(
-    reforest_controls$change_year,
-    times = lengths(reforest_controls$sampled_cells) # lengths(reforest_controls$sampled_cells) gives, for each year, how many sampled cells were drawn.
-    # rep(..., times = ...) repeats each year as many times as the number of sampled cells for that year — so each sampled cell gets the correct year.
-  )
-) %>%
-  dplyr::mutate(
-    change_type = "control",
-    change_code = 1 # intact forest
-  )
-head(reforest_controls_dt)
+reforest_controls_dt <- reforest_controls %>%
+  tidyr::unnest(sampled_cells) %>%
+  dplyr::transmute(cell_id = sampled_cells,
+                   change_year = change_year,
+                   change_type = "control",
+                   change_code = 1)
 
 # Add coordinates
 xy_ref <- terra::xyFromCell(template_rast, reforest_controls_dt$cell_id)
 reforest_controls_dt <- reforest_controls_dt %>%
-  dplyr::mutate(
-    x = xy_ref[, 1],
-    y = xy_ref[, 2]
-  )
+  dplyr::mutate(x = xy_ref[, 1],y = xy_ref[, 2])
 head(reforest_controls_dt)
 
 # Step 5: Select intact controls for deforest (=7)
 deforest_events <- events_per_year %>%
   dplyr::filter(change_code == 7)
 
-# create deforest_controls by sampling intact cells per year
 deforest_controls <- deforest_events %>%
   dplyr::group_by(change_year) %>%
-  dplyr::summarise(
-    sampled_cells = list(
-      sample_intact(change_year, n_events)
-    ),
-    .groups = "drop"
-  )
+  dplyr::summarise(sampled_cells = list(sample_intact(n_events)),
+                   .groups = "drop")
 
-# convert list of sampled cells into a long data frame
-deforest_controls_dt <- tibble::tibble(
-  cell_id = unlist(deforest_controls$sampled_cells),
-  change_year = rep(
-    deforest_controls$change_year,
-    times = lengths(deforest_controls$sampled_cells)
-  )
-) %>%
-  dplyr::mutate(
-    change_type = "control",  # label as control cells
-    change_code = 1            # intact cells
-  )
+deforest_controls_dt <- deforest_controls %>%
+  tidyr::unnest(sampled_cells) %>%
+  dplyr::transmute(cell_id = sampled_cells,
+                   change_year = change_year,
+                   change_type = "control",
+                   change_code = 1)
 
 # Add coordinates
-xy_def <- terra::xyFromCell(template_rast, deforest_controls_dt$cell_id)
+xy_ref <- terra::xyFromCell(template_rast, deforest_controls_dt$cell_id)
 deforest_controls_dt <- deforest_controls_dt %>%
-  dplyr::mutate(
-    x = xy_def[, 1],
-    y = xy_def[, 2]
-  )
-head(deforest_controls_dt)
+  dplyr::mutate(x = xy_ref[, 1],y = xy_ref[, 2])
+head(reforest_controls_dt)
+
+dt_long %>% 
+  dplyr::group_by(change_type) %>% 
+  dplyr::summarise(n=dplyr::n())
+cat("Controls (deforestation):", nrow(deforest_controls_dt), "\n")
+cat("Controls (reforestation):", nrow(reforest_controls_dt), "\n")
+
+
 
 #### SECTION 3 — Build final datasets for modelling -------
 
@@ -359,8 +306,7 @@ data_refor <- dplyr::bind_rows(
   dt_long %>%
     dplyr::filter(change_code == 6) %>%
     dplyr::select(cell_id, change_year, change_code, change_type, x, y),
-  reforest_controls_dt
-)
+  reforest_controls_dt)
 head(data_refor)
 
 # Dataset B: Deforest events + control cells
@@ -368,10 +314,8 @@ data_defor <- dplyr::bind_rows(
   dt_long %>%
     dplyr::filter(change_code == 7) %>%
     dplyr::select(cell_id, change_year, change_code, change_type, x, y),
-  deforest_controls_dt
-)
+  deforest_controls_dt)
 head(data_defor)
-
 
 # Quick check
 data_refor %>% dplyr::group_by(change_code) %>% dplyr::summarise(n=n())
@@ -399,31 +343,23 @@ coords_defor <- data_defor %>%
   dplyr::select(x, y)
 
 data_defor <- data_defor %>%
-  dplyr::mutate(
-    in_car    = extract_values(car_r, coords_defor),
-    in_public = extract_values(pub_r, coords_defor),
-    in_urban  = extract_values(urb_r, coords_defor),
-    in_rl     = extract_values(rl_r,  coords_defor)
-  )
+  dplyr::mutate(in_car = extract_values(car_r, coords_defor),
+                in_public = extract_values(pub_r, coords_defor),
+                in_urban = extract_values(urb_r, coords_defor),
+                in_rl = extract_values(rl_r,  coords_defor))
 
 data_defor <- data_defor %>%
-  dplyr::mutate(
-    in_car    = as.integer(in_car == 1),
-    in_public = as.integer(in_public == 1),
-    in_urban  = as.integer(in_urban == 1),
-    in_rl     = as.logical(in_rl == 1)
-  )
+  dplyr::mutate(in_car = as.integer(in_car == 1),
+                in_public = as.integer(in_public == 1),
+                in_urban  = as.integer(in_urban == 1),
+                in_rl = as.logical(in_rl == 1))
 
 # Categorize
 data_defor <- data_defor %>%
-  dplyr::mutate(
-    legal_status = dplyr::case_when(
-      in_urban  == 1 ~ "urban",
-      in_public == 1 ~ "public_reserve",
-      in_car    == 1 ~ "private",
-      TRUE            ~ "none"
-    )
-  )
+  dplyr::mutate(legal_status = dplyr::case_when(in_urban == 1 ~ "urban",
+                                                in_public == 1 ~ "public_reserve",
+                                                in_car == 1 ~ "private",
+                                                TRUE ~ "none"))
 table(data_defor$change_code, data_defor$legal_status)
 
 ## Dataset B
@@ -433,27 +369,23 @@ coords_refor <- data_refor %>%
 
 # Extract raster values and recode columns
 data_refor <- data_refor %>%
-  dplyr::mutate(
-    in_car    = extract_values(car_r, coords_refor),
-    in_public = extract_values(pub_r, coords_refor),
-    in_urban  = extract_values(urb_r, coords_refor),
-    in_rl     = extract_values(rl_r,  coords_refor)
-  ) %>%
-  dplyr::mutate(
-    in_car    = as.integer(in_car == 1),
-    in_public = as.integer(in_public == 1),
-    in_urban  = as.integer(in_urban == 1),
-    in_rl     = as.logical(in_rl == 1)
-  ) %>%
-  # Categorize legal status
-  dplyr::mutate(
-    legal_status = dplyr::case_when(
-      in_urban  == 1 ~ "urban",
-      in_public == 1 ~ "public_reserve",
-      in_car    == 1 ~ "private",
-      TRUE            ~ "none"
-    )
-  )
+  dplyr::mutate(in_car = extract_values(car_r, coords_refor),
+                in_public = extract_values(pub_r, coords_refor),
+                in_urban  = extract_values(urb_r, coords_refor),
+                in_rl = extract_values(rl_r,  coords_refor))
+
+data_refor <- data_refor %>%
+  dplyr::mutate(in_car = as.integer(in_car == 1),
+                in_public = as.integer(in_public == 1),
+                in_urban  = as.integer(in_urban == 1),
+                in_rl = as.logical(in_rl == 1))
+
+# Categorize legal status
+data_refor <- data_refor %>%
+  dplyr::mutate(legal_status = dplyr::case_when(in_urban == 1 ~ "urban",
+                                                in_public == 1 ~ "public_reserve",
+                                                in_car == 1 ~ "private",
+                                                TRUE ~ "none"))
 table(data_refor$change_code, data_refor$legal_status)
 
 cat("Legal status computed\n")
@@ -469,16 +401,12 @@ apa_r <- rasterize_binary(apa_mld_sf, template_rast, value = 1, background = 0)
 
 ## Dataset A
 data_defor <- data_defor %>%
-  dplyr::mutate(
-    in_APA = as.integer(extract_values(apa_r, coords_defor) == 1)
-  )
+  dplyr::mutate(in_APA = as.integer(extract_values(apa_r, coords_defor) == 1))
 table(data_defor$change_code, data_defor$in_APA)
 
 ## Dataset B
 data_refor <- data_refor %>%
-  dplyr::mutate(
-    in_APA = as.integer(extract_values(apa_r, coords_refor) == 1)
-  )
+  dplyr::mutate(in_APA = as.integer(extract_values(apa_r, coords_refor) == 1))
 table(data_refor$change_code, data_refor$in_APA)
 
 cat("APA intersection done\n")
@@ -504,17 +432,19 @@ plot(dist_urban_r)
 
 ## Dataset A
 data_defor <- data_defor %>%
-  dplyr::mutate(
-    dist_water_m = extract_values(dist_rivers_r, coords_defor),  # distance to rivers
-    dist_urban_m = extract_values(dist_urban_r, coords_defor)    # distance to urban centers
-  )
+  dplyr::mutate(dist_water_m = extract_values(dist_rivers_r, coords_defor),  # distance to rivers
+                dist_urban_m = extract_values(dist_urban_r, coords_defor))    # distance to urban centers
 
 # Distance to roads (dynamic)
-# To account for creation dates of roads, we subset roads whose creation date ≤ change year
+# To account for creation dates of roads, we subset roads by date_crea ≤ change_year
+# We recompute distance year by year
+# We extract distances only for events in that year
 
 # Initialize column
 data_defor$dist_road_m <- NA_real_
 
+# Loop over years
+unique_years <- sort(unique(data_defor$change_year))
 for (yr in unique_years) {
   
   # indices of rows for this year
@@ -551,10 +481,8 @@ for (yr in unique_years) {
 data_defor <- data_defor %>%
   dplyr::mutate(dist_edge_m = NA_real_)
 
-
-# Unique years to loop over
+# Loop over years
 unique_years <- sort(unique(data_defor$change_year))
-
 for (yr in unique_years) {
   
   cat("  Processing forest edges for year:", yr, "\n")
@@ -597,17 +525,19 @@ data_defor %>% dplyr::group_by(change_code) %>% dplyr::summarise_at(vars(starts_
 
 ## Dataset B
 data_refor <- data_refor %>%
-  dplyr::mutate(
-    dist_water_m = extract_values(dist_rivers_r, coords_refor),  # distance to rivers
-    dist_urban_m = extract_values(dist_urban_r, coords_refor)    # distance to urban centers
-  )
+  dplyr::mutate(dist_water_m = extract_values(dist_rivers_r, coords_refor),  # distance to rivers
+                dist_urban_m = extract_values(dist_urban_r, coords_refor))    # distance to urban centers
 
 # Distance to roads (dynamic)
-# To account for creation dates of roads, we subset roads whose creation date ≤ change year
+# To account for creation dates of roads, we subset roads by date_crea ≤ change_year
+# We recompute distance year by year
+# We extract distances only for events in that year
 
 # Initialize column
 data_refor$dist_road_m <- NA_real_
 
+# Loop over years
+unique_years <- sort(unique(data_refor$change_year))
 for (yr in unique_years) {
   
   # indices of rows for this year
@@ -644,9 +574,8 @@ for (yr in unique_years) {
 data_refor <- data_refor %>%
   dplyr::mutate(dist_edge_m = NA_real_)
 
-# Unique years to loop over
+# Loop over years
 unique_years <- sort(unique(data_refor$change_year))
-
 for (yr in unique_years) {
   
   cat("  Processing forest edges for year:", yr, "\n")
@@ -677,7 +606,7 @@ for (yr in unique_years) {
   dist_edge_r <- terra::distance(edge_rast)
   
   # Extract distances for rows of this year
-  coords_year <- coords_refor[idx, ]
+  coords_year <- coords_defor[idx, ]
   extracted_dist <- extract_values(dist_edge_r, coords_year)
   
   # Assign distances directly to the relevant rows
@@ -695,23 +624,23 @@ cat("SECTION 7: extracting slope values\n")
 
 ## Dataset A
 data_defor <- data_defor %>%
-  dplyr::mutate(
-    slope_pct = extract_values(slope_r, coords_defor)
-  )
+  dplyr::mutate(slope_pct = extract_values(slope_r, coords_defor))
 summary(data_defor$slope_pct)
+data_defor %>% dplyr::group_by(change_type) %>% dplyr::summarise(mean_slope = mean(slope_pct, na.rm=TRUE))
 
 ## Dataset B
 data_refor <- data_refor %>%
-  dplyr::mutate(
-    slope_pct = extract_values(slope_r, coords_refor)
-  )
+  dplyr::mutate(slope_pct = extract_values(slope_r, coords_refor))
 summary(data_refor$slope_pct)
+data_refor %>% dplyr::group_by(change_type) %>% dplyr::summarise(mean_slope = mean(slope_pct, na.rm=TRUE))
+
 
 cat("Slope extraction completed\n")
 
 
 
 #### SECTION 8 - LAND USE AREA ----------
+# We extract land-use areas within a buffer around each point, year by year, for specified land-use classes
 
 cat("\nSECTION 8: Land use area extraction around buffers\n")
 names(rasters_reclass) <- years_lulc
@@ -758,7 +687,7 @@ compute_landuse_buffer <- function(dt, rasters_reclass, classes, radius) {
       r_bin <- r_year == cl
       
       # moving window sum
-      focal_count <- terra::focal(r_bin, w = w, fun = "sum", na.rm = TRUE)
+      focal_count <- terra::focal(r_bin, w = w, fun = "sum", na.rm = TRUE) # NA values are ignored in the sum
       
       # convert pixel count to area
       focal_area_m2 <- focal_count * pixel_area
