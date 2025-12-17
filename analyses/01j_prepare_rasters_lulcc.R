@@ -129,15 +129,12 @@ plot(st_geometry(public_reserves_sf))
 
 
 ### Helpers -----------
-# Reproject an sf object only if CRS differs from target
-ensure_crs <- function(sf_obj, target_crs) {
-  if (is.null(sf_obj)) return(NULL)
-  if (st_crs(sf_obj) != target_crs) return(st_transform(sf_obj, target_crs))
-  sf_obj
-}
-
 # Rasterize vector -> binary raster (0/NA or 1/0 depending on background)
-rasterize_binary <- function(sf_obj, template_rast, value = 1, background = NA) {
+# Takes a vector layer (sf_obj) and burns it onto a template raster
+# Cells covered by the vector get value
+# All other cells get background
+# If the vector is empty or NULL, returns a raster filled entirely with background
+rasterize_binary <- function(sf_obj, template_rast, value, background) {
   if (is.null(sf_obj) || nrow(sf_obj) == 0) {
     r <- rast(template_rast)
     values(r) <- background
@@ -148,14 +145,20 @@ rasterize_binary <- function(sf_obj, template_rast, value = 1, background = NA) 
 }
 
 # Extract raster values at coordinates, always returning a numeric vector
+# Samples a raster r at XY coordinates
+# Always returns one numeric value per coordinate
+# If the raster is NULL, returns all NAs
+# Strips out IDs from terra::extract()
 extract_values <- function(r, coords_df) {
-  if (is.null(r)) return(rep(NA_real_, nrow(coords_df)))
-  out <- terra::extract(r, coords_df)
-  if (is.data.frame(out) && ncol(out) >= 2) return(out[[2]])
-  if (is.data.frame(out) && ncol(out) == 1) return(out[[1]])
+  if (is.null(r)) {
+    return(rep(NA_real_, nrow(coords_df)))
+  }
+  out <- terra::extract(r, coords_df, ID = FALSE) # ID = FALSE returns only the extracted values
+  if (is.data.frame(out)) {
+    return(as.numeric(out[[1]]))
+  }
   as.numeric(out)
 }
-
 
 ### Prepare the cell-based dataset -----
 # Rationale:
