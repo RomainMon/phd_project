@@ -12,6 +12,7 @@ library(patchwork)
 library(stringr)
 library(tibble)
 library(scales)
+library(ggrepel)
 # remotes::install_github("davidsjoberg/ggstream")
 library(ggstream)
 
@@ -102,6 +103,8 @@ ggplot(data, aes(x = year, y = pland, fill = Description, group = Description)) 
 
 
 ##### Stacked barplot (in %) ------
+png(here("outputs","plot","01h_lm_pland_barplot.png"), width = 2000, height = 1000, res = 300)
+
 ggplot(data, aes(x = year, y = pland, fill = Description)) +
   geom_bar(stat = "identity", position = "stack", color = "black", linewidth = 0.2) +
   scale_fill_manual(values = setNames(class_colors$Color, class_colors$Description)) +
@@ -116,6 +119,7 @@ ggplot(data, aes(x = year, y = pland, fill = Description)) +
     legend.position = "right"
   )
 
+dev.off()
 
 ##### Stream chart -----
 data = all_lulc_metrics %>% 
@@ -269,6 +273,8 @@ ggplot() +
 
 
 # 2) With a smoothed line
+png(here("outputs","plot","01h_lm_pland_barplot0.png"), width = 2500, height = 1500, res = 300)
+
 ggplot() +
   
   geom_col(
@@ -313,6 +319,8 @@ ggplot() +
     axis.text.x = element_text(angle = 45, hjust = 1),
     legend.position = "bottom"
   )
+
+dev.off()
 
 # 3) ... and the forest dynamics
 # Identify forest increase/decrease runs
@@ -504,15 +512,25 @@ donut <- data %>%
   )
 
 # donut plot
-ggplot(donut, aes(ymax=ymax, ymin=ymin, xmax=4, xmin=3, fill=Description)) +
+png(here("outputs","plot","01h_lm_pland_2024_donut.png"), width = 1500, height = 800, res = 300)
+
+ggplot(donut, aes(ymax = ymax, ymin = ymin, xmax = 4, xmin = 3, fill = Description)) +
   geom_rect() +
-  geom_text(x=3.5, aes(y=labelPos, label=label), size=3) +
-  coord_polar(theta="y") +
-  xlim(c(0,4)) +
+  geom_text_repel(
+    aes(x = 4.2, y = labelPos, label = label),
+    size = 3,
+    nudge_x = 0.5,
+    segment.color = "grey50",
+    direction = "y"
+  ) +
+  coord_polar(theta = "y") +
+  xlim(c(0, 4.8)) +
   theme_void() +
   scale_fill_manual(values = setNames(class_colors$Color, class_colors$Description)) +
   ggtitle("Land use composition in 2024") +
-  theme(legend.position="right")
+  theme(legend.position = "right")
+
+dev.off()
 
 ###### Text -------
 res_2024 <- data %>%
@@ -765,8 +783,11 @@ waffles <- p_landscape + p_forest + p_matrix +
               widths = c(0.58, 0.42),
               heights = c(1, 1))
 
+png(here("outputs","plot","01h_lm_pland_2024_waffle.png"), width = 2700, height = 1800, res = 300)
+
 plot(waffles)
 
+dev.off()
 
 
 ### Forest class metrics -----------
@@ -866,6 +887,8 @@ data = forest_class_metrics %>%
   )
 
 # Plot facets
+png(here("outputs","plot","01h_lm_forest_metrics_lineplot.png"), width = 2000, height = 2000, res = 300)
+
 ggplot(data, aes(x = year, y = Value)) +
   geom_line(color = "darkgreen", linewidth = 1) +
   geom_point(color = "forestgreen", size = 3) +
@@ -882,6 +905,7 @@ ggplot(data, aes(x = year, y = Value)) +
     panel.grid.minor = element_blank()
   )
 
+dev.off()
 
 ##### Line plot - ECA -----
 # Prepare ECA data
@@ -901,6 +925,30 @@ eca_data <- forest_class_metrics %>%
     ),
     year = as.numeric(year)
   )
+
+# Simple plot
+png(here("outputs","plot","01h_lm_eca_lineplot.png"), width = 2400, height = 2000, res = 300)
+
+ggplot(eca_data, aes(x = year, y = Value, color = Metric)) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 3) +
+  labs(
+    title = "Temporal Evolution of Equivalent Connected Area (ECA)",
+    x = "Year",
+    y = "ECA (ha)",
+    color = NULL
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    plot.title = element_text(face = "bold", hjust = 0.5),
+    panel.grid.minor = element_blank()
+  ) +
+  scale_color_manual(values = c(
+    "ECA (2 km)" = "#BFB8FF",
+    "ECA (8 km)" = "#0C0075"
+  ))
+
+dev.off()
 
 # Identify runs of consecutive same ECA change
 change_df <- forest_class_metrics %>%
@@ -1151,4 +1199,3 @@ combined = core_plot + corr_plot + plot_layout(ncol = 2, widths = c(1, 1))
 
 # Print
 combined
-

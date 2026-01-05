@@ -743,13 +743,13 @@ compute_patch_metrics <- function(r, year,
                           distance_thresholds = c(2000,8000))
   
   # buffer patches 1 km
-  patches_buf1km = terra::buffer(terra::vect(patches_final), width=1000) |> terra::aggregate()
+  patches_buf1km = terra::buffer(terra::vect(patches_final), width=1000) %>% terra::aggregate()
   
   # extend bbox
   minbbox_expanded = terra::union(minbbox2000, patches_buf1km)
   
   # crop r
-  r_crop = terra::crop(r, minbbox_expanded) |> terra::mask(minbbox_expanded)
+  r_crop = terra::crop(r, minbbox_expanded) %>% terra::mask(minbbox_expanded)
   
   resist1 = terra::ifel(r_crop==1, 1,
                         terra::ifel(r_crop==33,1,100))
