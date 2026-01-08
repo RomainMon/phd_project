@@ -95,7 +95,6 @@ reclass_fun <- function(xx) {
 # this is done on all land uses
 
 apply_temporal_threshold <- function(rasters, years) {
-  
   message("Applying temporal removal filter...")
   n <- length(rasters)
   
@@ -105,27 +104,20 @@ apply_temporal_threshold <- function(rasters, years) {
     if (is.null(v)) v <- terra::values(r)
     return(v)
   })
-  
   nr <- nrow(mat)
   
   # Loop through middle years
   for (i in 2:(n - 1)) {
-    
     prev <- mat[, i - 1]
     curr <- mat[, i]
-    nxt  <- mat[, i + 1]
+    nxt <- mat[, i + 1]
     
     # NA-safe condition:
     # change only when curr differs from BOTH prev and next
     # AND prev/next are not NA
-    spike <- !is.na(curr) &
-      !is.na(prev) &
-      !is.na(nxt) &
-      curr != prev &
-      curr != nxt
-    
+    spike <- !is.na(curr) & !is.na(prev) & !is.na(nxt) &
+      curr != prev & curr != nxt
     mat[spike, i] <- prev[spike]
-    
     message("Year ", years[i], ": fixed ", sum(spike), " cells.")
   }
   
@@ -170,7 +162,6 @@ remove_isolated_cells <- function(rasters, years) {
     
     r <- rasters[[i]]
     message(" Processing year ", years[i], " (", i, "/", n, ")")
-    
     vals <- values(r)
     
     # 1) Count neighbors equal to center (subtract 1 to exclude center)
@@ -222,7 +213,6 @@ remove_isolated_cells <- function(rasters, years) {
     # If neighbor mode is NA, keep original value
     fixed_vals <- vals
     fixed_vals[target_idx] <- replacement_vals
-    
     r_fixed <- setValues(r, fixed_vals)
     names(r_fixed) <- as.character(years[i])
     
@@ -283,7 +273,7 @@ dilatation_erosion <- function(raster, seuil) {
 #### Apply linear features -----
 # Here, we overlay vector linear features to the rasters using a buffer width and assign the intersected cells a new numeric value
 # -> Adapt the buffer width and value according to the linear feature (for instance: roads = 15m and 5 for artificial)
-apply_linear_feature_single <- function(r, yr, feature, buffer_width, value, use_date = TRUE) {
+apply_linear_feature_single <- function(r, yr, feature, buffer_width, value, use_date) {
   feat_valid <- if (use_date && "date_crea" %in% names(feature)) {
     feature[feature$date_crea <= yr, ]
   } else feature

@@ -284,8 +284,6 @@ for (i in seq_along(rasters_reclass_w_mspa2)) {
 }
 
 
-
-
 ### Own version (imperfect) -----
 # # Here, we distinguish between habitat patches and corridors, defined as narrow strips of vegetation connecting at least 2 habitat patches
 # # Criteria used are: distance of a forest cell to edge (if far = core area), patch size (if large = core area), adjacency to core cells (if adjacent = edges of core areas)

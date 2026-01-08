@@ -49,13 +49,13 @@ for (i in seq_along(rasters_forest_cat)) {
   cat("Year", years[i], " → raster name:", basename(raster_df$file[i]), "\n")
 }
 
-raster2024 = rasters_forest_cat[[36]]
+raster_forest_cat2024 = rasters_forest_cat[[36]]
 vals_after <- c(1,2,3,4,5,10,11,12,13,14,15)
 cols_after <- c("#32a65e", "#ad975a", "#FFFFB2", "#0000FF", "#d4271e", 
                 "lightgreen", "chartreuse", "darkseagreen", "darkolivegreen","darkkhaki", "yellow")
-terra::coltab(raster2024) <- cbind(vals_after, cols_after)
-plot(raster2024)
-freq(raster2024)
+terra::coltab(raster_forest_cat2024) <- cbind(vals_after, cols_after)
+plot(raster_forest_cat2024)
+freq(raster_forest_cat2024)
 
 
 ### Transition matrix -----
@@ -81,6 +81,9 @@ for (i in seq_along(rasters)) {
   names(rasters_corrected)[i] <- names(rasters)[i]
 }
 
+# Quick check
+freq(rasters[[36]])
+freq(rasters_corrected[[36]])
 
 ##### 2. CUMULATIVE TRANSITIONS -------
 # Create a set of transition rasters where each cell encodes its land-use change from the previous year
@@ -388,6 +391,55 @@ plot(year_change_crop,
 points(xy_chosen, pch = 16, cex = 1.2)
 
 par(mfrow = c(1, 1))
+
+
+##### 5. COMPUTE FOREST AGE AND TRAJECTORY ----------
+# We use the workflow in Silva Junior et al. (2020), Scientific Data
+# i) We reclass the rasters into binary 1/0 rasters 
+# ii) We compute the age as Age(t)=(Age(t-1)+Forest(t))×Forest(t)
+
+### STEP 1: Reclass rasters
+reclass_for_age <- function(r) {
+  app(r, fun = function(x) {
+    x[x == 1] <- 1
+    x[x %in% 2:5] <- 0
+    x
+  })
+}
+
+# Apply to all rasters
+rasters_forest_age <- lapply(rasters_corrected, reclass_for_age)
+
+# Check
+plot(rasters_forest_age[[1]])
+plot(rasters_forest_age[[36]])
+freq(rasters_forest_age[[36]])
+
+### STEP 2: Compute age
+n <- length(rasters_forest_age)
+
+age_rasters <- vector("list", n)
+
+# Baseline (1989): forest = 1, matrix = 0
+age_prev <- rasters_forest_age[[1]] # already 1 for forest
+names(age_prev) <- paste0("age_", years[1])
+age_rasters[[1]] <- age_prev
+
+# Following years
+for (i in 2:n) {
+  
+  forest_t <- rasters_forest_age[[i]]
+  
+  # Age rule
+  age_t <- (age_prev + 1) * forest_t
+  names(age_t) <- paste0("age_", years[i])
+  age_rasters[[i]] <- age_t
+  age_prev <- age_t
+}
+
+plot(age_rasters[[1]], main = years[1])
+plot(age_rasters[[2]], main = years[2])
+plot(age_rasters[[36]], main = years[36])
 
 
 ##### Visual demo of all steps ---------
