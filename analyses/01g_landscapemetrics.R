@@ -32,6 +32,7 @@ for (i in seq_along(rasters_reclass)) {
 }
 plot(rasters_reclass[[36]], col=c("#32a65e", "#ad975a", "#FFFFB2", "#0000FF", "#d4271e"))
 
+
 #### ...With forest categories --------
 base_path = here("outputs", "data", "MapBiomas", "Rasters_reclass_forest_cat")
 raster_files = list.files(base_path, pattern = "\\.tif$", full.names = TRUE)
@@ -50,6 +51,7 @@ for (i in seq_along(rasters_reclass_forest_cat)) {
 }
 plot(rasters_reclass_forest_cat[[36]])
 
+
 #### MSPA rasters (with corridors) -------
 base_path = here("outputs", "data", "MapBiomas", "MSPA", "reclass_w_mspa")
 raster_files = list.files(base_path, pattern = "\\.tif$", full.names = TRUE)
@@ -67,6 +69,45 @@ for (i in seq_along(rasters_mspa)) {
   cat("Year", years[i], " → raster name:", basename(raster_df$file[i]), "\n")
 }
 plot(rasters_mspa[[36]], col=c("#32a65e", "#ad975a", "#FFFFB2", "#0000FF", "#d4271e", "chartreuse"))
+
+
+#### Cumulative rasters (de/reforestation) -------
+base_path = here("outputs", "data", "MapBiomas", "Rasters_cumulative_tm")
+raster_files = list.files(base_path, pattern = "\\.tif$", full.names = TRUE)
+
+# Extract years
+# IMPORTANT: here, years are different from other rasters because 1989 is omitted (baseline)
+years_tm = stringr::str_extract(basename(raster_files), "(?<!\\d)\\d{4}(?!\\d)")
+# Create a dataframe to link files and years
+raster_df = data.frame(file = raster_files, years_tm = as.numeric(years_tm)) %>%
+  dplyr::arrange(years_tm)
+# Load rasters in chronological order
+rasters_tm = lapply(raster_df$file, terra::rast)
+years_tm = raster_df$years_tm
+# Check
+for (i in seq_along(rasters_tm)) {
+  cat("Year", years_tm[i], " → raster name:", basename(raster_df$file[i]), "\n")
+}
+plot(rasters_tm[[35]], col=c("#32a65e", "#ad975a", "#FFFFB2", "#0000FF", "#d4271e", "lightgreen", "pink"))
+
+
+#### Forest age rasters -------
+base_path = here("outputs", "data", "MapBiomas", "Rasters_forest_age_cat")
+raster_files = list.files(base_path, pattern = "\\.tif$", full.names = TRUE)
+
+# Extract years
+years = stringr::str_extract(basename(raster_files), "(?<!\\d)\\d{4}(?!\\d)")
+# Create a dataframe to link files and years
+raster_df = data.frame(file = raster_files, year = as.numeric(years)) %>%
+  dplyr::arrange(year)
+# Load rasters in chronological order
+rasters_forest_age = lapply(raster_df$file, terra::rast)
+years = raster_df$year
+# Check
+for (i in seq_along(rasters_forest_age)) {
+  cat("Year", years[i], " → raster name:", basename(raster_df$file[i]), "\n")
+}
+plot(rasters_forest_age[[36]])
 
 
 ### Import vectors -----
@@ -98,6 +139,8 @@ minbbox_sf = sf::st_as_sf(minbbox)
 check_landscape(rasters_reclass[[36]])
 check_landscape(rasters_reclass_forest_cat[[36]])
 check_landscape(rasters_mspa[[36]])
+check_landscape(rasters_tm[[35]])
+check_landscape(rasters_forest_age[[36]])
 
 #### Using landscapemetrics  ---------
 
@@ -177,6 +220,7 @@ compute_one_class_metrics = function(r, year, class_value, metrics_to_compute) {
   return(metrics)
 }
 
+
 ##### Global LULC evolution -----
 # Here, we're interested in forest evolution (as a whole)
 all_lulc_classes = purrr::map2_dfr(
@@ -199,7 +243,8 @@ all_lulc_classes = all_lulc_classes %>%
 # quick summary
 summary(all_lulc_classes)
 
-##### By forest categories --------
+
+##### Evolution of forest categories --------
 # First, we merge all matrix land uses
 # vector of classes to merge:
 matrix_classes = c(2,3,4,5)
@@ -226,6 +271,63 @@ forest_cat_metrics = forest_cat_metrics %>%
 
 # quick summary
 summary(forest_cat_metrics)
+
+##### Evolution of deforestation and reforestation --------
+# First, we merge all matrix land uses
+# vector of classes to merge:
+matrix_classes = c(2,3,4,5)
+
+# apply merging
+rasters_forest_vs_matrix = purrr::map2(
+  rasters_tm,
+  years_tm,
+  ~ merge_classes(.x, .y, matrix_classes, new_value = 99)
+)
+freq(rasters_forest_vs_matrix[[35]])
+
+# compute metrics
+defor_refor_metrics = purrr::map2_dfr(
+  rasters_forest_vs_matrix,
+  years_tm,
+  ~ compute_class_metrics(.x, .y, metrics_to_compute = c("lsm_c_ca", "lsm_c_pland", "lsm_c_np", "lsm_c_area_mn", "lsm_c_area_sd"))
+)
+
+# to wide format
+defor_refor_metrics = defor_refor_metrics %>% 
+  tidyr::pivot_wider(names_from = metric, values_from = value) %>% 
+  dplyr::select(-id, -layer)
+
+# quick summary
+summary(defor_refor_metrics)
+
+
+##### Evolution of forest age --------
+# First, we remove 0 (NA)
+for (i in seq_along(rasters_forest_age)) {
+  r <- rasters_forest_age[[i]]
+  r[r == 0] <- NA
+  rasters_forest_age[[i]] <- r
+}
+
+# Check
+plot(rasters_forest_age[[36]])
+freq(rasters_forest_age[[36]])
+
+# compute metrics
+forest_age_metrics = purrr::map2_dfr(
+  rasters_forest_age,
+  years,
+  ~ compute_class_metrics(.x, .y, metrics_to_compute = c("lsm_c_ca", "lsm_c_pland"))
+)
+
+# to wide format
+forest_age_metrics = forest_age_metrics %>% 
+  tidyr::pivot_wider(names_from = metric, values_from = value) %>% 
+  dplyr::select(-id, -layer)
+
+# quick summary
+summary(forest_age_metrics)
+
 
 ##### Other forest metrics (core + corridor) --------
 # Here, we compute new metrics for the forest class only
@@ -269,6 +371,7 @@ forest_core_metrics = forest_core_metrics %>%
 
 # quick check
 summary(forest_core_metrics)
+
 
 ##### Corridors --------
 # Here, we compute metrics on corridor forests only (using MSPA)
@@ -699,6 +802,8 @@ write.csv(all_lulc_classes, file = file.path(base_path, "all_lulc_classes_bbox_1
 write.csv(forest_class_metrics_final, file = file.path(base_path, "forest_class_metrics_bbox_1989_2024.csv"), row.names=FALSE)
 write.csv(forest_core_corridor_metrics_final, file = file.path(base_path, "forest_core_corridors_metrics_bbox_1989_2024.csv"), row.names=FALSE)
 write.csv(forest_cat_metrics, file = file.path(base_path, "forest_cat_metrics_bbox_1989_2024.csv"), row.names=FALSE)
+write.csv(forest_age_metrics, file = file.path(base_path, "forest_age_metrics_bbox_1989_2024.csv"), row.names=FALSE)
+write.csv(defor_refor_metrics, file = file.path(base_path, "defor_refor_metrics_bbox_1989_2024.csv"), row.names=FALSE)
 
 # Export patch metrics
 purrr::walk2(

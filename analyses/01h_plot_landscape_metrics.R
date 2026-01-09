@@ -1,4 +1,4 @@
-#------------------------------------------------#
+
 # Author: Romain Monassier
 # Objective: Plot landscape metrics through time
 #------------------------------------------------#
@@ -15,6 +15,7 @@ library(scales)
 library(ggrepel)
 # remotes::install_github("davidsjoberg/ggstream")
 library(ggstream)
+library(ggtern)
 
 ### Import datasets ----------------
 base_path = here("outputs", "data", "landscapemetrics")
@@ -32,6 +33,14 @@ forest_core_corridor_metrics = readr::read_csv(
 )
 forest_cat_metrics = readr::read_csv(
   file.path(base_path, "forest_cat_metrics_bbox_1989_2024.csv"),
+  show_col_types = FALSE
+)
+forest_age_metrics = readr::read_csv(
+  file.path(base_path, "forest_age_metrics_bbox_1989_2024.csv"),
+  show_col_types = FALSE
+)
+defor_refor_metrics = readr::read_csv(
+  file.path(base_path, "defor_refor_metrics_bbox_1989_2024.csv"),
   show_col_types = FALSE
 )
 
@@ -183,6 +192,78 @@ res_change <- data %>%
 
 cat("Changes between 1989 and 2024 were:\n")
 cat(paste0("* ", res_change, collapse="\n"), "\n")
+
+##### Line plot -----
+# Create color palette using the Legend codes provided by MapBiomas
+class_colors = tibble::tibble(
+  class = c(1,2,3,4,5),
+  Description = c(
+    "Forest",
+    "Other non-forest formation",
+    "Agriculture",
+    "Water",
+    "Artificial"
+  ),
+  Color = c(
+    "#32a65e", "#ad975a", "#FAD991", "#0000FF", "#d4271e"
+  )
+)
+
+# Select data
+data = all_lulc_metrics %>% 
+  dplyr::select(year, class, ca) %>% 
+  dplyr::mutate(
+    year  = as.integer(year),
+    class = as.numeric(class),
+    ca = as.numeric(ca)
+  )
+
+# Add color codes
+data = data %>% 
+  dplyr::left_join(class_colors, by = "class")
+
+# Compute change per class
+label_data <- data %>%
+  dplyr::group_by(Description) %>%
+  dplyr::arrange(year) %>%
+  dplyr::summarise(
+    year_end   = last(year),
+    ca_end     = last(ca),
+    ca_start   = first(ca),
+    change_ha  = ca_end - ca_start,
+    pct_change = 100 * change_ha / ca_start,
+    .groups = "drop"
+  ) %>%
+  dplyr::mutate(
+    label = paste0(
+      ifelse(change_ha >= 0, "+", "−"),
+      comma(abs(round(change_ha))),
+      " ha (",
+      sprintf("%+.1f%%", pct_change),
+      ")"
+    )
+  )
+
+# Plot
+png(here("outputs","plot","01h_lm_ca_all_lulcc_line_plot.png"), width = 2700, height = 1900, res = 300)
+
+x_max <- max(data$year)
+ggplot(data, aes(x = year, y = ca, color = Description, group = Description)) +
+  geom_ribbon(aes(ymin = ca - 2000, ymax = ca + 2000, fill = Description), alpha = 0.18, color = NA) +
+  geom_line(linewidth = 1.3) +
+  geom_point(size = 2) +
+  geom_text(data = label_data, aes(x = year_end + 0.6, y = ca_end, label = label, color = Description),
+            hjust = 0, size = 3.6, fontface = "bold", show.legend = FALSE) +
+  scale_color_manual(values = setNames(class_colors$Color, class_colors$Description)) +
+  scale_fill_manual(values = setNames(class_colors$Color, class_colors$Description), guide = "none") +
+  labs(x = "Year", y = "Area (ha)", color = "Land use") +
+  scale_x_continuous(expand = expansion(mult = c(0.02, 0.12))) +   # small left margin + larger right margin
+  coord_cartesian(clip = "off") +
+  theme_classic() +
+  theme(legend.position = "bottom", plot.margin = margin(10, 60, 10, 10))
+
+dev.off()
+
 
 ##### Barplot (positive vs negative changes) ------
 # Prepare data
@@ -538,6 +619,34 @@ res_2024 <- data %>%
   dplyr::pull(txt)
 cat("Land-use composition in 2024 was as follows:\n")
 cat(paste0("* ", res_2024, collapse="\n"), "\n\n")
+
+
+##### Ternary plot --------
+# 1. Filter for the classes we need (1, 3, 5)
+data <- all_lulc_metrics %>%
+  dplyr::filter(class %in% c(1, 3, 5)) %>%
+  dplyr::select(year, class, pland)
+
+# 2. Pivot data so each row is a year and columns are forest, agriculture, urban
+data <- data %>%
+  dplyr::mutate(class_name = case_when(
+    class == 1 ~ "forest",
+    class == 3 ~ "agriculture",
+    class == 5 ~ "urban"
+  )) %>%
+  dplyr::select(-class) %>%
+  tidyr::pivot_wider(names_from = class_name, values_from = pland)
+data$forest = data$forest/100
+data$agriculture = data$agriculture/100
+data$urban = data$urban/100
+
+# 3. Plot ternary diagram
+ggtern(data = data, aes(x = agriculture, y = urban, z = forest)) +
+  geom_point(aes(color = year), size = 3) +
+  scale_T_continuous(limits = c(0.1, 0.2)) + # urban
+  scale_L_continuous(limits = c(0.3, 0.4)) + # agriculture
+  scale_R_continuous(limits = c(0.5, 0.6)) + # forest
+  theme_rgbw()
 
 
 # Forest categories metrics --------

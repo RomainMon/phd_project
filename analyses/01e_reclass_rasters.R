@@ -650,7 +650,7 @@ message("Adding plantios to rasters...")
 # We use the output of dilatation erosion process
 rasters_plantios2 <- purrr::map2(rasters_dilate, years, function(r, yr) {
   message("  - Adding plantios for year ", yr)
-  add_plantios(r, yr, plantios, plantio_value = 10) # Plantios are not differentiated from other forests
+  add_plantios(r, yr, plantios, plantio_value = 10) # Plantios are differentiated from other forests
 })
 
 # Quick check for plantios overlay

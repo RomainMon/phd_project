@@ -337,8 +337,8 @@ year_idx <- which(years == year_change)
 year_before <- years[year_idx - 1]
 
 message("Selected cell ID: ", chosen$cell_id)
-message("   → First change year: ", year_change)
-message("   → Comparing ", year_before, " (before) vs ", year_change, " (after)")
+message("→ First change year: ", year_change)
+message("→ Comparing ", year_before, " (before) vs ", year_change, " (after)")
 
 # Extract rasters BEFORE and AFTER the transition
 r_before <- rasters_corrected[[year_idx - 1]]
@@ -397,6 +397,7 @@ par(mfrow = c(1, 1))
 # We use the workflow in Silva Junior et al. (2020), Scientific Data
 # i) We reclass the rasters into binary 1/0 rasters 
 # ii) We compute the age as Age(t)=(Age(t-1)+Forest(t))×Forest(t)
+# iii) We reclass forest age
 
 ### STEP 1: Reclass rasters
 reclass_for_age <- function(r) {
@@ -437,9 +438,29 @@ for (i in 2:n) {
   age_prev <- age_t
 }
 
+# Check
 plot(age_rasters[[1]], main = years[1])
 plot(age_rasters[[2]], main = years[2])
 plot(age_rasters[[36]], main = years[36])
+
+### STEP 3: Reclass age
+reclass_age <- function(r) {
+  app(r, fun = function(x) {
+    x[x == 0] <- 0
+    x[x %in% 1:5] <- 5
+    x[x %in% 6:15] <- 15
+    x[x %in% 16:25] <- 25
+    x[x > 25] <- 99
+    x
+  })
+}
+
+# Apply to all rasters
+rasters_forest_age_cat <- lapply(age_rasters, reclass_age)
+
+# Check
+plot(rasters_forest_age_cat[[1]], main = years[1])
+plot(rasters_forest_age_cat[[36]], main = years[36])
 
 
 ##### Visual demo of all steps ---------
@@ -473,11 +494,15 @@ r_step3 <- crop(reclass_cumul_trans[[index_demo - 1]], zoom_ext)
 ### STEP 4 – Year of 1st change
 r_step4 <- crop(years_forest_change$year_rasters[[1]], zoom_ext)
 
+### STEP 5 – Forest age category
+r_step5 <- crop(rasters_forest_age_cat[[index_demo]], zoom_ext)
 
 ### PLOT
 
-png(here("outputs","plot","01i_tm_lulc_demo.png"), width = 3000, height = 2000, res = 300)
-par(mfrow = c(2, 2), mar = c(2, 2, 2, 2))
+png(here("outputs","plot","01i_tm_lulc_demo.png"), 
+    width = 3600, height = 2400, res = 300)
+
+par(mfrow = c(2, 3), mar = c(2, 2, 2, 2))
 
 ## STEP 0 – Raw imported
 plot(
@@ -485,7 +510,7 @@ plot(
   main = paste0("Step 0 – Raw imported (", year_demo, ")"),
   col = c("#32a65e", "#ad975a", "#FFFFB2", "#d4271e")
 )
-points(x_center, y_center, pch=16, col="red")
+points(x_center, y_center, pch = 16, col = "red")
 
 ## STEP 2 – Cumulative transitions
 vals2 <- unique(values(r_step2))
@@ -495,7 +520,7 @@ plot(
   main = "Step 2 – Cumulative trajectory code",
   col = brewer.pal(max(3, min(n_classes, 8)), "Pastel1")
 )
-points(x_center, y_center, pch=16, col="red")
+points(x_center, y_center, pch = 16, col = "red")
 
 ## STEP 3 – Re/deforestation classification
 plot(
@@ -507,10 +532,10 @@ plot(
     "#FFFFB2",     # 3
     "#d4271e",     # 5
     "chartreuse",  # 6 = reforest
-    "pink"      # 7 = deforest
+    "pink"         # 7 = deforest
   )
 )
-points(x_center, y_center, pch=16, col="red")
+points(x_center, y_center, pch = 16, col = "red")
 
 ## STEP 4 – Year of 1st change
 vals4 <- unique(values(r_step4))
@@ -520,131 +545,25 @@ plot(
   main = "Step 4 – Year of 1st forest change",
   col = brewer.pal(max(3, min(n_classes, 8)), "Greys")
 )
-points(x_center, y_center, pch=16, col="red")
+points(x_center, y_center, pch = 16, col = "red")
+
+## STEP 5 – Forest age category
+plot(
+  r_step5,
+  main = "Step 5 – Forest age category",
+  col = c(
+    "grey90",   # 0 = non-forest
+    "#c7e9c0",  # 5
+    "#74c476",  # 15
+    "#238b45",  # 25
+    "#00441b"   # 99
+  )
+)
+points(x_center, y_center, pch = 16, col = "red")
 
 par(mfrow = c(1,1))
 dev.off()
 
-##### Summary statistics — last raster ------
-
-## Select last raster
-r_last <- reclass_cumul_trans[[length(reclass_cumul_trans)]]
-year_label <- names(reclass_cumul_trans)[length(reclass_cumul_trans)]
-
-message("🟩 Computing summary statistics for year ", year_label, " ...")
-
-## Number of cells per category
-tab <- freq(r_last) %>% as.data.frame()
-colnames(tab) <- c("layer", "class", "n_cells")
-
-## Surface (ha) and percentage (%)
-res_m <- res(r_last)
-cell_area_ha <- prod(res_m) / 10000
-
-tab <- tab %>%
-  dplyr::mutate(area_ha = n_cells * cell_area_ha,
-         perc_tot = 100 * n_cells / sum(n_cells))
-
-## Add readable class labels
-class_labels <- c(
-  "1" = "Forest",
-  "2" = "Other non-forest habitat",
-  "3" = "Agriculture",
-  "4" = "Water",
-  "5" = "Urban areas",
-  "6" = "Reforested (secondary forest)",
-  "7" = "Deforested"
-)
-
-tab_plot <- tab %>%
-  dplyr::mutate(class = class_labels[as.character(class)])
-
-## Print summary sentences
-cat("\n=== Land-use summary for", year_label, "===\n")
-tab_plot %>%
-  dplyr::arrange(desc(perc_tot)) %>%
-  dplyr::mutate(
-    sentence = sprintf(
-      "- %s covers %.0f ha (%.1f%% of the total area).",
-      class, area_ha, perc_tot
-    )
-  ) %>%
-  dplyr::pull(sentence) %>%
-  cat(sep = "\n")
-
-## Donut plot — Land-use composition
-category_colors <- c(
-  "Forest" = "#32a65e",
-  "Other non-forest habitat" = "#ad975a",
-  "Agriculture" = "#FFFFB2",
-  "Water" = "#0000FF",
-  "Urban areas" = "#d4271e",
-  "Reforested (secondary forest)" = "chartreuse",
-  "Deforested" = "pink"
-)
-
-ggplot(tab_plot, aes(x = 2, y = perc_tot, fill = class)) +
-  geom_bar(stat = "identity", width = 1, color = "white") +
-  coord_polar(theta = "y") +
-  xlim(0.5, 2.5) +
-  geom_text(aes(label = paste0(round(perc_tot, 1), "%")),
-            position = position_stack(vjust = 0.5),
-            color = "black", size = 4) +
-  scale_fill_manual(values = category_colors) +
-  theme_void() +
-  ggtitle(paste0("Land-use composition · ", year_label)) +
-  theme(
-    legend.position = "bottom",
-    plot.title = element_text(size = 14, face = "bold")
-  )
-
-## Forest-only breakdown (Intact + Secondary)
-forest <- tab %>%
-  dplyr::filter(class %in% c(1, 6)) %>%
-  dplyr::mutate(
-    class = case_when(
-      class == 1 ~ "Intact forest",
-      class == 6 ~ "Secondary forest"
-    ),
-    area_ha = n_cells * cell_area_ha
-  ) %>%
-  dplyr::group_by(class) %>%
-  dplyr::summarise(area_ha = sum(area_ha), .groups = "drop") %>%
-  dplyr::mutate(perc_tot = area_ha / sum(area_ha) * 100)
-
-## Print forest composition sentences
-cat("\n=== Forest composition for", year_label, "===\n")
-forest %>%
-  dplyr::arrange(desc(perc_tot)) %>%
-  dplyr::mutate(
-    sentence = sprintf(
-      "- %s represents %.0f ha (%.1f%% of total forest area).",
-      class, area_ha, perc_tot
-    )
-  ) %>%
-  dplyr::pull(sentence) %>%
-  cat(sep = "\n")
-
-## Donut plot — Forest composition
-forest_colors <- c(
-  "Intact forest" = "#32a65e",
-  "Secondary forest" = "#61FA95"
-)
-
-ggplot(forest, aes(x = 2, y = perc_tot, fill = class)) +
-  geom_bar(stat = "identity", width = 1, color = "white") +
-  coord_polar(theta = "y") +
-  xlim(0.5, 2.5) +
-  geom_text(aes(label = paste0(round(perc_tot, 1), "%")),
-            position = position_stack(vjust = 0.5),
-            color = "black", size = 4) +
-  scale_fill_manual(values = forest_colors) +
-  theme_void() +
-  ggtitle(paste0("Forest composition · ", year_label)) +
-  theme(
-    legend.position = "bottom",
-    plot.title = element_text(size = 14, face = "bold")
-  )
 
 ##### Export rasters -----------
 message("Exporting rasters...")
@@ -678,11 +597,7 @@ message("Exporting rasters for years of forest change...")
 
 for (i in seq_along(years_forest_change$year_rasters)) {
   
-  output_path <- file.path(
-    output_dir,
-    sprintf("raster_year_lulc_change_%02d.tif", i) # nicely padded index
-  )
-  
+  output_path <- file.path(output_dir, sprintf("raster_year_lulc_change_%02d.tif", i)) # nicely padded index
   message("  - Writing change-event raster #", i)
   
   terra::writeRaster(
@@ -693,6 +608,53 @@ for (i in seq_along(years_forest_change$year_rasters)) {
   )
 }
 
+# Export age_rasters
+# Define output folder
+output_dir = here("outputs", "data", "MapBiomas", "Rasters_forest_age")
+
+message("Exporting forest age rasters...")
+
+for (i in seq_along(age_rasters)) {
+  yr <- years[i]
+  
+  output_path <- file.path(output_dir, sprintf("raster_forest_age_%d.tif", yr))
+  
+  message("  - Writing forest age raster for year ", yr)
+  
+  terra::writeRaster(
+    age_rasters[[i]],
+    filename = output_path,
+    overwrite = TRUE,
+    wopt = list(
+      datatype = "INT2U",                # unsigned integer (0–65535)
+      gdal = c("COMPRESS=LZW")
+    )
+  )
+}
+
+# Export rasters_forest_age_cat
+# Define output folder
+output_dir = here("outputs", "data", "MapBiomas", "Rasters_forest_age_cat")
+
+message("Exporting forest age rasters (age categories)...")
+
+for (i in seq_along(rasters_forest_age_cat)) {
+  yr <- years[i]
+  
+  output_path <- file.path(output_dir, sprintf("raster_forest_age_cat_%d.tif", yr))
+  
+  message("  - Writing forest age raster (w/ categories) for year ", yr)
+  
+  terra::writeRaster(
+    rasters_forest_age_cat[[i]],
+    filename = output_path,
+    overwrite = TRUE,
+    wopt = list(
+      datatype = "INT2U",                # unsigned integer (0–65535)
+      gdal = c("COMPRESS=LZW")
+    )
+  )
+}
 
 # #### Non-spatial trajectories --------
 # # Below, we compute a transition matrix on the rasters to identify the changes in land use across the landscape and through time
