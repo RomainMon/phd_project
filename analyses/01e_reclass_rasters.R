@@ -38,22 +38,28 @@ power_lines = vect(here("data", "geo", "OSM", "work", "Power_line_OSM_clean.shp"
 pipelines = vect(here("data", "geo", "OSM", "work", "Pipelines_OSM_clean.shp"))
 bridges = vect(here("data", "geo", "AMLD", "Passagens_ARTERIS", "work", "road_overpasses_clean.shp"))
 plantios = vect(here("data", "geo", "AMLD", "plantios", "work", "plantios_clean.shp"))
+plantios_sf = sf::st_as_sf(plantios)
 car = vect(here("data", "geo", "IBGE", "cadastro_car", "AREA_IMOVEL_RJ_2024", "AREA_IMOVEL_bbox.shp"))
 pda = vect(here("data", "geo", "MMA", "protected_areas", "ucs", "poco_das_antas.shp"))
 uniao = vect(here("data", "geo", "MMA", "protected_areas", "ucs", "uniao.shp"))
+tres_picos = vect(here("data", "geo", "MMA", "protected_areas", "ucs", "tres_picos.shp"))
+rppn = vect(here("data", "geo", "AMLD", "RPPN", "RPPN_RJ.shp"))
+bbox = vect(here("data", "geo", "BBOX", "sampling_units_bbox_31983.shp"))
 
 ### Quick check -------
 # list all objects that must share CRS
 layers <- list(
-  raster_1     = crs(rasters[[1]]),
-  roads        = crs(roads),
-  power_lines  = crs(power_lines),
-  pipelines    = crs(pipelines),
-  bridges      = crs(bridges),
-  plantios     = crs(plantios),
-  car          = crs(car),
-  pda          = crs(pda),
-  uniao        = crs(uniao)
+  raster_1 = crs(rasters[[1]]),
+  roads = crs(roads),
+  power_lines = crs(power_lines),
+  pipelines = crs(pipelines),
+  bridges = crs(bridges),
+  plantios = crs(plantios),
+  car = crs(car),
+  pda = crs(pda),
+  uniao = crs(uniao),
+  rppn = crs(rppn),
+  tres_picos = crs(tres_picos)
 )
 
 # test if any differ from first
@@ -302,7 +308,48 @@ assign_if_intersect <- function(raster, vect, target_values, new_value) {
   raster
 }
 
+#### Assign values if intersects and attribute matches --------
+# This function assigns a value if intersect AND attribute matches AND according to the year
+assign_if_intersect_attr_year <- function(raster, year, vect,
+                                          year_field,
+                                          attr, attr_value,
+                                          target_values, new_value){
+  
+  if (nrow(vect) == 0) return(raster)
+  
+  # keep only vectors already present at this year (such as reforested areas)
+  vect_year <- vect[!is.na(vect[[year_field]]) & vect[[year_field]] <= year, ]
+  
+  if (nrow(vect_year) == 0) return(raster)
+  
+  # keep only desired attribute
+  vect_sub <- vect_year[vect_year[[attr]] == attr_value, ]
+  
+  if (nrow(vect_sub) == 0) return(raster)
+  
+  vect_rast <- terra::rasterize(vect_sub, raster, field = 1, background = NA)
+  
+  raster[raster %in% target_values & !is.na(vect_rast)] <- new_value
+  
+  raster
+}
 
+# This function assigns a value if intersect AND according to the year
+assign_if_intersect_year <- function(raster, year, vect, year_field,
+                                     target_values, new_value){
+  
+  if (nrow(vect) == 0) return(raster)
+  
+  vect_year <- vect[!is.na(vect[[year_field]]) & vect[[year_field]] <= year, ]
+  
+  if (nrow(vect_year) == 0) return(raster)
+  
+  vect_rast <- terra::rasterize(vect_year, raster, field = 1, background = NA)
+  
+  raster[raster %in% target_values & !is.na(vect_rast)] <- new_value
+  
+  raster
+}
 
 ### Processing pipeline --------
 
@@ -480,13 +527,12 @@ freq(rasters_dilate[[36]])
 
 ##### Step 6 – Apply linear features on top of raster layers -----
 message("Step 6: Applying linear features...")
-rasters_final <- purrr::map2(rasters_dilate, years, function(r, yr) {
+rasters_lf <- purrr::map2(rasters_dilate, years, function(r, yr) {
   message("  - Applying linear features for year ", yr)
   r_lin <- r
   r_lin <- apply_linear_feature_single(r_lin, yr, power_lines, buffer_width = 50, value = 2, use_date = FALSE)
   r_lin <- apply_linear_feature_single(r_lin, yr, pipelines, buffer_width = 15, value = 2, use_date = TRUE)
   r_lin <- apply_linear_feature_single(r_lin, yr, roads, buffer_width = 20, value = 5, use_date = TRUE)
-  r_lin <- apply_linear_feature_single(r_lin, yr, bridges, buffer_width = 15, value = 1, use_date = TRUE) # Here, bridges are classified as forest
   r_lin
 })
 
@@ -511,7 +557,7 @@ subset_indices <- c(1, 17, 35)
 for (i in subset_indices) {
   # Crop rasters
   r_before <- crop(rasters_dilate[[i]], zoom_ext)
-  r_after  <- crop(rasters_final[[i]], zoom_ext)
+  r_after  <- crop(rasters_lf[[i]], zoom_ext)
   
   # Crop linear features
   roads_sub       <- crop(roads, zoom_ext)
@@ -541,9 +587,20 @@ for (i in subset_indices) {
   par(mfrow=c(1,1))
 }
 
+##### Step 7 – Crop again (as linear features are above the extent) -----
+rasters_final <- lapply(rasters_lf, function(r) {
+  r_cropped <- crop(r, bbox) # crop returns a geographic subset of an object as specified by an Extent object
+  r_masked <- mask(r_cropped, bbox) # create a new Raster object that has the same values as x, except for the cells that are NA in a 'mask' (either a Raster or a Spatial object)
+  return(r_masked)
+})
+
+plot(rasters_lf[[36]], col = c("#32a65e", "#ad975a", "#FFFFB2", "#0000FF", "#d4271e"))
+plot(rasters_final[[36]], col = c("#32a65e", "#ad975a", "#FFFFB2", "#0000FF", "#d4271e"))
+
+
 ##### Visual demo of all steps ---------
 # Quick final summary
-freq(rasters_final[[35]])
+freq(rasters_final[[36]])
 
 # Central coordinates
 x_center <- 778151.2
@@ -575,7 +632,7 @@ r_step4 <- crop(rasters_plantios[[index_demo]], zoom_ext)
 r_step5 <- crop(rasters_dilate[[index_demo]], zoom_ext)
 
 # Step 6 - Linear features
-r_step6 <- crop(rasters_final[[index_demo]], zoom_ext)
+r_step6 <- crop(rasters_lf[[index_demo]], zoom_ext)
 
 roads_sub       <- crop(roads, zoom_ext)
 power_lines_sub <- crop(power_lines, zoom_ext)
@@ -620,6 +677,7 @@ plot(pipelines_sub,   add=TRUE, col="orange")
 par(mfrow = c(1,1))
 dev.off()
 
+
 ##### Export rasters ---------
 message("Exporting rasters...")
 
@@ -643,129 +701,35 @@ for (i in seq_along(rasters_final)) {
 
 
 #### 2. Forest categories ------
-# Second, we classify the rasters and distinguish between forest categories
+# We classify the rasters and distinguish between forest categories
 
-##### Step 1 – Add plantios ------------
-message("Adding plantios to rasters...")
-# We use the output of dilatation erosion process
-rasters_plantios2 <- purrr::map2(rasters_dilate, years, function(r, yr) {
-  message("  - Adding plantios for year ", yr)
-  add_plantios(r, yr, plantios, plantio_value = 10) # Plantios are differentiated from other forests
-})
+message("Classifying forests depending on their legal status...")
 
-# Quick check for plantios overlay
-year_sel <- 2004  # choose year to inspect
-buff <- 1000
-pl <- plantios[plantios$date_refor == year_sel, ]
-
-if (nrow(pl) > 0) {
-  years_to_plot <- c(year_sel - 1, year_sel, year_sel + 1)
-  idx <- match(years_to_plot, years)
-  valid <- !is.na(idx)
-  years_to_plot <- years_to_plot[valid]
-  idx <- idx[valid]
-  ext_zoom <- ext(pl) + buff
-  par(mfrow=c(1, length(idx)))
-  for (j in seq_along(idx)) {
-    yr <- years_to_plot[j]
-    r_zoom <- crop(rasters_plantios2[[idx[j]]], ext_zoom)
-    plot(r_zoom, col=c("#32a65e", "#ad975a", "#FFFFB2", "#0000FF", "#d4271e"), main=as.character(yr))
-    plot(pl, border="black", lwd=2, add=TRUE)
-  }
-  par(mfrow=c(1,1))
-} else {
-  message("No plantios with date_refor = ", year_sel)
-}
-
-##### Step 2 – Apply linear features on top of raster layers -----
-message("Applying linear features...")
-rasters_lm <- purrr::map2(rasters_plantios2, years, function(r, yr) {
-  message("  - Applying linear features for year ", yr)
-  r_lin <- r
-  r_lin <- apply_linear_feature_single(r_lin, yr, power_lines, buffer_width = 50, value = 2, use_date = FALSE)
-  r_lin <- apply_linear_feature_single(r_lin, yr, pipelines, buffer_width = 15, value = 2, use_date = TRUE)
-  r_lin <- apply_linear_feature_single(r_lin, yr, roads, buffer_width = 20, value = 5, use_date = TRUE)
-  r_lin <- apply_linear_feature_single(r_lin, yr, bridges, buffer_width = 15, value = 15, use_date = TRUE) # ! Here, bridges are distinguished from forest (value 15)
-  r_lin
-})
-
-# Check
-# Point coordinates
-x_center <- 776928.1
-y_center <- 7508359.8
-
-# Buffer size
-buffer_size <- 1500
-
-# Create bounding box extent
-zoom_ext <- ext(
-  x_center - buffer_size, x_center + buffer_size,
-  y_center - buffer_size, y_center + buffer_size
-)
-
-# Raster indices to visualize
-subset_indices <- c(1, 17, 35)
-
-# Loop over selected rasters
-for (i in subset_indices) {
-  # Crop rasters
-  r_before <- crop(rasters_plantios2[[i]], zoom_ext)
-  r_after  <- crop(rasters_lm[[i]], zoom_ext)
+rasters_forest_cat <- lapply(rasters_final, function(r){
+  # 1) forests inside private properties (CAR) become 11
+  r <- assign_if_intersect(r, car, target_values = 1, new_value = 11)
   
-  # Crop linear features
-  roads_sub       <- crop(roads, zoom_ext)
-  power_lines_sub <- crop(power_lines, zoom_ext)
-  bridges_sub     <- crop(bridges, zoom_ext)
-  pipelines_sub   <- crop(pipelines, zoom_ext)
+  # 2) forests inside private reserves become 12
+  r <- assign_if_intersect(r, rppn, target_values = c(1,11), new_value = 12)
   
-  # Plot side by side
-  par(mfrow=c(1,2))
+  # 3) forests inside public conservation units become 13
+  r <- assign_if_intersect(r, rbind(uniao,pda,tres_picos), target_values = c(1,11), new_value = 13)
   
-  plot(r_before,
-       main = paste0("Before linear features (", years[i], ")"),
-       col = c("#32a65e", "#ad975a", "#FFFFB2", "#0000FF", "#d4271e"))
-  plot(roads_sub, add=TRUE, col="black")
-  plot(power_lines_sub, add=TRUE, col="red")
-  plot(bridges_sub, add=TRUE, col="blue")
-  plot(pipelines_sub, add=TRUE, col="orange")
-  
-  plot(r_after,
-       main = paste0("After linear features (", years[i], ")"),
-       col = c("#32a65e", "#ad975a", "#FFFFB2", "#0000FF", "#d4271e", "chartreuse"))
-  plot(roads_sub, add=TRUE, col="black")
-  plot(power_lines_sub, add=TRUE, col="red")
-  plot(bridges_sub, add=TRUE, col="blue")
-  plot(pipelines_sub, add=TRUE, col="orange")
-  
-  par(mfrow=c(1,1))
-}
-
-##### Step 3 – Reassign forest values -----
-message("Classifying forests...")
-
-rasters_final2 <- lapply(rasters_lm, function(r){
-  # 1) plantios inside reserves become 11
-  r <- assign_if_intersect(r, rbind(uniao,pda), target_values = 10, new_value = 11)
-  
-  # 2) plantios inside CAR become 12
-  r <- assign_if_intersect(r, car, target_values = 10, new_value = 12)
-  
-  # 3) reserves override original forest (become 13)
-  r <- assign_if_intersect(r, rbind(uniao,pda), target_values = 1, new_value = 13)
-  
-  # 4) private override original forest (become 14)
-  r <- assign_if_intersect(r, car, target_values = 1, new_value = 14)
-  
+  # 4) remaining forests (value = 1) become unknown status = 100
+  r[r == 1] <- 100
   r
 })
 
 # Check
 # pick the rasters
-r_before <- rasters_lm[[36]]
-r_after  <- rasters_final2[[36]]
+r_before <- rasters_final[[36]]
+r_after  <- rasters_forest_cat[[36]]
+plot(rasters_forest_cat[[36]], col = c("#ad975a", "#FFFFB2", "#0000FF", "#d4271e", 
+                                 "darkolivegreen", "darkseagreen", "lightgreen", "#32a65e"))
+freq(rasters_forest_cat[[36]])
 
 # zoom extent from reserve or car region
-zoom_ext <- ext(pda) + 5000  # +2 km buffer
+zoom_ext <- ext(pda) + 5000
 
 # crop rasters
 rb <- crop(r_before, zoom_ext)
@@ -775,34 +739,25 @@ ra <- crop(r_after,  zoom_ext)
 car_sf = sf::st_as_sf(car)
 
 # define a color table
-vals_after <- c(1,2,3,4,5,10,11,12,13,14,15)
-cols_after <- c("#32a65e", "#ad975a", "#FFFFB2", "#0000FF", "#d4271e", 
-                "lightgreen", "chartreuse", "darkseagreen", "darkolivegreen","darkkhaki", "yellow")
-
-terra::coltab(ra) <- cbind(vals_after, cols_after)
-
 par(mfrow=c(1,2))
 
 plot(rb,
      main="BEFORE",
-     col = c("#32a65e", "#ad975a", "#FFFFB2", "#0000FF", "#d4271e", "lightgreen", "chartreuse"))
+     col = c("#32a65e", "#ad975a", "#FFFFB2", "#0000FF", "#d4271e"))
 
 plot(pda, add=TRUE, border="yellow", lwd=2)
 plot(car_sf, add=TRUE, col=scales::alpha("orange",0.5), border=NA)
 
 plot(ra,
-     main="AFTER")  # coltab already defines colors
+     main="AFTER",
+     col = c("#ad975a", "#FFFFB2", "#0000FF", "#d4271e", 
+       "darkolivegreen", "darkseagreen", "lightgreen", "#32a65e"))
 
 plot(pda, add=TRUE, border="yellow", lwd=2)
 plot(car_sf, add=TRUE, col=scales::alpha("orange",0.5), border=NA)
 
 par(mfrow=c(1,1))
 
-
-# Quick check
-freq(rasters_final[[36]])
-freq(rasters_final2[[1]]) # there should not be any 10, 11, or 12 values (no plantios at that time)
-freq(rasters_final2[[36]])
 
 ##### Export rasters ---------
 message("Exporting rasters...")
@@ -811,14 +766,97 @@ message("Exporting rasters...")
 output_dir <- here("outputs", "data", "MapBiomas", "Rasters_reclass_forest_cat")
 
 # Export each raster with year in the filename
-for (i in seq_along(rasters_final2)) {
+for (i in seq_along(rasters_forest_cat)) {
   year_i <- years[i]
   output_path <- file.path(output_dir, paste0("raster_reclass_forest_cat_", year_i, ".tif"))
   
   message("  - Writing raster for year ", year_i)
   
   terra::writeRaster(
-    rasters_final2[[i]],
+    rasters_forest_cat[[i]],
+    filename = output_path,
+    overwrite = TRUE, # Overwrite existing files or not
+    wopt = list(datatype = "INT1U", gdal = c("COMPRESS=LZW"))
+  )
+}
+
+#### 3. Conservation categories ------
+# We classify the rasters and distinguish between types of connectivity or habitat restoration
+
+# Reclassify plantios
+rasters_restor_cat <- purrr::map2(rasters_final, years, function(r, yr){
+  
+  # 1) forest intersecting plantios with Ecologia == "Corredor" → 51
+  r <- assign_if_intersect_attr_year(r, yr, plantios,
+                                     year_field = "date_refor",
+                                     attr = "Ecologia",
+                                     attr_value = "Corredor",
+                                     target_values = 1,
+                                     new_value = 51)
+  
+  # 2) remaining forest intersecting any plantios → 50
+  r <- assign_if_intersect_year(r, yr, plantios,
+                                year_field = "date_refor",
+                                target_values = 1,
+                                new_value = 50)
+  
+  r
+})
+
+# Apply road overpasses
+rasters_cons_cat <- purrr::map2(rasters_restor_cat, years, function(r, yr) {
+  message("  - Applying linear features for year ", yr)
+  r_lin <- r
+  r_lin <- apply_linear_feature_single(r_lin, yr, bridges, buffer_width = 15, value = 52, use_date = TRUE)
+  r_lin
+})
+
+# Check
+plot(rasters_cons_cat[[36]], col = c("#32a65e", "#ad975a", "#FFFFB2", "#0000FF", "#d4271e", 
+                                     "orange", "purple", "yellow"))
+freq(rasters_cons_cat[[1]])
+freq(rasters_cons_cat[[36]])
+
+# pick the rasters
+r_before <- rasters_final[[36]]
+r_after  <- rasters_cons_cat[[36]]
+
+# zoom extent from reserve or car region
+zoom_ext <- ext(pda) + 500
+
+# crop rasters
+rb <- crop(r_before, zoom_ext)
+ra <- crop(r_after,  zoom_ext)
+par(mfrow=c(1,2))
+
+plot(rb,
+     main="BEFORE",
+     col = c("#32a65e", "#ad975a", "#FFFFB2", "#0000FF", "#d4271e"))
+plot(plantios, add=TRUE, border="white", lwd=1)
+
+plot(ra,
+     main="AFTER",
+     col = c("#32a65e", "#ad975a", "#FFFFB2", "#0000FF", "#d4271e", 
+             "orange", "purple", "yellow"))
+plot(plantios, add=TRUE, border="white", lwd=1)
+
+par(mfrow=c(1,1))
+
+##### Export rasters ---------
+message("Exporting rasters...")
+
+# Define output folder
+output_dir <- here("outputs", "data", "MapBiomas", "Rasters_reclass_cons_cat")
+
+# Export each raster with year in the filename
+for (i in seq_along(rasters_cons_cat)) {
+  year_i <- years[i]
+  output_path <- file.path(output_dir, paste0("raster_reclass_cons_cat_", year_i, ".tif"))
+  
+  message("  - Writing raster for year ", year_i)
+  
+  terra::writeRaster(
+    rasters_cons_cat[[i]],
     filename = output_path,
     overwrite = TRUE, # Overwrite existing files or not
     wopt = list(datatype = "INT1U", gdal = c("COMPRESS=LZW"))
