@@ -72,12 +72,18 @@ for(nm in names(layers)) {
 ext(rasters[[1]])
 plot(rasters[[1]])  # plot the first layer
 plot(roads, col="white", add=TRUE)
+freq(rasters[[36]])
 
 ### Functions ---------
 
 #### Reclass rasters ------
-# Here, we reclass MapBiomas rasters (colecao 9) using new categories 
-# NB: to see what codes refer to, check the "Codigos-da-legenda-colecao-9" file
+# Here, we reclass MapBiomas rasters using new categories 
+# NB: to see what codes refer to, check the "Codigos-da-legenda-colecao-10" file*
+# Forest (1) includes: forest formation, mangrove, wooded sandbank vegetation
+# Other non-forest habitats include (2) include: wetland, beach, dune and sand spot, rocky outcrop, hypersaline tidal flat
+# Agriculture (3) includes: pasture, mosaic of uses, soybean, other temporary crops, forest plantation
+# Water (4) includes: aquaculture, river, lake and ocean
+# Artificial and urban areas include (5): urban areas, other non vegetated areas, mining
 reclass_fun <- function(xx) {
   forest <- c(3, 4, 5, 6, 49)
   notforest <- c(11, 12, 32, 29, 50, 23)
@@ -308,32 +314,6 @@ assign_if_intersect <- function(raster, vect, target_values, new_value) {
   raster
 }
 
-#### Assign values if intersects and attribute matches --------
-# This function assigns a value if intersect AND attribute matches AND according to the year
-assign_if_intersect_attr_year <- function(raster, year, vect,
-                                          year_field,
-                                          attr, attr_value,
-                                          target_values, new_value){
-  
-  if (nrow(vect) == 0) return(raster)
-  
-  # keep only vectors already present at this year (such as reforested areas)
-  vect_year <- vect[!is.na(vect[[year_field]]) & vect[[year_field]] <= year, ]
-  
-  if (nrow(vect_year) == 0) return(raster)
-  
-  # keep only desired attribute
-  vect_sub <- vect_year[vect_year[[attr]] == attr_value, ]
-  
-  if (nrow(vect_sub) == 0) return(raster)
-  
-  vect_rast <- terra::rasterize(vect_sub, raster, field = 1, background = NA)
-  
-  raster[raster %in% target_values & !is.na(vect_rast)] <- new_value
-  
-  raster
-}
-
 # This function assigns a value if intersect AND according to the year
 assign_if_intersect_year <- function(raster, year, vect, year_field,
                                      target_values, new_value){
@@ -345,6 +325,31 @@ assign_if_intersect_year <- function(raster, year, vect, year_field,
   if (nrow(vect_year) == 0) return(raster)
   
   vect_rast <- terra::rasterize(vect_year, raster, field = 1, background = NA)
+  
+  raster[raster %in% target_values & !is.na(vect_rast)] <- new_value
+  
+  raster
+}
+
+# This function assigns a value if intersect AND attribute matches AND according to the year
+assign_if_intersect_attr_year <- function(raster, year, vect,
+                                          year_field,
+                                          attr, attr_value,
+                                          target_values, new_value){
+  
+  if (nrow(vect) == 0) return(raster)
+  
+  # keep only vectors already present at this year
+  vect_year <- vect[!is.na(vect[[year_field]]) & vect[[year_field]] <= year, ]
+  
+  if (nrow(vect_year) == 0) return(raster)
+  
+  # keep only desired attribute
+  vect_sub <- vect_year[vect_year[[attr]] == attr_value, ]
+  
+  if (nrow(vect_sub) == 0) return(raster)
+  
+  vect_rast <- terra::rasterize(vect_sub, raster, field = 1, background = NA)
   
   raster[raster %in% target_values & !is.na(vect_rast)] <- new_value
   
@@ -366,6 +371,7 @@ rasters_reclass <- lapply(seq_along(rasters), function(i) {
 
 # Check
 plot(rasters_reclass[[1]], col=c("#32a65e", "#ad975a", "#FFFFB2", "#0000FF", "#d4271e"))
+plot(rasters_reclass[[36]], col=c("#32a65e", "#ad975a", "#FFFFB2", "#0000FF", "#d4271e"))
 
 
 ##### Step 2 – Temporal filter ------
@@ -385,7 +391,7 @@ mat_after <- sapply(rasters_filtered, function(r) values(r))
 changed_cells <- which(rowSums(mat_before != mat_after, na.rm = TRUE) > 0)
 
 # Pick one changed cell
-cell_id <- changed_cells[1000]
+cell_id <- changed_cells[100]
 
 # Choose years before and after
 i <- which(mat_before[cell_id, ] != mat_after[cell_id, ])[1]
@@ -398,10 +404,10 @@ if (i == 1 | i == length(rasters_reclass)) {
 # Coordinate of the chosen cell
 xy <- xyFromCell(rasters_reclass[[1]], cell_id)
 
-# Create extent = 500 m radius around the cell
+# Create extent with radius around the cell
 zoom_ext <- extent(
-  xy[1] - 500, xy[1] + 500,
-  xy[2] - 500, xy[2] + 500
+  xy[1] - 1000, xy[1] + 1000,
+  xy[2] - 1000, xy[2] + 1000
 )
 
 # Plot
@@ -705,18 +711,27 @@ for (i in seq_along(rasters_final)) {
 
 message("Classifying forests depending on their legal status...")
 
+cu <- rbind(uniao, pda, tres_picos)
+
 rasters_forest_cat <- lapply(rasters_final, function(r){
-  # 1) forests inside private properties (CAR) become 11
+  
+  # Start only with forest = 1
+  
+  # 1) RPPN (overrides everything)
+  r <- assign_if_intersect(r, rppn, target_values = 1, new_value = 12)
+  
+  # 2) Private inside conservation units (CAR ∩ CU)
+  r <- assign_if_intersect(r, intersect(car, cu), target_values = 1, new_value = 14)
+  
+  # 3) Public conservation units (remaining forest in CU)
+  r <- assign_if_intersect(r, cu, target_values = 1, new_value = 13)
+  
+  # 4) Private properties (remaining forest in CAR)
   r <- assign_if_intersect(r, car, target_values = 1, new_value = 11)
   
-  # 2) forests inside private reserves become 12
-  r <- assign_if_intersect(r, rppn, target_values = c(1,11), new_value = 12)
-  
-  # 3) forests inside public conservation units become 13
-  r <- assign_if_intersect(r, rbind(uniao,pda,tres_picos), target_values = c(1,11), new_value = 13)
-  
-  # 4) remaining forests (value = 1) become unknown status = 100
+  # 5) Remaining forest
   r[r == 1] <- 100
+  
   r
 })
 
@@ -724,8 +739,6 @@ rasters_forest_cat <- lapply(rasters_final, function(r){
 # pick the rasters
 r_before <- rasters_final[[36]]
 r_after  <- rasters_forest_cat[[36]]
-plot(rasters_forest_cat[[36]], col = c("#ad975a", "#FFFFB2", "#0000FF", "#d4271e", 
-                                 "darkolivegreen", "darkseagreen", "lightgreen", "#32a65e"))
 freq(rasters_forest_cat[[36]])
 
 # zoom extent from reserve or car region
@@ -739,6 +752,20 @@ ra <- crop(r_after,  zoom_ext)
 car_sf = sf::st_as_sf(car)
 
 # define a color table
+vals = c(2,3,4,5,11,12,13,14,100)
+cols <- c(
+  "2" = "#ad975a",
+  "3" = "#FFFFB2",
+  "4" = "#0000FF",
+  "5" = "#d4271e",
+  "11" = "darkolivegreen", # Private forest
+  "12" = "darkseagreen", # RPPN
+  "13" = "lightgreen", # Public reserve
+  "14" = "lightgoldenrod4", # Private forest inside conservation units
+  "100" = "#32a65e"
+)
+terra::coltab(ra) <- cbind(vals, cols)
+
 par(mfrow=c(1,2))
 
 plot(rb,
@@ -750,8 +777,7 @@ plot(car_sf, add=TRUE, col=scales::alpha("orange",0.5), border=NA)
 
 plot(ra,
      main="AFTER",
-     col = c("#ad975a", "#FFFFB2", "#0000FF", "#d4271e", 
-       "darkolivegreen", "darkseagreen", "lightgreen", "#32a65e"))
+     col = cols)
 
 plot(pda, add=TRUE, border="yellow", lwd=2)
 plot(car_sf, add=TRUE, col=scales::alpha("orange",0.5), border=NA)

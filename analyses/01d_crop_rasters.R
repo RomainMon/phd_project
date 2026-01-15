@@ -13,7 +13,7 @@ library(sf)
 
 ### Import data -------
 ## Rasters
-base_path <- here("data", "geo", "MapBiomas", "colecao_9") 
+base_path <- here("data", "geo", "MapBiomas", "colecao_10") 
 raster_files <- list.files(base_path, pattern = "\\.tif$", full.names = TRUE)                  
 rasters <- lapply(raster_files, terra::rast)
 ## Shapefiles
