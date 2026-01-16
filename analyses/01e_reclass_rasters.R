@@ -34,6 +34,7 @@ for (i in seq_along(rasters)) {
 
 ## Vectors
 roads = vect(here("data", "geo", "OSM", "work", "Highway_OSM_clean.shp"))
+roads_sf = sf::st_as_sf(roads)
 power_lines = vect(here("data", "geo", "OSM", "work", "Power_line_OSM_clean.shp"))
 pipelines = vect(here("data", "geo", "OSM", "work", "Pipelines_OSM_clean.shp"))
 bridges = vect(here("data", "geo", "AMLD", "Passagens_ARTERIS", "work", "road_overpasses_clean.shp"))
@@ -79,14 +80,16 @@ freq(rasters[[36]])
 #### Reclass rasters ------
 # Here, we reclass MapBiomas rasters using new categories 
 # NB: to see what codes refer to, check the "Codigos-da-legenda-colecao-10" file*
-# Forest (1) includes: forest formation, mangrove, wooded sandbank vegetation
-# Other non-forest habitats include (2) include: wetland, beach, dune and sand spot, rocky outcrop, hypersaline tidal flat
+# Forest (1) includes: forest formation, wooded sandbank vegetation
+# Other non-forest habitats include (2) include: beach, dune and sand spot, rocky outcrop, hypersaline tidal flat
 # Agriculture (3) includes: pasture, mosaic of uses, soybean, other temporary crops, forest plantation
 # Water (4) includes: aquaculture, river, lake and ocean
 # Artificial and urban areas include (5): urban areas, other non vegetated areas, mining
+# Wetlands (6) include: mangroves and wetlands
 reclass_fun <- function(xx) {
-  forest <- c(3, 4, 5, 6, 49)
-  notforest <- c(11, 12, 32, 29, 50, 23)
+  forest <- c(3, 4, 6, 49)
+  notforest <- c(12, 32, 29, 50, 23)
+  wetlands <- c(5, 11)
   agri <- c(15, 18, 19, 39, 20, 40, 62, 41, 36, 46, 47, 35, 48, 9, 21)
   water <- c(26, 33, 31)
   artificial <- c(24, 30, 25)
@@ -94,9 +97,10 @@ reclass_fun <- function(xx) {
   xx[xx == 0] <- NA
   xx[xx %in% forest] <- 1
   xx[xx %in% notforest] <- 2
-  xx[xx %in% agri] <- 3
-  xx[xx %in% water] <- 4
-  xx[xx %in% artificial] <- 5
+  xx[xx %in% wetlands] <- 3
+  xx[xx %in% agri] <- 4
+  xx[xx %in% water] <- 5
+  xx[xx %in% artificial] <- 6
   xx
 }
 
@@ -370,9 +374,9 @@ rasters_reclass <- lapply(seq_along(rasters), function(i) {
 })
 
 # Check
-plot(rasters_reclass[[1]], col=c("#32a65e", "#ad975a", "#FFFFB2", "#0000FF", "#d4271e"))
-plot(rasters_reclass[[36]], col=c("#32a65e", "#ad975a", "#FFFFB2", "#0000FF", "#d4271e"))
-
+plot(rasters_reclass[[1]], col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e"))
+plot(rasters_reclass[[36]], col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e"))
+freq(rasters_reclass[[36]])
 
 ##### Step 2 – Temporal filter ------
 message("Step 2: Applying temporal consistency filter...")
@@ -508,7 +512,7 @@ if (nrow(pl) > 0) {
   for (j in seq_along(idx)) {
     yr <- years_to_plot[j]
     r_zoom <- crop(rasters_plantios[[idx[j]]], ext_zoom)
-    plot(r_zoom, col=c("#32a65e", "#ad975a", "#FFFFB2", "#0000FF", "#d4271e"), main=as.character(yr))
+    plot(r_zoom, col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e"), main=as.character(yr))
     plot(pl, border="black", lwd=2, add=TRUE)
   }
   par(mfrow=c(1,1))
@@ -524,8 +528,8 @@ rasters_dilate <- lapply(seq_along(rasters_plantios), function(i) {
 })
 
 # Quick check
-plot(rasters_plantios[[36]], main=paste0("Before dilatation–Erosion ", years[36]), col=c("#32a65e", "#ad975a", "#FFFFB2", "#0000FF", "#d4271e"))
-plot(rasters_dilate[[36]], main=paste0("After dilatation–Erosion ", years[36]), col=c("#32a65e", "#ad975a", "#FFFFB2", "#0000FF", "#d4271e"))
+plot(rasters_plantios[[36]], main=paste0("Before dilatation–Erosion ", years[36]), col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e"))
+plot(rasters_dilate[[36]], main=paste0("After dilatation–Erosion ", years[36]), col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e"))
 freq(rasters_plantios[[36]])
 freq(rasters_dilate[[36]])
 
@@ -533,12 +537,22 @@ freq(rasters_dilate[[36]])
 
 ##### Step 6 – Apply linear features on top of raster layers -----
 message("Step 6: Applying linear features...")
+# First, we distinguish roads based on their nature (primary, secondary, tertiary)
+roads_sf %>% sf::st_drop_geometry() %>%  dplyr::select(highway) %>% dplyr::group_by(highway) %>% dplyr::summarise(n=n())
+highway = roads_sf %>% dplyr::filter(highway == "motorway" | highway == "trunk" | highway == "primary") %>% terra::vect()
+plot(highway)
+
+# Second, we apply linear features
+# We do not consider power lines because forests are not necessarily cleared under power lines, and because MapBiomas seem to detect those cleared areas quite well (they are around 60m wide)
+# We do not consider secondary, tertiary or unclassified roads because they do not necessarily trim the forests (canopy can remain continuous above)
+# Power lines take the value "other non-forest habitat (2)" (cleared herbaceous areas)
+# Main roads take the value "artificial" (6)
+# WARNING: at this resolution (30 x 30 m), a minimum of 20 m is needed for linear features to create continuous linear features (below, some cells are not overwritten, and some raster cells are still connected through their vertices)
 rasters_lf <- purrr::map2(rasters_dilate, years, function(r, yr) {
   message("  - Applying linear features for year ", yr)
   r_lin <- r
-  r_lin <- apply_linear_feature_single(r_lin, yr, power_lines, buffer_width = 50, value = 2, use_date = FALSE)
-  r_lin <- apply_linear_feature_single(r_lin, yr, pipelines, buffer_width = 15, value = 2, use_date = TRUE)
-  r_lin <- apply_linear_feature_single(r_lin, yr, roads, buffer_width = 20, value = 5, use_date = TRUE)
+  r_lin <- apply_linear_feature_single(r_lin, yr, pipelines, buffer_width = 20, value = 2, use_date = TRUE)
+  r_lin <- apply_linear_feature_single(r_lin, yr, highway, buffer_width = 20, value = 6, use_date = TRUE)
   r_lin
 })
 
@@ -576,7 +590,7 @@ for (i in subset_indices) {
   
   plot(r_before,
        main = paste0("Before linear features (", years[i], ")"),
-       col = c("#32a65e", "#ad975a", "#FFFFB2", "#0000FF", "#d4271e"))
+       col = c("#32a65e", "#519799", "#FFFFB2", "#d4271e"))
   plot(roads_sub, add=TRUE, col="black")
   plot(power_lines_sub, add=TRUE, col="red")
   plot(bridges_sub, add=TRUE, col="blue")
@@ -584,7 +598,7 @@ for (i in subset_indices) {
   
   plot(r_after,
        main = paste0("After linear features (", years[i], ")"),
-       col = c("#32a65e", "#ad975a", "#FFFFB2", "#0000FF", "#d4271e"))
+       col = c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#d4271e"))
   plot(roads_sub, add=TRUE, col="black")
   plot(power_lines_sub, add=TRUE, col="red")
   plot(bridges_sub, add=TRUE, col="blue")
@@ -600,8 +614,8 @@ rasters_final <- lapply(rasters_lf, function(r) {
   return(r_masked)
 })
 
-plot(rasters_lf[[36]], col = c("#32a65e", "#ad975a", "#FFFFB2", "#0000FF", "#d4271e"))
-plot(rasters_final[[36]], col = c("#32a65e", "#ad975a", "#FFFFB2", "#0000FF", "#d4271e"))
+plot(rasters_lf[[36]], col = c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e"))
+plot(rasters_final[[36]], col = c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e"))
 
 
 ##### Visual demo of all steps ---------
@@ -654,27 +668,27 @@ par(mfrow = c(2, 3), mar = c(2,2,2,2))
 
 # Step 1
 plot(r_step1, main = paste0("Step 1 – Reclassify (", years[index_demo], ")"),
-     col=c("#32a65e", "#FFFFB2", "#d4271e"))
+     col=c("#32a65e", "#519799", "#FFFFB2", "#d4271e"))
 
 # Step 2
 plot(r_step2, main = "Step 2 – Temporal filter",
-     col=c("#32a65e", "#FFFFB2", "#d4271e"))
+     col=c("#32a65e", "#519799", "#FFFFB2", "#d4271e"))
 
 # Step 3
 plot(r_step3, main = "Step 3 – Spatial filter",
-     col=c("#32a65e", "#FFFFB2", "#d4271e"))
+     col=c("#32a65e", "#519799", "#FFFFB2", "#d4271e"))
 
 # Step 4
 plot(r_step4, main = "Step 4 – Add plantios",
-     col=c("#32a65e", "#FFFFB2", "#d4271e"))
+     col=c("#32a65e", "#519799", "#FFFFB2", "#d4271e"))
 
 # Step 5
 plot(r_step5, main = "Step 5 – Dilatation–Erosion",
-     col=c("#32a65e", "#FFFFB2", "#d4271e"))
+     col=c("#32a65e", "#519799", "#FFFFB2", "#d4271e"))
 
 # Step 6
 plot(r_step6, main = "Step 6 – Linear features",
-     col=c("#32a65e", "#ad975a", "#FFFFB2", "#d4271e"))
+     col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#d4271e"))
 plot(roads_sub,       add=TRUE, col="black")
 plot(power_lines_sub, add=TRUE, col="red")
 plot(bridges_sub,     add=TRUE, col="blue")
@@ -752,16 +766,17 @@ ra <- crop(r_after,  zoom_ext)
 car_sf = sf::st_as_sf(car)
 
 # define a color table
-vals = c(2,3,4,5,11,12,13,14,100)
+vals = c(2,3,4,5,6,11,12,13,14,100)
 cols <- c(
   "2" = "#ad975a",
-  "3" = "#FFFFB2",
-  "4" = "#0000FF",
-  "5" = "#d4271e",
-  "11" = "darkolivegreen", # Private forest
-  "12" = "darkseagreen", # RPPN
-  "13" = "lightgreen", # Public reserve
-  "14" = "lightgoldenrod4", # Private forest inside conservation units
+  "3" = "#519799",
+  "4" = "#FFFFB2",
+  "5" = "#0000FF",
+  "6" = "#d4271e",
+  "11" = "#006400", # Private forest
+  "12" = "#CDAD00", # RPPN
+  "13" = "#C1FFC1", # Public reserve
+  "14" = "#CDCDC1", # Private forest inside conservation units
   "100" = "#32a65e"
 )
 terra::coltab(ra) <- cbind(vals, cols)
@@ -770,17 +785,15 @@ par(mfrow=c(1,2))
 
 plot(rb,
      main="BEFORE",
-     col = c("#32a65e", "#ad975a", "#FFFFB2", "#0000FF", "#d4271e"))
+     col = c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e"))
 
 plot(pda, add=TRUE, border="yellow", lwd=2)
-plot(car_sf, add=TRUE, col=scales::alpha("orange",0.5), border=NA)
+plot(rppn, add=TRUE, border="gold3", lwd=2)
+plot(car_sf, add=TRUE, col=scales::alpha("white",0.5), border=NA)
 
 plot(ra,
      main="AFTER",
      col = cols)
-
-plot(pda, add=TRUE, border="yellow", lwd=2)
-plot(car_sf, add=TRUE, col=scales::alpha("orange",0.5), border=NA)
 
 par(mfrow=c(1,1))
 
@@ -833,13 +846,11 @@ rasters_restor_cat <- purrr::map2(rasters_final, years, function(r, yr){
 rasters_cons_cat <- purrr::map2(rasters_restor_cat, years, function(r, yr) {
   message("  - Applying linear features for year ", yr)
   r_lin <- r
-  r_lin <- apply_linear_feature_single(r_lin, yr, bridges, buffer_width = 15, value = 52, use_date = TRUE)
+  r_lin <- apply_linear_feature_single(r_lin, yr, bridges, buffer_width = 20, value = 52, use_date = TRUE)
   r_lin
 })
 
 # Check
-plot(rasters_cons_cat[[36]], col = c("#32a65e", "#ad975a", "#FFFFB2", "#0000FF", "#d4271e", 
-                                     "orange", "purple", "yellow"))
 freq(rasters_cons_cat[[1]])
 freq(rasters_cons_cat[[36]])
 
@@ -857,13 +868,25 @@ par(mfrow=c(1,2))
 
 plot(rb,
      main="BEFORE",
-     col = c("#32a65e", "#ad975a", "#FFFFB2", "#0000FF", "#d4271e"))
+     col = c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e"))
 plot(plantios, add=TRUE, border="white", lwd=1)
 
+vals = c(1,2,3,4,5,6,50,51,52)
+cols <- c(
+  "1" = "#32a65e",
+  "2" = "#ad975a",
+  "3" = "#519799",
+  "4" = "#FFFFB2",
+  "5" = "#0000FF",
+  "6" = "#d4271e",
+  "50" = "#FF7F00", # Forest corridors
+  "51" = "#EE30A7", # Other active restoration areas
+  "52" = "#FFFF00" # Road overpasses
+)
+terra::coltab(ra) <- cbind(vals, cols)
 plot(ra,
      main="AFTER",
-     col = c("#32a65e", "#ad975a", "#FFFFB2", "#0000FF", "#d4271e", 
-             "orange", "purple", "yellow"))
+     col = cols)
 plot(plantios, add=TRUE, border="white", lwd=1)
 
 par(mfrow=c(1,1))
