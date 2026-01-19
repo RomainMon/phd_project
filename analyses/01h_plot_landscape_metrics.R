@@ -32,7 +32,11 @@ forest_core_corridor_metrics = readr::read_csv(
   show_col_types = FALSE
 )
 forest_cat_metrics = readr::read_csv(
-  file.path(base_path, "forest_cat_metrics_bbox_1989_2024.csv"),
+  file.path(base_path, "forest_cat_metrics_bbox_2024.csv"),
+  show_col_types = FALSE
+)
+cons_cat_metrics = readr::read_csv(
+  file.path(base_path, "cons_cat_metrics_bbox_1989_2024.csv"),
   show_col_types = FALSE
 )
 forest_age_metrics = readr::read_csv(
@@ -44,46 +48,62 @@ defor_refor_metrics = readr::read_csv(
   show_col_types = FALSE
 )
 
-### Class metrics (overall) ----------------
-
-#### Summary statistics ------
-# Evolution per class per year
-all_lulc_metrics %>%
-  dplyr::arrange(class, year) %>%
-  dplyr::group_by(class) %>%
-  dplyr::mutate(pland_change_year = round((pland - dplyr::lag(pland)), 1),
-                ca_change_year = ca - dplyr::lag(ca),
-                ca_change_year_pct = (ca - dplyr::lag(ca)) / dplyr::lag(ca) * 100) %>%
-  dplyr::ungroup()
-
-# Changes betwenn first and last year
-all_lulc_metrics %>%
-  dplyr::group_by(class) %>%
-  dplyr::summarize(pland_change_total = round(pland[year == max(year)] - pland[year == min(year)], 1),
-                   ca_change_total = ca[year == max(year)] - ca[year == min(year)])
-
-# Between sets of years
-all_lulc_metrics %>%
-  dplyr::group_by(class) %>%
-  dplyr::summarize(
-    pland_change_1989_2000 = round(pland[year == 2000] - pland[year == 1989], 1),
-    pland_change_2000_2012 = round(pland[year == 2012] - pland[year == 2000], 1),
-    pland_change_2012_2024 = round(pland[year == 2024] - pland[year == 2014], 1),
-    ca_change_1989_2000 = ca[year == 2000] - ca[year == 1989],
-    ca_change_2000_2012 = ca[year == 2012] - ca[year == 2000],
-    ca_change_2012_2024 = ca[year == 2024] - ca[year == 2014]) %>%
-  dplyr::ungroup()
-
 
 #### Plots -------
+##### Donut plot --------
+# prepare data for donut
+data <- all_lulc_metrics %>%
+  dplyr::filter(year == 2024) %>%
+  dplyr::left_join(class_colors, by="class") %>%
+  dplyr::select(Description, ca, pland) %>%
+  dplyr::arrange(desc(pland))
+
+donut <- data %>%
+  dplyr::mutate(
+    fraction = pland / sum(pland),
+    ymax = cumsum(fraction),
+    ymin = c(0, head(ymax, n = -1)),
+    labelPos = (ymax + ymin) / 2,
+    label = paste0(round(pland,1),"%")
+  )
+
+# donut plot
+png(here("outputs","plot","01h_lm_pland_2024_donut.png"), width = 1500, height = 800, res = 300)
+
+ggplot(donut, aes(ymax = ymax, ymin = ymin, xmax = 4, xmin = 3, fill = Description)) +
+  geom_rect() +
+  geom_text_repel(
+    aes(x = 4.2, y = labelPos, label = label),
+    size = 3,
+    nudge_x = 0.5,
+    segment.color = "grey50",
+    direction = "y"
+  ) +
+  coord_polar(theta = "y") +
+  xlim(c(0, 4.8)) +
+  theme_void() +
+  scale_fill_manual(values = setNames(class_colors$Color, class_colors$Description)) +
+  ggtitle("Land use composition in 2024") +
+  theme(legend.position = "right")
+
+dev.off()
+
+###### Text -------
+res_2024 <- data %>%
+  dplyr::mutate(txt = paste0(Description, " covered ", round(ca), " ha (", round(pland,1), "%) in 2024.")) %>%
+  dplyr::pull(txt)
+cat("Land-use composition in 2024 was as follows:\n")
+cat(paste0("* ", res_2024, collapse="\n"), "\n\n")
+
+
 ##### Stacked area chart ------
 # Create color palette using the Legend codes provided by MapBiomas
 class_colors = tibble::tibble(
-  class = c(1,2,3,4,5),
-  Description = c("Forest","Other non-forest formation","Agriculture","Water","Artificial"
+  class = c(1,2,3,4,5,6),
+  Description = c("Forest","Other non-forest formation", "Wetlands and mangroves", "Agriculture","Water","Artificial"
   ),
   Color = c(
-    "#32a65e", "#ad975a", "#FFFFB2", "#0000FF", "#d4271e"
+    "#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e"
   )
 )
 
@@ -130,52 +150,16 @@ ggplot(data, aes(x = year, y = pland, fill = Description)) +
 
 dev.off()
 
-##### Stream chart -----
-data = all_lulc_metrics %>% 
-  dplyr::select(year, class, ca) %>% 
-  dplyr::left_join(class_colors, by="class")
-
-data %>%
-  dplyr::mutate(
-    year = as.numeric(year)
-  ) %>%
-  ggplot(aes(
-    x = year,
-    y = ca,
-    fill = Description,
-    color = Description,
-    label = Description
-  )) +
-  geom_stream(
-    extra_span = 0.013,
-    type = "proportion",
-    n_grid = 3000,
-    bw = 0.78
-  ) +
-  scale_fill_manual(values = setNames(data$Color, data$Description)) +
-  scale_color_manual(values = setNames(data$Color, data$Description)) +
-  cowplot::theme_minimal_vgrid(font_size = 18) +
-  theme(legend.position = "none") +
-  labs(
-    title = "Share of land cover (proportion of total surface)",
-    x = NULL,
-    y = NULL
-  )
-
-
 ###### Text --------
 # Evolution from 1989 and 2024
 data <- all_lulc_metrics %>%
   dplyr::left_join(class_colors, by="class") %>%
   dplyr::group_by(Description) %>%
   dplyr::summarise(
-    ca1989  = ca[year==1989],
-    ca2024  = ca[year==2024],
-    pl1989  = pland[year==1989],
-    pl2024  = pland[year==2024],
-    d_ca    = ca2024 - ca1989,
-    d_pl    = pl2024 - pl1989,
-    d_pl_pct = (pl2024 - pl1989) # already percentage unit
+    ca1989 = ca[year==1989],
+    ca2024 = ca[year==2024],
+    d_ca = ca2024 - ca1989,
+    ca_pct_change = 100 * d_ca / ca1989
   ) %>%
   dplyr::ungroup()
 
@@ -185,7 +169,7 @@ res_change <- data %>%
     txt = paste0(
       Description, " changed by ",
       ifelse(d_ca>=0, "+",""), round(d_ca), " ha (",
-      ifelse(d_pl>=0, "+",""), round(d_pl,1), " percentage points) between 1989 and 2024."
+      ifelse(ca_pct_change>=0, "+",""), round(ca_pct_change,1), " percentage points) between 1989 and 2024."
     )
   ) %>%
   dplyr::pull(txt)
@@ -196,16 +180,17 @@ cat(paste0("* ", res_change, collapse="\n"), "\n")
 ##### Line plot -----
 # Create color palette using the Legend codes provided by MapBiomas
 class_colors = tibble::tibble(
-  class = c(1,2,3,4,5),
+  class = c(1,2,3,4,5,6),
   Description = c(
     "Forest",
     "Other non-forest formation",
+    "Wetlands and mangroves",
     "Agriculture",
     "Water",
     "Artificial"
   ),
   Color = c(
-    "#32a65e", "#ad975a", "#FAD991", "#0000FF", "#d4271e"
+    "#32a65e", "#ad975a", "#519799", "#FAD991", "#0000FF", "#d4271e"
   )
 )
 
@@ -213,7 +198,7 @@ class_colors = tibble::tibble(
 data = all_lulc_metrics %>% 
   dplyr::select(year, class, ca) %>% 
   dplyr::mutate(
-    year  = as.integer(year),
+    year = as.integer(year),
     class = as.numeric(class),
     ca = as.numeric(ca)
   )
@@ -227,10 +212,10 @@ label_data <- data %>%
   dplyr::group_by(Description) %>%
   dplyr::arrange(year) %>%
   dplyr::summarise(
-    year_end   = last(year),
-    ca_end     = last(ca),
-    ca_start   = first(ca),
-    change_ha  = ca_end - ca_start,
+    year_end  = last(year),
+    ca_end = last(ca),
+    ca_start = first(ca),
+    change_ha = ca_end - ca_start,
     pct_change = 100 * change_ha / ca_start,
     .groups = "drop"
   ) %>%
@@ -244,6 +229,15 @@ label_data <- data %>%
     )
   )
 
+label_data <- label_data %>%
+  mutate(ca_end_adj = case_when(
+    Description == "Artificial" ~ ca_end + 3000,
+    Description == "Water" ~ ca_end + 2000,
+    Description == "Wetlands and mangroves" ~ ca_end + 1000,
+    Description == "Other non-forest formation" ~ ca_end - 2000,
+    TRUE ~ ca_end
+  ))
+
 # Plot
 png(here("outputs","plot","01h_lm_ca_all_lulcc_line_plot.png"), width = 2700, height = 1900, res = 300)
 
@@ -252,7 +246,8 @@ ggplot(data, aes(x = year, y = ca, color = Description, group = Description)) +
   geom_ribbon(aes(ymin = ca - 2000, ymax = ca + 2000, fill = Description), alpha = 0.18, color = NA) +
   geom_line(linewidth = 1.3) +
   geom_point(size = 2) +
-  geom_text(data = label_data, aes(x = year_end + 0.6, y = ca_end, label = label, color = Description),
+  geom_text(data = label_data,
+            aes(x = year_end + 0.6, y = ca_end_adj, label = label, color = Description),
             hjust = 0, size = 3.6, fontface = "bold", show.legend = FALSE) +
   scale_color_manual(values = setNames(class_colors$Color, class_colors$Description)) +
   scale_fill_manual(values = setNames(class_colors$Color, class_colors$Description), guide = "none") +
@@ -264,6 +259,19 @@ ggplot(data, aes(x = year, y = ca, color = Description, group = Description)) +
 
 dev.off()
 
+###### Text -------
+res_trend <- label_data %>%
+  dplyr::mutate(
+    txt = paste0(
+      Description, " ",
+      ifelse(change_ha >= 0, "increased", "decreased"),
+      " by ", scales::comma(abs(round(change_ha))), " ha (",
+      sprintf("%+.1f", pct_change), "%).")
+  ) %>%
+  dplyr::pull(txt)
+
+cat("Long-term land-use changes were:\n")
+cat(paste0("* ", res_trend, collapse = "\n"), "\n\n")
 
 ##### Barplot (positive vs negative changes) ------
 # Prepare data
@@ -274,8 +282,8 @@ data = all_lulc_metrics %>%
     class = as.integer(class),
     ca = as.numeric(ca)
   ) %>%
-  # Keep only Forest (1), Agriculture (3), Artificial (5)
-  dplyr::filter(class %in% c(1, 3, 5)) %>%
+  # Keep only Forest (1), Agriculture (4), Artificial (6)
+  dplyr::filter(class %in% c(1, 4, 6)) %>%
   # Compute change in surface
   dplyr::group_by(class) %>%
   dplyr::mutate(delta_ca = ca - dplyr::lag(ca, order_by = year)) %>%
@@ -285,14 +293,14 @@ data = all_lulc_metrics %>%
   dplyr::mutate(
     class_name = dplyr::case_when(
       class == 1 ~ "Forest",
-      class == 3 ~ "Agriculture",
-      class == 5 ~ "Artificial",
+      class == 4 ~ "Agriculture",
+      class == 6 ~ "Artificial",
       TRUE ~ as.character(class)
     ),
     color = dplyr::case_when(
       class == 1 ~ "#32a65e",
-      class == 3 ~ "#FFFFB2",
-      class == 5 ~ "#d4271e" 
+      class == 4 ~ "#FAD991",
+      class == 6 ~ "#d4271e" 
     )
   )
 
@@ -312,7 +320,7 @@ ggplot() +
   geom_line(
     data = data,
     aes(x = year, y = delta_ca, group = class_name, color = class_name),
-    linewidth = 0.9
+    linewidth = 0.5
   ) +
   
   # points at each year on the lines
@@ -324,12 +332,12 @@ ggplot() +
   
   scale_fill_manual(values = c(
     "Forest" = "#32a65e",
-    "Agriculture" = "#FFFFB2",
+    "Agriculture" = "#FAD991",
     "Artificial" = "#d4271e"
   )) +
   scale_color_manual(values = c(
     "Forest" = "#32a65e",
-    "Agriculture" = "#FFFFB2",
+    "Agriculture" = "#FAD991",
     "Artificial" = "#d4271e"
   )) +
   
@@ -353,11 +361,10 @@ ggplot() +
   )
 
 
-# 2) With a smoothed line
+# With a smoothed line
 png(here("outputs","plot","01h_lm_pland_barplot0.png"), width = 2500, height = 1500, res = 300)
 
 ggplot() +
-  
   geom_col(
     data = data,
     aes(x = year, y = delta_ca, fill = class_name),
@@ -365,27 +372,25 @@ ggplot() +
     color = "black",
     width = 0.6
   ) +
-  
   geom_smooth(
     data = data,
     aes(x = year, y = delta_ca, color = class_name),
     method = "loess",
     se = FALSE,
-    linewidth = 1.2,
+    linewidth = 1,
+    linetype = "longdash",
     span = 0.300 # change the span to change the smoothening of the line
   ) +
-  
   scale_fill_manual(values = c(
     "Forest" = "#32a65e",
-    "Agriculture" = "#FFFFB2",
+    "Agriculture" = "#FAD991",
     "Artificial" = "#d4271e"
   )) +
   scale_color_manual(values = c(
     "Forest" = "#32a65e",
-    "Agriculture" = "#FFFFB2",
+    "Agriculture" = "#FAD991",
     "Artificial" = "#d4271e"
   )) +
-  
   geom_hline(yintercept = 0, color = "black", linewidth = 0.6) +
   scale_x_continuous(breaks = unique(data$year), labels = unique(data$year)) +
   labs(
@@ -533,8 +538,6 @@ p_forest <- ggplot(data, aes(x = year, y = delta_ca, fill = class_name)) +
 p_forest
 
 
-
-
 ###### Text -------
 # filter only Forest time series
 data <- all_lulc_metrics %>%
@@ -549,9 +552,9 @@ forest_dyn <- data %>%
   dplyr::mutate(group = data.table::rleid(trend)) %>%
   dplyr::group_by(group, trend) %>%
   dplyr::summarise(start_year = min(year),
-                   end_year   = max(year),
-                   ca_start   = ca[year == start_year],
-                   ca_end     = ca[year == end_year],
+                   end_year = max(year),
+                   ca_start= ca[year == start_year],
+                   ca_end = ca[year == end_year],
                    .groups="drop") %>%
   # remove single-year groups
   dplyr::filter(end_year > start_year) %>%
@@ -575,75 +578,30 @@ cat("Forest temporal dynamics were structured in the following distinct periods:
 cat(paste0("* ", forest_text, collapse="\n"), "\n\n")
 
 
-##### Donut plot --------
-# prepare data for donut
-data <- all_lulc_metrics %>%
-  dplyr::filter(year == 2024) %>%
-  dplyr::left_join(class_colors, by="class") %>%
-  dplyr::select(Description, ca, pland) %>%
-  dplyr::arrange(desc(pland))
-
-donut <- data %>%
-  dplyr::mutate(
-    fraction = pland / sum(pland),
-    ymax = cumsum(fraction),
-    ymin = c(0, head(ymax, n = -1)),
-    labelPos = (ymax + ymin) / 2,
-    label = paste0(round(pland,1),"%")
-  )
-
-# donut plot
-png(here("outputs","plot","01h_lm_pland_2024_donut.png"), width = 1500, height = 800, res = 300)
-
-ggplot(donut, aes(ymax = ymax, ymin = ymin, xmax = 4, xmin = 3, fill = Description)) +
-  geom_rect() +
-  geom_text_repel(
-    aes(x = 4.2, y = labelPos, label = label),
-    size = 3,
-    nudge_x = 0.5,
-    segment.color = "grey50",
-    direction = "y"
-  ) +
-  coord_polar(theta = "y") +
-  xlim(c(0, 4.8)) +
-  theme_void() +
-  scale_fill_manual(values = setNames(class_colors$Color, class_colors$Description)) +
-  ggtitle("Land use composition in 2024") +
-  theme(legend.position = "right")
-
-dev.off()
-
-###### Text -------
-res_2024 <- data %>%
-  dplyr::mutate(txt = paste0(Description, " covered ", round(ca), " ha (", round(pland,1), "%) in 2024.")) %>%
-  dplyr::pull(txt)
-cat("Land-use composition in 2024 was as follows:\n")
-cat(paste0("* ", res_2024, collapse="\n"), "\n\n")
-
-
 ##### Ternary plot --------
-# 1. Filter for the classes we need (1, 3, 5)
+# 1. Filter for the classes we need
 data <- all_lulc_metrics %>%
-  dplyr::filter(class %in% c(1, 3, 5)) %>%
+  dplyr::filter(class %in% c(1, 4, 6)) %>%
   dplyr::select(year, class, pland)
 
 # 2. Pivot data so each row is a year and columns are forest, agriculture, urban
 data <- data %>%
   dplyr::mutate(class_name = case_when(
-    class == 1 ~ "forest",
-    class == 3 ~ "agriculture",
-    class == 5 ~ "urban"
+    class == 1 ~ "Forest",
+    class == 4 ~ "Agriculture",
+    class == 6 ~ "Artificial"
   )) %>%
   dplyr::select(-class) %>%
   tidyr::pivot_wider(names_from = class_name, values_from = pland)
-data$forest = data$forest/100
-data$agriculture = data$agriculture/100
-data$urban = data$urban/100
+data$Forest = data$Forest/100
+data$Agriculture = data$Agriculture/100
+data$Artificial = data$Artificial/100
+summary(data[, c("Forest", "Agriculture", "Artificial")])
 
 # 3. Plot ternary diagram
-ggtern(data = data, aes(x = agriculture, y = urban, z = forest)) +
+ggtern(data = data, aes(x = Agriculture, y = Artificial, z = Forest)) +
   geom_point(aes(color = year), size = 3) +
-  scale_T_continuous(limits = c(0.1, 0.2)) + # urban
+  scale_T_continuous(limits = c(0.1, 0.2)) + # artificial
   scale_L_continuous(limits = c(0.3, 0.4)) + # agriculture
   scale_R_continuous(limits = c(0.5, 0.6)) + # forest
   theme_rgbw()

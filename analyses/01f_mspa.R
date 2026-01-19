@@ -80,7 +80,7 @@ freq(rasters_large_patches[[36]])
 # -> GTB requires a 8-byte type formatted input mask (.tif) with 0 = missing data, 1 = background, 2 = habitat
 reclass_for_mspa <- function(xx) {
   habitat <- 1
-  background <- c(2, 3, 4, 5)
+  background <- c(2, 3, 4, 5, 6, 999)
   
   # Make a copy of original values
   v <- xx[]
@@ -99,6 +99,7 @@ reclass_for_mspa <- function(xx) {
 
 ## Apply to all rasters
 rasters_for_mspa <- lapply(rasters_large_patches, reclass_for_mspa)
+plot(rasters_for_mspa[[36]], col=c("white", "grey", "#32a65e"))
 
 #### Export all reclassed rasters ----
 # Define output folder
@@ -213,26 +214,40 @@ freq(rasters[[36]])
 freq(rasters_reclass_w_mspa[[36]])
 
 #### Add corridors unmarked as corridors by MSPA -----
-# -> Here, we overlay plantios on MSPA rasters and assign value 33 where there is an intersection with the plantio AND the raster year is equal or after date_refor
-add_plantios_ids <- function(raster, year, plantios, ids, value) {
-  # Keep only plantios with selected ids and valid reforestation year
-  plantios_valid <- plantios[plantios$id %in% ids & !is.na(plantios$date_refor) & plantios$date_refor <= year, ]
+# -> Here, we overlay plantios on MSPA rasters and assign value 33 where there is an intersection with the plantio ("Corredor") AND the raster year is equal or after date_refor
+# This function assigns a value if intersect AND attribute matches AND according to the year
+assign_if_intersect_attr_year <- function(raster, year, vect,
+                                          year_field,
+                                          attr, attr_value,
+                                          target_values, new_value){
   
-  if (nrow(plantios_valid) > 0) {
-    # Rasterize plantios: assign 'value' inside polygons, NA elsewhere
-    pl_rast <- terra::rasterize(plantios_valid, raster, field = value, background = NA)
-    
-    # Update only raster cells where plantio exists
-    raster[!is.na(pl_rast)] <- value
-  }
+  if (nrow(vect) == 0) return(raster)
   
-  return(raster)
+  # keep only vectors already present at this year
+  vect_year <- vect[!is.na(vect[[year_field]]) & vect[[year_field]] <= year, ]
+  
+  if (nrow(vect_year) == 0) return(raster)
+  
+  # keep only desired attribute
+  vect_sub <- vect_year[vect_year[[attr]] == attr_value, ]
+  
+  if (nrow(vect_sub) == 0) return(raster)
+  
+  vect_rast <- terra::rasterize(vect_sub, raster, field = 1, background = NA)
+  
+  raster[raster %in% target_values & !is.na(vect_rast)] <- new_value
+  
+  raster
 }
 
 # Wrap
-rasters_reclass_w_mspa2 <- lapply(seq_along(rasters_reclass_w_mspa), function(i) {
-  message("Overlaying plantios on raster for year: ", mspa_years[i])
-  add_plantios_ids(rasters_reclass_w_mspa[[i]], mspa_years[i], plantios, ids = 36, value = 33)
+rasters_reclass_w_mspa2 <- purrr::map2(rasters_reclass_w_mspa, mspa_years, function(r, yr){
+  r <- assign_if_intersect_attr_year(r, yr, plantios,
+                                     year_field = "date_refor",
+                                     attr = "Ecologia",
+                                     attr_value = "Corredor",
+                                     target_values = 1,
+                                     new_value = 33)
 })
 
 # Check
@@ -241,12 +256,12 @@ freq(rasters_reclass_w_mspa[[36]])
 freq(rasters_reclass_w_mspa2[[36]])
 
 # Visual check
-year_to_check <- 2016
+year_to_check <- 2024
 r_index <- which(mspa_years == year_to_check)
 r_check <- rasters_reclass_w_mspa2[[r_index]]
 
 # Subset plantios with the selected IDs
-plantios_selected <- plantios[plantios$id %in% 36, ]
+plantios_selected <- plantios[plantios$id %in% 65, ]
 
 # Get the extent of the plantios to zoom in
 zoom_extent <- terra::ext(plantios_selected)
