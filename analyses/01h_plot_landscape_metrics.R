@@ -50,6 +50,17 @@ defor_refor_metrics = readr::read_csv(
 
 
 #### Plots -------
+# Create color palette using the Legend codes provided by MapBiomas
+class_colors = tibble::tibble(
+  class = c(1,2,3,4,5,6),
+  Description = c("Forest","Other non-forest formation", "Wetlands and mangroves", "Agriculture","Water","Artificial"
+  ),
+  Color = c(
+    "#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e"
+  )
+)
+
+
 ##### Donut plot --------
 # prepare data for donut
 data <- all_lulc_metrics %>%
@@ -97,16 +108,6 @@ cat(paste0("* ", res_2024, collapse="\n"), "\n\n")
 
 
 ##### Stacked area chart ------
-# Create color palette using the Legend codes provided by MapBiomas
-class_colors = tibble::tibble(
-  class = c(1,2,3,4,5,6),
-  Description = c("Forest","Other non-forest formation", "Wetlands and mangroves", "Agriculture","Water","Artificial"
-  ),
-  Color = c(
-    "#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e"
-  )
-)
-
 # Select data
 data = all_lulc_metrics %>% 
   dplyr::select(year, class, pland) %>% 
@@ -212,9 +213,9 @@ label_data <- data %>%
   dplyr::group_by(Description) %>%
   dplyr::arrange(year) %>%
   dplyr::summarise(
-    year_end  = last(year),
-    ca_end = last(ca),
-    ca_start = first(ca),
+    year_end  = dplyr::last(year),
+    ca_end = dplyr::last(ca),
+    ca_start = dplyr::first(ca),
     change_ha = ca_end - ca_start,
     pct_change = 100 * change_ha / ca_start,
     .groups = "drop"
@@ -230,11 +231,11 @@ label_data <- data %>%
   )
 
 label_data <- label_data %>%
-  mutate(ca_end_adj = case_when(
-    Description == "Artificial" ~ ca_end + 3000,
-    Description == "Water" ~ ca_end + 2000,
+  dplyr::mutate(ca_end_adj = dplyr::case_when(
+    Description == "Artificial" ~ ca_end + 6000,
+    Description == "Water" ~ ca_end + 4000,
     Description == "Wetlands and mangroves" ~ ca_end + 1000,
-    Description == "Other non-forest formation" ~ ca_end - 2000,
+    Description == "Other non-forest formation" ~ ca_end - 4000,
     TRUE ~ ca_end
   ))
 
@@ -248,14 +249,14 @@ ggplot(data, aes(x = year, y = ca, color = Description, group = Description)) +
   geom_point(size = 2) +
   geom_text(data = label_data,
             aes(x = year_end + 0.6, y = ca_end_adj, label = label, color = Description),
-            hjust = 0, size = 3.6, fontface = "bold", show.legend = FALSE) +
+            hjust = 0, size = 5, fontface = "bold", show.legend = FALSE) +
   scale_color_manual(values = setNames(class_colors$Color, class_colors$Description)) +
   scale_fill_manual(values = setNames(class_colors$Color, class_colors$Description), guide = "none") +
   labs(x = "Year", y = "Area (ha)", color = "Land use") +
   scale_x_continuous(expand = expansion(mult = c(0.02, 0.12))) +   # small left margin + larger right margin
   coord_cartesian(clip = "off") +
   theme_classic() +
-  theme(legend.position = "bottom", plot.margin = margin(10, 60, 10, 10))
+  theme(legend.position = "bottom", plot.margin = margin(10, 80, 10, 10))
 
 dev.off()
 
@@ -858,75 +859,6 @@ dev.off()
 
 
 ### Forest class metrics -----------
-#### Summary statistics ----
-# Evolution per class per year
-forest_class_metrics %>%
-  dplyr::arrange(year) %>%
-  dplyr::mutate(area_change = (area_mn - dplyr::lag(area_mn)) / dplyr::lag(area_mn) * 100,
-                np_change = (np - dplyr::lag(np)) / dplyr::lag(np) * 100,
-                FFI_change = (FFI - dplyr::lag(FFI)) / dplyr::lag(FFI) * 100,
-                ECA_change_2km = (eca_ha_2000 - dplyr::lag(eca_ha_2000)) / dplyr::lag(eca_ha_2000) * 100,
-                ECA_change_8km = (eca_ha_8000 - dplyr::lag(eca_ha_8000)) / dplyr::lag(eca_ha_8000) * 100) %>% 
-  dplyr::select(year, area_change, np_change, FFI_change, ECA_change_2km, ECA_change_8km) %>% 
-  print(n=36)
-
-# Changes betwenn first and last year
-forest_class_metrics %>%
-  dplyr::summarize(area_change = area_mn[year == max(year)] - area_mn[year == min(year)],
-                   np_change = np[year == max(year)] - np[year == min(year)],
-                   FFI_change = FFI[year == max(year)] - FFI[year == min(year)],
-                   ECA_change_2km = eca_ha_2000[year == max(year)] - eca_ha_2000[year == min(year)],
-                   ECA_change_8km = eca_ha_8000[year == max(year)] - eca_ha_8000[year == min(year)],
-                   area_change_perc = ((area_mn[year == max(year)] - area_mn[year == min(year)]) / area_mn[year == min(year)]) * 100,
-                   np_change_perc = ((np[year == max(year)] - np[year == min(year)]) / np[year == min(year)]) * 100,
-                   FFI_change_perc = ((FFI[year == max(year)] - FFI[year == min(year)]) / FFI[year == min(year)]) * 100,
-                   ECA_change_2km_perc = ((eca_ha_2000[year == max(year)] - eca_ha_2000[year == min(year)]) / eca_pct_land_2000[year == min(year)]) * 100,
-                   ECA_change_8km_perc = ((eca_ha_8000[year == max(year)] - eca_ha_8000[year == min(year)]) / eca_pct_land_8000[year == min(year)]) * 100)
-
-
-# Between sets of years
-forest_class_metrics %>%
-  dplyr::summarize(
-    # --- Absolute changes ---
-    area_change_1989_2000 = area_mn[year == 2000] - area_mn[year == 1989],
-    area_change_2000_2012 = area_mn[year == 2012] - area_mn[year == 2000],
-    area_change_2012_2024 = area_mn[year == 2024] - area_mn[year == 2012],
-    
-    np_change_1989_2000 = np[year == 2000] - np[year == 1989],
-    np_change_2000_2012 = np[year == 2012] - np[year == 2000],
-    np_change_2012_2024 = np[year == 2024] - np[year == 2012],
-    
-    FFI_change_1989_2000 = FFI[year == 2000] - FFI[year == 1989],
-    FFI_change_2000_2012 = FFI[year == 2012] - FFI[year == 2000],
-    FFI_change_2012_2024 = FFI[year == 2024] - FFI[year == 2012],
-    
-    ECA_change_1989_2000_2km = eca_ha_2000[year == 2000] - eca_ha_2000[year == 1989],
-    ECA_change_2000_2012_2km = eca_ha_2000[year == 2012] - eca_ha_2000[year == 2000],
-    ECA_change_2012_2024_2km = eca_ha_2000[year == 2024] - eca_ha_2000[year == 2012],
-    
-    # --- Percentage changes ---
-    area_change_perc_1989_2000 = ((area_mn[year == 2000] - area_mn[year == 1989]) / area_mn[year == 1989]) * 100,
-    area_change_perc_2000_2012 = ((area_mn[year == 2012] - area_mn[year == 2000]) / area_mn[year == 2000]) * 100,
-    area_change_perc_2012_2024 = ((area_mn[year == 2024] - area_mn[year == 2012]) / area_mn[year == 2012]) * 100,
-    
-    np_change_perc_1989_2000 = ((np[year == 2000] - np[year == 1989]) / np[year == 1989]) * 100,
-    np_change_perc_2000_2012 = ((np[year == 2012] - np[year == 2000]) / np[year == 2000]) * 100,
-    np_change_perc_2012_2024 = ((np[year == 2024] - np[year == 2012]) / np[year == 2012]) * 100,
-    
-    FFI_change_perc_1989_2000 = ((FFI[year == 2000] - FFI[year == 1989]) / FFI[year == 1989]) * 100,
-    FFI_change_perc_2000_2012 = ((FFI[year == 2012] - FFI[year == 2000]) / FFI[year == 2000]) * 100,
-    FFI_change_perc_2012_2024 = ((FFI[year == 2024] - FFI[year == 2012]) / FFI[year == 2012]) * 100,
-    
-    ECA_change_perc_1989_2000_2km = ((eca_ha_2000[year == 2000] - eca_ha_2000[year == 1989]) / 
-                                       eca_ha_2000[year == 1989]) * 100,
-    ECA_change_perc_2000_2012_2km = ((eca_ha_2000[year == 2012] - eca_ha_2000[year == 2000]) / 
-                                       eca_ha_2000[year == 2000]) * 100,
-    ECA_change_perc_2012_2024_2km = ((eca_ha_2000[year == 2024] - eca_ha_2000[year == 2012]) / 
-                                       eca_ha_2000[year == 2012]) * 100
-  )
-
-
-
 #### Plots -----
 ##### Line plot - all -----
 data = forest_class_metrics %>%
