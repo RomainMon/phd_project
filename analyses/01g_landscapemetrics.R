@@ -301,7 +301,7 @@ plot(rasters_reclass_cons_cat[[36]])
 cons_cat_metrics = purrr::map2_dfr(
   rasters_reclass_cons_cat,
   years,
-  ~ compute_class_metrics(.x, .y, metrics_to_compute = c("lsm_c_ca", "lsm_c_pland"))
+  ~ compute_class_metrics(.x, .y, metrics_to_compute = c("lsm_c_ca", "lsm_c_pland", "lsm_c_np"))
 )
 
 # to wide format

@@ -141,7 +141,7 @@ plot.new()   # empty panel
 par(mfrow=c(1,1))
 
 
-##### 3. RECLASS TRANSITION RASTERS ------
+##### 2. RECLASS TRANSITION RASTERS ------
 # Reclassify cumulative trajectories to identify reforestation and deforestation events
 # Deforested cells → all cells that are currently non-forest (2–6) but were forest (1) at least once in the past.
 # Reforested cells → all cells that are currently forest (1) but were non-forest (2–6) at least once in the past.
@@ -201,7 +201,7 @@ freq(reclass_cumul_trans[[1]]) # 1990
 freq(reclass_cumul_trans[[35]]) # 2024
 
 
-##### 4. DETECT YEAR OF LULCC ----------
+##### 3. DETECT YEAR OF LULCC ----------
 # For each reforested or deforested cell, we identify WHEN (which year) the change occurred
 # To do so, these cells take the value of the year a cell has changed (e.g., 1998)
 # NB: some cells changed several times (reforested-deforested-reforested, etc.), hence we create several rasters
@@ -344,7 +344,7 @@ points(xy_chosen, pch = 16, cex = 1.2)
 par(mfrow = c(1, 1))
 
 
-##### 5. COMPUTE FOREST AGE AND TRAJECTORY ----------
+##### 4. COMPUTE FOREST AGE AND TRAJECTORY ----------
 # We use the workflow in Silva Junior et al. (2020), Scientific Data
 # i) We reclass the rasters into binary 1/0 rasters 
 # ii) We compute the age as Age(t)=(Age(t-1)+Forest(t))×Forest(t)
