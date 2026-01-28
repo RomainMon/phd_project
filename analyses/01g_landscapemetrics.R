@@ -286,16 +286,8 @@ forest_cat_metrics = forest_cat_metrics %>%
 summary(forest_cat_metrics)
 
 
-##### Evolution of conservation activities --------
+##### Conservation activities --------
 freq(rasters_reclass_cons_cat[[36]])
-
-# First, we remove matrix values
-for (i in seq_along(rasters_reclass_cons_cat)) {
-  r <- rasters_reclass_cons_cat[[i]]
-  r[r %in% c(0, 1, 2, 3, 4, 5, 6)] <- NA
-  rasters_reclass_cons_cat[[i]] <- r
-}
-plot(rasters_reclass_cons_cat[[36]])
 
 # compute metrics
 cons_cat_metrics = purrr::map2_dfr(

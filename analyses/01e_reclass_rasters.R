@@ -49,7 +49,7 @@ bbox = vect(here("data", "geo", "BBOX", "sampling_units_bbox_31983.shp"))
 
 ### Quick check -------
 # list all objects that must share CRS
-layers <- list(
+layers = list(
   raster_1 = crs(rasters[[1]]),
   roads = crs(roads),
   power_lines = crs(power_lines),
@@ -64,16 +64,17 @@ layers <- list(
 )
 
 # test if any differ from first
-ref_crs <- layers[[1]]
+ref_crs = layers[[1]]
 
 for(nm in names(layers)) {
-  same <- identical(layers[[nm]], ref_crs)
+  same = identical(layers[[nm]], ref_crs)
   message(nm, " CRS same as first raster? -> ", same)
 }
 ext(rasters[[1]])
 plot(rasters[[1]])  # plot the first layer
 plot(roads, col="white", add=TRUE)
 freq(rasters[[36]])
+
 
 ### Functions ---------
 
@@ -106,136 +107,158 @@ reclass_fun <- function(xx) {
 
 #### Temporal filter ---------
 # Function to exclude cells based on a temporal threshold
-# If a pixel at year i is different from year i–1 AND different from year i+1, then year i is a “single-year noise” value
-# We replace the cell with the value from year i–1.
-# this is done on all land uses
+# Rule 1: If a pixel at year i is different from year i–1 AND different from year i+1, then year i is a “single-year noise” value -> We replace the cell with the value from year i–1 (all LULC)
+# Rule 2 (Caballero et al. 2023): If a pixel of natural vegetation (forest, wetlands, other non forest formation) becomes anthropic for 1 or 2 years, and then back to its previous value -> reclassify this sub-sequence into its original value
+# Rule 3 (Caballero et al. 2023): If a pixel of anthropic cover (agriculture or not vegetated) becomes natural vegetation for 1-3 years, and then back to anthropic -> reclassify the sub-sequence into the original anthropic cover
 
 apply_temporal_threshold <- function(rasters, years) {
   message("Applying temporal removal filter...")
-  n <- length(rasters)
+  n = length(rasters)
   
-  # Extract pixel matrix (rows = pixels, cols = years)
-  mat <- sapply(rasters, function(r) {
-    v <- values(r)
-    if (is.null(v)) v <- terra::values(r)
-    return(v)
+  NV = c(1, 2, 3)  # natural vegetation
+  AN = c(4, 6) # anthropic cover
+  
+  mat = sapply(rasters, function(r) {
+    v = values(r)
+    if (is.null(v)) v = terra::values(r)
+    v
   })
-  nr <- nrow(mat)
   
-  # Loop through middle years
+  nr = nrow(mat)
+  
+  # Rule 1: single-year spike
   for (i in 2:(n - 1)) {
-    prev <- mat[, i - 1]
-    curr <- mat[, i]
-    nxt <- mat[, i + 1]
+    prev = mat[, i - 1]
+    curr = mat[, i]
+    nxt  = mat[, i + 1]
     
-    # NA-safe condition:
-    # change only when curr differs from BOTH prev and next
-    # AND prev/next are not NA
-    spike <- !is.na(curr) & !is.na(prev) & !is.na(nxt) &
-      curr != prev & curr != nxt
-    mat[spike, i] <- prev[spike]
-    message("Year ", years[i], ": fixed ", sum(spike), " cells.")
+    # Previous, current and subsequent value is not NA AND current value is different then the previous and the subsequent one
+    spike = !is.na(curr) & !is.na(prev) & !is.na(nxt) & curr != prev & curr != nxt
+    
+    # The flagged pixel gets its previous value
+    mat[spike, i] = prev[spike]
+    message("Year ", years[i], ": fixed ", sum(spike), " spike cells.")
   }
   
-  # Rebuild raster list
-  out <- vector("list", n)
+  # Rule 2: NV -> AN (1–2y) -> NV
+  for (i in 2:(n - 2)) {
+    
+    p = mat[, i - 1]
+    c1 = mat[, i]
+    c2 = mat[, i + 1]
+    c3 = mat[, i + 2]
+    
+    # 1-year anthropic gap: previous is NV, subsequent pixel is anthropic, and pixel returns to the same NV 
+    idx1 = !is.na(p) & !is.na(c1) & !is.na(c2) & p %in% NV & c1 %in% AN & c2 == p
+    
+    # The flagged pixel gets the initial value
+    mat[idx1, i] = p[idx1]
+    
+    # 2-year anthropic gap: previous is NV, subsequent pixels are anthropic (2 years), and pixel returns to the same NV
+    idx2 = !is.na(p) & !is.na(c1) & !is.na(c2) & !is.na(c3) & p %in% NV & c1 %in% AN & c2 %in% AN & c3 == p
+    
+    # The flagged pixel gets the initial value
+    mat[idx2, i:(i + 1)] = p[idx2]
+    
+    message("Year ", years[i], ": fixed ",
+            sum(idx1) + sum(idx2), " NV→AN→NV cells.")
+  }
+  
+  # Rule 3: AN -> NV (1–3y) -> AN
+  for (i in 2:(n - 3)) {
+    
+    p = mat[, i - 1]
+    c1 = mat[, i]
+    c2 = mat[, i + 1]
+    c3 = mat[, i + 2]
+    c4 = mat[, i + 3]
+    
+    # 1-year NV gap: pixel is anthropic, becomes NV, then anthropic again
+    idx1 <- !is.na(p) & !is.na(c1) & !is.na(c2) & p %in% AN & c1 %in% NV & c2 == p
+    
+    # Flagged pixel gets the previous value
+    mat[idx1, i] = p[idx1]
+    
+    # 2-year NV gap: pixel is anthropic, becomes NV for 2 years, then anthropic again
+    idx2 <- !is.na(p) & !is.na(c1) & !is.na(c2) & !is.na(c3) & p %in% AN & c1 %in% NV & c2 %in% NV & c3 == p
+    
+    # Flagged pixel gets the previous value
+    mat[idx2, i:(i + 1)] = p[idx2]
+    
+    # 3-year NV gap: pixel is anthropic, becomes NV for 3 years, then anthropic again
+    idx3 = !is.na(p) & !is.na(c1) & !is.na(c2) & !is.na(c3) & !is.na(c4) & p %in% AN & c1 %in% NV & c2 %in% NV & c3 %in% NV & c4 == AN
+    
+    # Flagged pixel gets the previous value
+    mat[idx3, i:(i + 2)] = p[idx3]
+    
+    message("Year ", years[i], ": fixed ",
+            sum(idx1) + sum(idx2) + sum(idx3), " AN→NV→AN cells.")
+  }
+  
+  # Rebuild rasters
+  out = vector("list", n)
   for (i in seq_len(n)) {
-    r <- rasters[[i]]
-    r <- setValues(r, mat[, i])
-    names(r) <- years[i]
-    out[[i]] <- r
+    r = rasters[[i]]
+    r = setValues(r, mat[, i])
+    names(r) = years[i]
+    out[[i]] = r
   }
   
   return(out)
 }
 
+
 #### Spatial filter -------------
 # Here, we reclass isolated cells given their neighbors
-# A pixel at year i is reclassified only if all conditions are true:
-# It has no neighbors with the same value in the 8-neighborhood.
-# It is replaced by the majority value among its neighbors (excluding NA).
+# A pixel at year i is reclassified only if it has no neighbors with the same value in the 8-neighborhood.
+# -> It is replaced by the majority value among its neighbors (excluding NA).
 
-remove_isolated_cells <- function(rasters, years) {
+remove_isolated_cells = function(rasters, years) {
   
-  message("Removing isolated cells...")
-  n <- length(rasters)
+  message("Removing isolated cells (spatial filter)...")
+  n = length(rasters)
   if (n != length(years)) stop("rasters and years must have same length")
   
-  # Ensure integer rasters (NA preserved)
-  rasters <- lapply(rasters, function(r) {
-    r_int <- clamp(r, -Inf, Inf, values = TRUE)  # keep structure
-    values(r_int) <- as.integer(values(r))
-    r_int
-  })
+  w = matrix(1, 3, 3)
+  center = 5  # position in 3x3 vector
   
-  out_list <- vector("list", n)
+  out_list = vector("list", n)
   
-  # 3x3 window (center included)
-  w <- matrix(1, 3, 3)
-  center_index <- ceiling(length(w) / 2)
-  
-  for (i in seq_len(n)) {
+  focal_fun = function(x, ...) {
+    cen = x[center]
+    if (is.na(cen)) return(NA_integer_)
     
-    r <- rasters[[i]]
-    message(" Processing year ", years[i], " (", i, "/", n, ")")
-    vals <- values(r)
+    # count how many times center appears (including itself)
+    s = sum(x == cen, na.rm = TRUE)
     
-    # 1) Count neighbors equal to center (subtract 1 to exclude center)
-    same_count_r <- terra::focal(
-      r, w,
-      fun = function(x, ...) {
-        centre <- x[ceiling(length(x) / 2)]
-        sum(x == centre, na.rm = TRUE) - 1
-      },
-      na.policy = "omit",
-      filename = "",
-      pad = TRUE
-    )
-    
-    same_count <- values(same_count_r)
-    
-    # Spatial isolation
-    is_isolated <- !is.na(vals) & (same_count == 0)
-    target_idx <- which(is_isolated)
-    
-    message("  -> flagged pixels: ", length(target_idx))
-    
-    if (length(target_idx) == 0) {
-      out_list[[i]] <- r
-      next
+    # if isolated (only itself)
+    if (s == 1) {
+      neighs = x[-center]
+      neighs = neighs[!is.na(neighs)]
+      if (length(neighs) == 0) return(cen)
+      
+      tb = table(neighs)
+      return(as.integer(names(tb)[which.max(tb)]))
     }
     
-    # 2) Compute neighbor MODE (excluding center)
-    neighbor_mode_r <- terra::focal(
-      r, w,
-      fun = function(x, ...) {
-        center_pos <- ceiling(length(x) / 2)
-        neighs <- x[-center_pos]
-        neighs <- neighs[!is.na(neighs)]
-        if (length(neighs) == 0) return(NA_integer_)
-        tbl <- table(neighs)
-        as.integer(names(tbl)[which.max(tbl)])
-      },
-      na.policy = "omit",
-      filename = "",
-      pad = TRUE
-    )
-    
-    neighbor_mode <- values(neighbor_mode_r)
-    
-    # 3) Replacement = neighbor mode
-    replacement_vals <- neighbor_mode[target_idx]
-    
-    # If neighbor mode is NA, keep original value
-    fixed_vals <- vals
-    fixed_vals[target_idx] <- replacement_vals
-    r_fixed <- setValues(r, fixed_vals)
-    names(r_fixed) <- as.character(years[i])
-    
-    out_list[[i]] <- r_fixed
+    cen
   }
   
-  return(out_list)
+  for (i in seq_len(n)) {
+    message(" Processing year ", years[i], " (", i, "/", n, ")")
+    
+    r = rasters[[i]]
+    
+    r_fixed = terra::focal(
+      r, w = w, fun = focal_fun,
+      na.policy = "omit", pad = TRUE, filename = ""
+    )
+    
+    names(r_fixed) = as.character(years[i])
+    out_list[[i]] = r_fixed
+  }
+  
+  out_list
 }
 
 #### Overlay plantios on rasters depending on the reforestation year -----
@@ -244,60 +267,31 @@ remove_isolated_cells <- function(rasters, years) {
 # -> Make sure that the datasets has a variable named "date_refor" with numeric years
 
 # Add plantios – set forest cells inside plantios polygons to chosen value
-add_plantios <- function(raster, year, plantios, plantio_value) {
+add_plantios = function(raster, year, plantios, plantio_value) {
   # Keep only plantios with a valid reforestation year before or equal to current year
-  plantios_valid <- plantios[!is.na(plantios$date_refor) & plantios$date_refor <= year, ]
+  plantios_valid = plantios[!is.na(plantios$date_refor) & plantios$date_refor <= year, ]
   if (nrow(plantios_valid) > 0) {
     # Rasterize plantios and give them the value specified as argument
-    pl_rast <- terra::rasterize(plantios_valid, raster, field = plantio_value, background = NA)
+    pl_rast = terra::rasterize(plantios_valid, raster, field = plantio_value, background = NA)
     # Only overwrite cells where pl_rast is not NA (i.e., inside plantios)
-    raster[!is.na(pl_rast)] <- plantio_value
+    raster[!is.na(pl_rast)] = plantio_value
   }
   raster
 }
-
-#### Dilatation-erosion --------
-# Here, we apply dilatation-erosion on habitats (value = 1)
-# This section is based on Mailys Queru's work
-
-# dilatation_erosion_mailys <- function(raster, seuil) {
-#   habitat <- app(raster, fun = function(v) ifelse(v == 1, 1, NA)) # All cells different than 1 become NA
-#   dist_hab <- terra::distance(habitat)
-#   dist_hab_thresh <- app(dist_hab, fun = function(v) ifelse(v > seuil, 1, NA)) # Threshold distance and set 0 to NA 
-#   dist_nonhab <- terra::distance(dist_hab_thresh) 
-#   dist_nonhab > seuil 
-#   }
-
-# Numeric version (applies mask to original raster)
-
-dilatation_erosion <- function(raster, seuil) { 
-  # Step 1: Habitat mask 
-  habitat <- app(raster, fun = function(v) ifelse(v == 1, 1, NA)) 
-  # Step 2: Dilation 
-  dist_hab <- terra::distance(habitat) 
-  dilated_mask <- app(dist_hab, fun = function(v) ifelse(v > seuil, 1, NA)) 
-  # Step 3: Erosion 
-  dist_nonhab <- terra::distance(dilated_mask) 
-  final_mask <- app(dist_nonhab, fun = function(v) ifelse(v > seuil, 1, NA)) 
-  # Step 4: Apply mask to original raster 
-  raster[!is.na(final_mask)] <- 1 
-  
-  raster 
-  }
 
 
 #### Apply linear features -----
 # Here, we overlay vector linear features to the rasters using a buffer width and assign the intersected cells a new numeric value
 # -> Adapt the buffer width and value according to the linear feature (for instance: roads = 15m and 5 for artificial)
-apply_linear_feature_single <- function(r, yr, feature, buffer_width, value, use_date) {
-  feat_valid <- if (use_date && "date_crea" %in% names(feature)) {
+apply_linear_feature_single = function(r, yr, feature, buffer_width, value, use_date) {
+  feat_valid = if (use_date && "date_crea" %in% names(feature)) {
     feature[feature$date_crea <= yr, ]
   } else feature
   
   if (nrow(feat_valid) > 0) {
-    feat_buff <- terra::buffer(feat_valid, width = buffer_width)
-    feat_rast <- terra::rasterize(feat_buff, r, field = value, background = NA)
-    r <- cover(feat_rast, r)
+    feat_buff = terra::buffer(feat_valid, width = buffer_width)
+    feat_rast = terra::rasterize(feat_buff, r, field = value, background = NA)
+    r = cover(feat_rast, r)
   }
   
   return(r)  # single SpatRaster
@@ -307,31 +301,22 @@ apply_linear_feature_single <- function(r, yr, feature, buffer_width, value, use
 
 #### Assign values if intersects --------
 # This function tests whether a raster value intersects a vector object, and reclassifies these cells with a new value if TRUE
-assign_if_intersect <- function(raster, vect, target_values, new_value) {
-  
+assign_if_intersect = function(raster, vect, target_values, new_value) {
   if(nrow(vect) == 0) return(raster)  # nothing to do
-  
-  vect_rast <- terra::rasterize(vect, raster, field = 1, background = NA)
-  
-  raster[raster %in% target_values & !is.na(vect_rast)] <- new_value
-  
+  vect_rast = terra::rasterize(vect, raster, field = 1, background = NA)
+  raster[raster %in% target_values & !is.na(vect_rast)] = new_value
   raster
 }
 
 # This function assigns a value if intersect AND according to the year
-assign_if_intersect_year <- function(raster, year, vect, year_field,
+assign_if_intersect_year = function(raster, year, vect, year_field,
                                      target_values, new_value){
-  
   if (nrow(vect) == 0) return(raster)
-  
-  vect_year <- vect[!is.na(vect[[year_field]]) & vect[[year_field]] <= year, ]
-  
+  # keep only vectors already present at this year
+  vect_year = vect[!is.na(vect[[year_field]]) & vect[[year_field]] <= year, ]
   if (nrow(vect_year) == 0) return(raster)
-  
-  vect_rast <- terra::rasterize(vect_year, raster, field = 1, background = NA)
-  
-  raster[raster %in% target_values & !is.na(vect_rast)] <- new_value
-  
+  vect_rast = terra::rasterize(vect_year, raster, field = 1, background = NA)
+  raster[raster %in% target_values & !is.na(vect_rast)] = new_value
   raster
 }
 
@@ -342,21 +327,14 @@ assign_if_intersect_attr_year <- function(raster, year, vect,
                                           target_values, new_value){
   
   if (nrow(vect) == 0) return(raster)
-  
   # keep only vectors already present at this year
-  vect_year <- vect[!is.na(vect[[year_field]]) & vect[[year_field]] <= year, ]
-  
+  vect_year = vect[!is.na(vect[[year_field]]) & vect[[year_field]] <= year, ]
   if (nrow(vect_year) == 0) return(raster)
-  
   # keep only desired attribute
-  vect_sub <- vect_year[vect_year[[attr]] == attr_value, ]
-  
+  vect_sub = vect_year[vect_year[[attr]] == attr_value, ]
   if (nrow(vect_sub) == 0) return(raster)
-  
-  vect_rast <- terra::rasterize(vect_sub, raster, field = 1, background = NA)
-  
-  raster[raster %in% target_values & !is.na(vect_rast)] <- new_value
-  
+  vect_rast = terra::rasterize(vect_sub, raster, field = 1, background = NA)
+  raster[raster %in% target_values & !is.na(vect_rast)] = new_value
   raster
 }
 
@@ -382,92 +360,106 @@ freq(rasters_reclass[[36]])
 message("Step 2: Applying temporal consistency filter...")
 
 # Apply on rasters
-rasters_filtered <- apply_temporal_threshold(rasters = rasters_reclass, years = years)
+rasters_filtered = apply_temporal_threshold(rasters = rasters_reclass, years = years)
 
 # Quick check
 freq(rasters_reclass[[35]])
 freq(rasters_filtered[[35]])
-# Extract matrices
-mat_before <- sapply(rasters_reclass, function(r) values(r))
-mat_after <- sapply(rasters_filtered, function(r) values(r))
 
-# Identify changed cells
-changed_cells <- which(rowSums(mat_before != mat_after, na.rm = TRUE) > 0)
+## Plot
 
-# Pick one changed cell
-cell_id <- changed_cells[100]
+mat_before = sapply(rasters_reclass, terra::values)
+mat_after = sapply(rasters_filtered, terra::values)
 
-# Choose years before and after
-i <- which(mat_before[cell_id, ] != mat_after[cell_id, ])[1]
+# cells that changed at least once
+changed_cells = which(rowSums(mat_before != mat_after, na.rm = TRUE) > 0)
 
-# Makes sure to not choose the first and last rasters
-if (i == 1 | i == length(rasters_reclass)) {
-  stop("Chosen change is at first/last year — choose another cell.")
+# pick a valid change (not first/last year)
+set.seed(1)
+
+repeat {
+  cell_id = sample(changed_cells, 1)
+  diffs = which(mat_before[cell_id, ] != mat_after[cell_id, ])
+  i = diffs[1]
+  if (i > 1 && i < length(rasters_reclass)) break
 }
 
-# Coordinate of the chosen cell
-xy <- xyFromCell(rasters_reclass[[1]], cell_id)
+message("Temporal change check — cell ", cell_id, ", year ", years[i])
 
-# Create extent with radius around the cell
-zoom_ext <- extent(
-  xy[1] - 1000, xy[1] + 1000,
-  xy[2] - 1000, xy[2] + 1000
+xy = terra::xyFromCell(rasters_reclass[[1]], cell_id)
+
+buf = 1500  # map units
+zoom_ext = terra::ext(
+  xy[1] - buf, xy[1] + buf,
+  xy[2] - buf, xy[2] + buf
 )
 
-# Plot
 par(mfrow = c(2, 3), mar = c(2, 2, 2, 2))
 
-# Row 1 — original
-plot(crop(rasters_reclass[[i-1]], zoom_ext), main = paste0("Original ", years[i-1]))
-points(xy[1], xy[2], pch=16, col="red")
+# before
+plot(terra::crop(rasters_reclass[[i-1]], zoom_ext),
+     main = paste0("Orig ", years[i-1]))
+points(xy[1], xy[2], pch = 16, col = "red")
 
-plot(crop(rasters_reclass[[i]], zoom_ext), main = paste0("Original ", years[i]))
-points(xy[1], xy[2], pch=16, col="red")
+plot(terra::crop(rasters_reclass[[i]], zoom_ext),
+     main = paste0("Orig ", years[i]))
+points(xy[1], xy[2], pch = 16, col = "red")
 
-plot(crop(rasters_reclass[[i+1]], zoom_ext), main = paste0("Original ", years[i+1]))
-points(xy[1], xy[2], pch=16, col="red")
+plot(terra::crop(rasters_reclass[[i+1]], zoom_ext),
+     main = paste0("Orig ", years[i+1]))
+points(xy[1], xy[2], pch = 16, col = "red")
 
-# Row 2 — filtered
-plot(crop(rasters_filtered[[i-1]], zoom_ext), main = paste0("Filtered ", names(rasters_filtered[[i-1]])))
-points(xy[1], xy[2], pch=16, col="red")
+# after
+plot(terra::crop(rasters_filtered[[i-1]], zoom_ext),
+     main = paste0("TempFilt ", years[i-1]))
+points(xy[1], xy[2], pch = 16, col = "red")
 
-plot(crop(rasters_filtered[[i]], zoom_ext), main = paste0("Filtered ", names(rasters_filtered[[i]])))
-points(xy[1], xy[2], pch=16, col="red")
+plot(terra::crop(rasters_filtered[[i]], zoom_ext),
+     main = paste0("TempFilt ", years[i]))
+points(xy[1], xy[2], pch = 16, col = "red")
 
-plot(crop(rasters_filtered[[i+1]], zoom_ext), main = paste0("Filtered ", names(rasters_filtered[[i+1]])))
-points(xy[1], xy[2], pch=16, col="red")
+plot(terra::crop(rasters_filtered[[i+1]], zoom_ext),
+     main = paste0("TempFilt ", years[i+1]))
+points(xy[1], xy[2], pch = 16, col = "red")
 
-par(mfrow=c(1,1))
+par(mfrow = c(1, 1))
 
+# Temporal trajectory
+
+plot(years, mat_before[cell_id, ], type = "b",
+     ylim = range(c(mat_before[cell_id, ], mat_after[cell_id, ]), na.rm = TRUE),
+     xlab = "Year", ylab = "Class", main = paste("Cell", cell_id, "- Temporal filter"))
+lines(years, mat_after[cell_id, ], type = "b", col = "red")
+legend("topright", c("Before", "After"), col = c("black", "red"), lty = 1)
 
 ##### Step 3 – Spatial filter -----
 message("Step 3: Removing isolated cells...")
 
 # apply to all rasters
-rasters_spatial_clean <- remove_isolated_cells(rasters_filtered, years)
+rasters_spatial_clean = remove_isolated_cells(rasters_filtered, years)
 
 ## Check
 freq(rasters_filtered[[1]])
 freq(rasters_spatial_clean[[1]])
 
 # Extract matrices
-mat_before <- sapply(rasters_filtered[[1]], function(r) values(r))
-mat_after  <- sapply(rasters_spatial_clean[[1]], function(r) values(r))
+mat_before = sapply(rasters_filtered[[1]], function(r) values(r))
+mat_after = sapply(rasters_spatial_clean[[1]], function(r) values(r))
 
 # Identify changed cells
-changed_cells <- which(rowSums(mat_before != mat_after, na.rm = TRUE) > 0)
+changed_cells = which(rowSums(mat_before != mat_after, na.rm = TRUE) > 0)
 
 # Pick one changed cell
-cell_id <- changed_cells[100]   # or any index you want
+cell_id = changed_cells[100]   # or any index you want
 
 # Identify one raster where the value changed
-i <- which(mat_before[cell_id, ] != mat_after[cell_id, ])[1]
+i = which(mat_before[cell_id, ] != mat_after[cell_id, ])[1]
 
 # Coordinates of the cell
-xy <- xyFromCell(rasters_filtered[[i]], cell_id)
+xy = xyFromCell(rasters_filtered[[i]], cell_id)
 
 # Zoom window (500 m)
-zoom_ext <- extent(
+zoom_ext = extent(
   xy[1] - 500, xy[1] + 500,
   xy[2] - 500, xy[2] + 500
 )
@@ -491,27 +483,27 @@ par(mfrow = c(1,1))
 
 ##### Step 4 – Add plantios ------
 message("Step 4: Adding plantios to rasters...")
-rasters_plantios <- purrr::map2(rasters_spatial_clean, years, function(r, yr) {
+rasters_plantios = purrr::map2(rasters_spatial_clean, years, function(r, yr) {
   message("  - Adding plantios for year ", yr)
   add_plantios(r, yr, plantios, plantio_value = 1) # Plantios are not differentiated from other forests
 })
 
 # Quick check for plantios overlay
-year_sel <- 2004  # choose year to inspect
-buff <- 1000
-pl <- plantios[plantios$date_refor == year_sel, ]
+year_sel = 2004 # choose year to inspect
+buff = 1000
+pl = plantios[plantios$date_refor == year_sel, ]
 
 if (nrow(pl) > 0) {
-  years_to_plot <- c(year_sel - 1, year_sel, year_sel + 1)
-  idx <- match(years_to_plot, years)
-  valid <- !is.na(idx)
-  years_to_plot <- years_to_plot[valid]
-  idx <- idx[valid]
-  ext_zoom <- ext(pl) + buff
+  years_to_plot = c(year_sel - 1, year_sel, year_sel + 1)
+  idx = match(years_to_plot, years)
+  valid = !is.na(idx)
+  years_to_plot = years_to_plot[valid]
+  idx = idx[valid]
+  ext_zoom = ext(pl) + buff
   par(mfrow=c(1, length(idx)))
   for (j in seq_along(idx)) {
-    yr <- years_to_plot[j]
-    r_zoom <- crop(rasters_plantios[[idx[j]]], ext_zoom)
+    yr = years_to_plot[j]
+    r_zoom = crop(rasters_plantios[[idx[j]]], ext_zoom)
     plot(r_zoom, col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e"), main=as.character(yr))
     plot(pl, border="black", lwd=2, add=TRUE)
   }
@@ -520,23 +512,9 @@ if (nrow(pl) > 0) {
   message("No plantios with date_refor = ", year_sel)
 }
 
-##### Step 5 – Dilatation-erosion ------
-message("Step 5: Applying dilatation–erosion...")
-rasters_dilate <- lapply(seq_along(rasters_plantios), function(i) {
-  message("  - Processing dilatation–erosion for raster ", i, " (year ", years[i], ")")
-  dilatation_erosion(rasters_plantios[[i]], seuil = 50)
-})
 
-# Quick check
-plot(rasters_plantios[[36]], main=paste0("Before dilatation–Erosion ", years[36]), col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e"))
-plot(rasters_dilate[[36]], main=paste0("After dilatation–Erosion ", years[36]), col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e"))
-freq(rasters_plantios[[36]])
-freq(rasters_dilate[[36]])
-
-
-
-##### Step 6 – Apply linear features on top of raster layers -----
-message("Step 6: Applying linear features...")
+##### Step 5 – Apply linear features on top of raster layers -----
+message("Step 5: Applying linear features...")
 # First, we distinguish roads based on their nature (primary, secondary, tertiary)
 roads_sf %>% sf::st_drop_geometry() %>%  dplyr::select(highway) %>% dplyr::group_by(highway) %>% dplyr::summarise(n=n())
 highway = roads_sf %>% dplyr::filter(highway == "motorway" | highway == "trunk" | highway == "primary") %>% terra::vect()
@@ -548,42 +526,42 @@ plot(highway)
 # Power lines take the value "other non-forest habitat (2)" (cleared herbaceous areas)
 # Main roads take the value "artificial" (6)
 # WARNING: at this resolution (30 x 30 m), a minimum of 20 m is needed for linear features to create continuous linear features (below, some cells are not overwritten, and some raster cells are still connected through their vertices)
-rasters_lf <- purrr::map2(rasters_dilate, years, function(r, yr) {
+rasters_lf = purrr::map2(rasters_plantios, years, function(r, yr) {
   message("  - Applying linear features for year ", yr)
-  r_lin <- r
-  r_lin <- apply_linear_feature_single(r_lin, yr, pipelines, buffer_width = 20, value = 2, use_date = TRUE)
-  r_lin <- apply_linear_feature_single(r_lin, yr, highway, buffer_width = 20, value = 6, use_date = TRUE)
+  r_lin = r
+  r_lin = apply_linear_feature_single(r_lin, yr, pipelines, buffer_width = 20, value = 2, use_date = TRUE)
+  r_lin = apply_linear_feature_single(r_lin, yr, highway, buffer_width = 20, value = 6, use_date = TRUE)
   r_lin
 })
 
 # Check
 # Point coordinates
-x_center <- 776928.1
-y_center <- 7508359.8
+x_center = 776928.1
+y_center = 7508359.8
 
 # Buffer size
-buffer_size <- 1500
+buffer_size = 1500
 
 # Create bounding box extent
-zoom_ext <- ext(
+zoom_ext = ext(
   x_center - buffer_size, x_center + buffer_size,
   y_center - buffer_size, y_center + buffer_size
 )
 
 # Raster indices to visualize
-subset_indices <- c(1, 17, 35)
+subset_indices = c(1, 17, 35)
 
 # Loop over selected rasters
 for (i in subset_indices) {
   # Crop rasters
-  r_before <- crop(rasters_dilate[[i]], zoom_ext)
-  r_after  <- crop(rasters_lf[[i]], zoom_ext)
+  r_before = crop(rasters_plantios[[i]], zoom_ext)
+  r_after = crop(rasters_lf[[i]], zoom_ext)
   
   # Crop linear features
-  roads_sub       <- crop(roads, zoom_ext)
-  power_lines_sub <- crop(power_lines, zoom_ext)
-  bridges_sub     <- crop(bridges, zoom_ext)
-  pipelines_sub   <- crop(pipelines, zoom_ext)
+  roads_sub = crop(roads, zoom_ext)
+  power_lines_sub = crop(power_lines, zoom_ext)
+  bridges_sub = crop(bridges, zoom_ext)
+  pipelines_sub = crop(pipelines, zoom_ext)
   
   # Plot side by side
   par(mfrow=c(1,2))
@@ -607,10 +585,10 @@ for (i in subset_indices) {
   par(mfrow=c(1,1))
 }
 
-##### Step 7 – Crop again (as linear features are above the extent) -----
-rasters_final <- lapply(rasters_lf, function(r) {
-  r_cropped <- crop(r, bbox) # crop returns a geographic subset of an object as specified by an Extent object
-  r_masked <- mask(r_cropped, bbox) # create a new Raster object that has the same values as x, except for the cells that are NA in a 'mask' (either a Raster or a Spatial object)
+##### Step 6 – Crop again (as linear features are above the extent) -----
+rasters_final = lapply(rasters_lf, function(r) {
+  r_cropped = crop(r, bbox) # crop returns a geographic subset of an object as specified by an Extent object
+  r_masked = mask(r_cropped, bbox) # create a new Raster object that has the same values as x, except for the cells that are NA in a 'mask' (either a Raster or a Spatial object)
   return(r_masked)
 })
 
@@ -623,41 +601,41 @@ plot(rasters_final[[36]], col = c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#
 freq(rasters_final[[36]])
 
 # Central coordinates
-x_center <- 778151.2
-y_center <- 7508862.8
+x_center = 779535
+y_center = 7509233
 
 # Zoom window
-buffer_size <- 1200
-zoom_ext <- extent(
+buffer_size = 3000
+zoom_ext = extent(
   x_center - buffer_size, x_center + buffer_size,
   y_center - buffer_size, y_center + buffer_size
 )
 
 # Choose which raster/year to illustrate
-index_demo <- 35
+index_demo = 34
+
+# Step 0 - Original raster
+r_step0 = crop(rasters[[index_demo]], zoom_ext)
 
 # Step 1 - Reclassify
-r_step1 <- crop(rasters_reclass[[index_demo]], zoom_ext)
+r_step1 = crop(rasters_reclass[[index_demo]], zoom_ext)
 
 # Step 2 - Temporal filter
-r_step2 <- crop(rasters_filtered[[index_demo]], zoom_ext)
+r_step2 = crop(rasters_filtered[[index_demo]], zoom_ext)
 
 # Step 3 - Spatial filter
-r_step3 <- crop(rasters_spatial_clean[[index_demo]], zoom_ext)
+r_step3 = crop(rasters_spatial_clean[[index_demo]], zoom_ext)
 
 # Step 4 - Add plantios
-r_step4 <- crop(rasters_plantios[[index_demo]], zoom_ext)
+r_step4 = crop(rasters_plantios[[index_demo]], zoom_ext)
 
-# Step 5 - Dilatation erosion
-r_step5 <- crop(rasters_dilate[[index_demo]], zoom_ext)
+# Step 5 - Linear features
+r_step5 = crop(rasters_lf[[index_demo]], zoom_ext)
 
-# Step 6 - Linear features
-r_step6 <- crop(rasters_lf[[index_demo]], zoom_ext)
-
-roads_sub       <- crop(roads, zoom_ext)
-power_lines_sub <- crop(power_lines, zoom_ext)
-bridges_sub     <- crop(bridges, zoom_ext)
-pipelines_sub   <- crop(pipelines, zoom_ext)
+roads_sub = crop(roads, zoom_ext)
+power_lines_sub = crop(power_lines, zoom_ext)
+bridges_sub = crop(bridges, zoom_ext)
+pipelines_sub = crop(pipelines, zoom_ext)
 
 
 # Plot all steps together
@@ -665,6 +643,9 @@ pipelines_sub   <- crop(pipelines, zoom_ext)
 png(here("outputs","plot","01e_reclass_rasters_demo.png"), width = 3000, height = 2000, res = 300)
 
 par(mfrow = c(2, 3), mar = c(2,2,2,2))
+
+# Step 0
+plot(r_step0, main = paste0("Step 0 – Original (", years[index_demo], ")"))
 
 # Step 1
 plot(r_step1, main = paste0("Step 1 – Reclassify (", years[index_demo], ")"),
@@ -683,16 +664,12 @@ plot(r_step4, main = "Step 4 – Add plantios",
      col=c("#32a65e", "#519799", "#FFFFB2", "#d4271e"))
 
 # Step 5
-plot(r_step5, main = "Step 5 – Dilatation–Erosion",
-     col=c("#32a65e", "#519799", "#FFFFB2", "#d4271e"))
-
-# Step 6
-plot(r_step6, main = "Step 6 – Linear features",
+plot(r_step5, main = "Step 5 – Linear features",
      col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#d4271e"))
-plot(roads_sub,       add=TRUE, col="black")
+plot(roads_sub, add=TRUE, col="black")
 plot(power_lines_sub, add=TRUE, col="red")
-plot(bridges_sub,     add=TRUE, col="blue")
-plot(pipelines_sub,   add=TRUE, col="orange")
+plot(bridges_sub, add=TRUE, col="blue")
+plot(pipelines_sub, add=TRUE, col="orange")
 
 par(mfrow = c(1,1))
 dev.off()
@@ -702,12 +679,12 @@ dev.off()
 message("Exporting rasters...")
 
 # Define output folder
-output_dir <- here("outputs", "data", "MapBiomas", "Rasters_reclass")
+output_dir = here("outputs", "data", "MapBiomas", "Rasters_reclass")
 
 # Export each raster with year in the filename
 for (i in seq_along(rasters_final)) {
-  year_i <- years[i]
-  output_path <- file.path(output_dir, paste0("raster_reclass_", year_i, ".tif"))
+  year_i = years[i]
+  output_path = file.path(output_dir, paste0("raster_reclass_", year_i, ".tif"))
   
   message("  - Writing raster for year ", year_i)
   
@@ -725,62 +702,50 @@ for (i in seq_along(rasters_final)) {
 
 message("Classifying forests depending on their legal status...")
 
-cu <- rbind(uniao, pda, tres_picos)
+cu = rbind(uniao, pda, tres_picos)
 
-rasters_forest_cat <- lapply(rasters_final, function(r){
+rasters_forest_cat = lapply(rasters_final, function(r){
   
   # Start only with forest = 1
   
   # 1) RPPN (overrides everything)
-  r <- assign_if_intersect(r, rppn, target_values = 1, new_value = 12)
+  r = assign_if_intersect(r, rppn, target_values = 1, new_value = 12)
   
   # 2) Private inside conservation units (CAR ∩ CU)
-  r <- assign_if_intersect(r, intersect(car, cu), target_values = 1, new_value = 14)
+  r = assign_if_intersect(r, intersect(car, cu), target_values = 1, new_value = 14)
   
   # 3) Public conservation units (remaining forest in CU)
-  r <- assign_if_intersect(r, cu, target_values = 1, new_value = 13)
+  r = assign_if_intersect(r, cu, target_values = 1, new_value = 13)
   
   # 4) Private properties (remaining forest in CAR)
-  r <- assign_if_intersect(r, car, target_values = 1, new_value = 11)
+  r = assign_if_intersect(r, car, target_values = 1, new_value = 11)
   
   # 5) Remaining forest
-  r[r == 1] <- 100
+  r[r == 1] = 10
+  
+  # 6) Everything else = NA
+  r[!r %in% c(10,11,12,13,14)] = NA
   
   r
 })
 
 # Check
 # pick the rasters
-r_before <- rasters_final[[36]]
-r_after  <- rasters_forest_cat[[36]]
+r_before = rasters_final[[36]]
+r_after = rasters_forest_cat[[36]]
 freq(rasters_forest_cat[[36]])
 
 # zoom extent from reserve or car region
-zoom_ext <- ext(pda) + 5000
+zoom_ext = ext(pda) + 5000
 
 # crop rasters
-rb <- crop(r_before, zoom_ext)
-ra <- crop(r_after,  zoom_ext)
+rb = crop(r_before, zoom_ext)
+ra = crop(r_after,  zoom_ext)
 
 # to sf for plotting
 car_sf = sf::st_as_sf(car)
 
 # define a color table
-vals = c(2,3,4,5,6,11,12,13,14,100)
-cols <- c(
-  "2" = "#ad975a",
-  "3" = "#519799",
-  "4" = "#FFFFB2",
-  "5" = "#0000FF",
-  "6" = "#d4271e",
-  "11" = "#006400", # Private forest
-  "12" = "#CDAD00", # RPPN
-  "13" = "#C1FFC1", # Public reserve
-  "14" = "#CDCDC1", # Private forest inside conservation units
-  "100" = "#32a65e"
-)
-terra::coltab(ra) <- cbind(vals, cols)
-
 par(mfrow=c(1,2))
 
 plot(rb,
@@ -793,7 +758,7 @@ plot(car_sf, add=TRUE, col=scales::alpha("white",0.5), border=NA)
 
 plot(ra,
      main="AFTER",
-     col = cols)
+     col = c("#32a65e", "#006400", "#CDAD00", "#C1FFC1", "#CDCDC1"))
 
 par(mfrow=c(1,1))
 
@@ -802,12 +767,12 @@ par(mfrow=c(1,1))
 message("Exporting rasters...")
 
 # Define output folder
-output_dir <- here("outputs", "data", "MapBiomas", "Rasters_reclass_forest_cat")
+output_dir = here("outputs", "data", "MapBiomas", "Rasters_reclass_forest_cat")
 
 # Export each raster with year in the filename
 for (i in seq_along(rasters_forest_cat)) {
-  year_i <- years[i]
-  output_path <- file.path(output_dir, paste0("raster_reclass_forest_cat_", year_i, ".tif"))
+  year_i = years[i]
+  output_path = file.path(output_dir, paste0("raster_reclass_forest_cat_", year_i, ".tif"))
   
   message("  - Writing raster for year ", year_i)
   
@@ -823,10 +788,10 @@ for (i in seq_along(rasters_forest_cat)) {
 # We classify the rasters and distinguish between types of connectivity or habitat restoration
 
 # Reclassify plantios
-rasters_restor_cat <- purrr::map2(rasters_final, years, function(r, yr){
+rasters_restor_cat = purrr::map2(rasters_final, years, function(r, yr){
   
   # 1) forest intersecting plantios with Ecologia == "Corredor" → 51
-  r <- assign_if_intersect_attr_year(r, yr, plantios,
+  r = assign_if_intersect_attr_year(r, yr, plantios,
                                      year_field = "date_refor",
                                      attr = "Ecologia",
                                      attr_value = "Corredor",
@@ -834,7 +799,7 @@ rasters_restor_cat <- purrr::map2(rasters_final, years, function(r, yr){
                                      new_value = 51)
   
   # 2) remaining forest intersecting any plantios → 50
-  r <- assign_if_intersect_year(r, yr, plantios,
+  r = assign_if_intersect_year(r, yr, plantios,
                                 year_field = "date_refor",
                                 target_values = 1,
                                 new_value = 50)
@@ -843,27 +808,43 @@ rasters_restor_cat <- purrr::map2(rasters_final, years, function(r, yr){
 })
 
 # Apply road overpasses
-rasters_cons_cat <- purrr::map2(rasters_restor_cat, years, function(r, yr) {
+rasters_cons_cat = purrr::map2(rasters_restor_cat, years, function(r, yr) {
   message("  - Applying linear features for year ", yr)
-  r_lin <- r
-  r_lin <- apply_linear_feature_single(r_lin, yr, bridges, buffer_width = 20, value = 52, use_date = TRUE)
+  r_lin = r
+  r_lin = apply_linear_feature_single(r_lin, yr, bridges, buffer_width = 20, value = 52, use_date = TRUE)
   r_lin
 })
 
+# Reclass all the rest into NA
+codes = c(50, 51, 52)
+rasters_cons_cat = lapply(rasters_cons_cat, function(r){
+  r[!r %in% codes] = NA
+  r
+})
+
+# Drop rasters with only NA AND keep matching years
+keep = sapply(rasters_cons_cat, function(r) {
+  if (is.null(r)) return(FALSE)
+  terra::global(!is.na(r), "sum", na.rm = TRUE)[1,1] > 0
+})
+
+rasters_cons_cat = rasters_cons_cat[keep]
+years_cons_cat = years[keep]
+
+
 # Check
-freq(rasters_cons_cat[[1]])
-freq(rasters_cons_cat[[36]])
+freq(rasters_cons_cat[[21]])
 
 # pick the rasters
-r_before <- rasters_final[[36]]
-r_after  <- rasters_cons_cat[[36]]
+r_before = rasters_final[[21]]
+r_after = rasters_cons_cat[[21]]
 
 # zoom extent from reserve or car region
-zoom_ext <- ext(pda) + 500
+zoom_ext = ext(pda) + 500
 
 # crop rasters
-rb <- crop(r_before, zoom_ext)
-ra <- crop(r_after,  zoom_ext)
+rb = crop(r_before, zoom_ext)
+ra = crop(r_after,  zoom_ext)
 par(mfrow=c(1,2))
 
 plot(rb,
@@ -871,22 +852,9 @@ plot(rb,
      col = c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e"))
 plot(plantios, add=TRUE, border="white", lwd=1)
 
-vals = c(1,2,3,4,5,6,50,51,52)
-cols <- c(
-  "1" = "#32a65e",
-  "2" = "#ad975a",
-  "3" = "#519799",
-  "4" = "#FFFFB2",
-  "5" = "#0000FF",
-  "6" = "#d4271e",
-  "50" = "#FF7F00", # Forest corridors
-  "51" = "#EE30A7", # Other active restoration areas
-  "52" = "#FFFF00" # Road overpasses
-)
-terra::coltab(ra) <- cbind(vals, cols)
 plot(ra,
      main="AFTER",
-     col = cols)
+     col = c("#FF7F00", "#EE30A7", "darkred"))
 plot(plantios, add=TRUE, border="white", lwd=1)
 
 par(mfrow=c(1,1))
@@ -895,19 +863,27 @@ par(mfrow=c(1,1))
 message("Exporting rasters...")
 
 # Define output folder
-output_dir <- here("outputs", "data", "MapBiomas", "Rasters_reclass_cons_cat")
+output_dir = here("outputs", "data", "MapBiomas", "Rasters_reclass_cons_cat")
 
 # Export each raster with year in the filename
 for (i in seq_along(rasters_cons_cat)) {
-  year_i <- years[i]
-  output_path <- file.path(output_dir, paste0("raster_reclass_cons_cat_", year_i, ".tif"))
+  year_i = years_cons_cat[i]
+  output_path = file.path(output_dir,
+                           paste0("raster_reclass_cons_cat_", year_i, ".tif"))
   
   message("  - Writing raster for year ", year_i)
   
   terra::writeRaster(
     rasters_cons_cat[[i]],
     filename = output_path,
-    overwrite = TRUE, # Overwrite existing files or not
+    overwrite = TRUE,
     wopt = list(datatype = "INT1U", gdal = c("COMPRESS=LZW"))
   )
 }
+
+
+### Rasters consistency -------
+# Check that all rasters have the same extent
+ext(rasters_final[[1]])
+ext(rasters_forest_cat[[1]])
+ext(rasters_cons_cat[[1]])

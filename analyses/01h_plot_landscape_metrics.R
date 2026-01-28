@@ -549,7 +549,7 @@ dev.off()
 ### Forest categories metrics --------
 # Create color palette using the Legend codes provided by MapBiomas
 class_colors = tibble::tibble(
-  class = c(11,12,13,14,100),
+  class = c(11,12,13,14,10),
   Description = c("Private forests",
                   "Forests in private reserves (RPPN)", 
                   "Forests in public reserves", 
