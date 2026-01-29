@@ -631,14 +631,3 @@ write.csv(forest_cat_metrics, file = file.path(base_path, "forest_cat_metrics_bb
 write.csv(cons_cat_metrics, file = file.path(base_path, "cons_cat_metrics_bbox_1989_2024.csv"), row.names=FALSE)
 write.csv(forest_age_metrics, file = file.path(base_path, "forest_age_metrics_bbox_1989_2024.csv"), row.names=FALSE)
 write.csv(defor_refor_metrics, file = file.path(base_path, "defor_refor_metrics_bbox_1989_2024.csv"), row.names=FALSE)
-
-# Export patch metrics
-purrr::walk2(
-  all_years_metrics,
-  years,
-  ~ {
-    output_path = file.path(base_path, paste0("patches_metrics_", .y, ".gpkg"))
-    sf::st_write(.x, output_path, layer = "patches", delete_dsn = TRUE, quiet = TRUE)
-    message("✅ Exported: ", output_path)
-  }
-)

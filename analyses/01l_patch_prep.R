@@ -258,3 +258,13 @@ all_years_metrics = purrr::map2(rasters_mspa, years,
                                                         regions_buffer=regions_buffer,
                                                         minbbox2000=minbbox2000))
 
+# Export patch metrics
+purrr::walk2(
+  all_years_metrics,
+  years,
+  ~ {
+    output_path = file.path(base_path, paste0("patches_metrics_", .y, ".gpkg"))
+    sf::st_write(.x, output_path, layer = "patches", delete_dsn = TRUE, quiet = TRUE)
+    message("✅ Exported: ", output_path)
+  }
+)
