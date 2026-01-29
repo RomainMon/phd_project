@@ -71,8 +71,8 @@ rasters_large_patches = lapply(seq_along(rasters), function(i) {
 })
 
 # Quick check
-plot(rasters[[36]])
-plot(rasters_large_patches[[36]]) # At first sight, nothing changed, but look carefully: tiny patches are reclassified!
+plot(rasters[[36]], col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e"))
+plot(rasters_large_patches[[36]], col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e", "magenta")) # Look carefully: tiny patches are reclassified!
 freq(rasters[[36]])
 freq(rasters_large_patches[[36]])
 
@@ -103,7 +103,7 @@ plot(rasters_for_mspa[[36]], col=c("white", "grey", "#32a65e"))
 
 #### Export all reclassed rasters ----
 # Define output folder
-out_dir_preMSPA <- here("outputs", "data", "MapBiomas", "MSPA", "preMSPA")
+out_dir_preMSPA = here("outputs", "data", "MapBiomas", "MSPA", "preMSPA")
 
 # Export loop
 for(i in seq_along(rasters_for_mspa)) {
@@ -137,21 +137,21 @@ for(i in seq_along(rasters_for_mspa)) {
 #### Reclass MSPA rasters -----
 ##### Rename and import GTB outputs -----
 # Path to files
-mspa_path <- here("outputs", "data", "MapBiomas", "MSPA", "batch_MSPA")
+mspa_path = here("outputs", "data", "MapBiomas", "MSPA", "batch_MSPA")
 
 # List all MSPA raster files
-mspa_files <- list.files(mspa_path, pattern = "\\.tif$", full.names = TRUE)
+mspa_files = list.files(mspa_path, pattern = "\\.tif$", full.names = TRUE)
 
 # Extract years safely from filenames
 # Use strict regex: 4 consecutive digits not part of a longer number
-mspa_years <- stringr::str_extract(basename(mspa_files), "(?<!\\d)\\d{4}(?!\\d)")
+mspa_years = stringr::str_extract(basename(mspa_files), "(?<!\\d)\\d{4}(?!\\d)")
 
 # Create dataframe linking files and extracted years
 mspa_df = data.frame(file = mspa_files, year = as.numeric(mspa_years)) %>%
   dplyr::arrange(year)
 
 # Rename files by removing unwanted text
-mspa_df <- mspa_df %>%
+mspa_df = mspa_df %>%
   dplyr::mutate(
     new_name = gsub("for_", "", file),
     new_name = gsub("_8_1_0_0", "", new_name)
@@ -161,13 +161,13 @@ mspa_df <- mspa_df %>%
 file.rename(mspa_df$file, mspa_df$new_name)
 
 # Update paths and years after renaming
-mspa_df$file <- mspa_df$new_name
+mspa_df$file = mspa_df$new_name
 
 # Load rasters in chronological order
-rasters_mspa <- lapply(mspa_df$file, terra::rast)
+rasters_mspa = lapply(mspa_df$file, terra::rast)
 unique(values(rasters_mspa[[1]]))
 plot(rasters_mspa[[1]])
-mspa_years <- mspa_df$year
+mspa_years = mspa_df$year
 
 # Quick visual check
 for (i in seq_along(mspa_df$file)) {
@@ -178,71 +178,70 @@ for (i in seq_along(mspa_df$file)) {
 
 ##### Mask MapBiomas rasters with MSPA --------
 # -> Here, we mask MapBiomas rasters with the outcome of the MSPA analysis in GuidosToolBox
-# (i) We reclass cells as corridors (value = 33) and (ii) we also reclass nearby 1 cells ("branches") as corridors (33)
+# (i) We reclass cells as corridors (value = 33)
+# (ii) We reclass nearby 1 cells ("branches") as corridors (33)
 
-mask_with_mspa <- function(landuse, mspa) {
+# This function reclasses land uses in rasters using MSPA rasters
+mask_with_mspa = function(landuse, mspa) {
   # Ensure same extent/resolution
   if(!terra::compareGeom(landuse, mspa, stopOnError = FALSE)) {
     mspa <- terra::resample(mspa, landuse, method = "near")
   }
   
-  # Create a mask for MSPA value == 33
-  mask_33 <- mspa == 33
+  # Create a mask for MSPA value == 33 (here, we keep MSPA corridors)
+  mask_33 = mspa == 33
   
   # Replace values in original raster where mask_33 == TRUE
-  landuse[mask_33] <- 33
+  landuse[mask_33] = 33
   
   # Spread 33 to adjacent cells with value 1
   # Define a 3x3 matrix for 8-neighbor adjacency
-  w <- matrix(1, nrow = 3, ncol = 3)
+  w = matrix(1, nrow = 3, ncol = 3)
   
   # Count number of adjacent 33 cells
-  neighbors_33 <- terra::focal(mask_33, w = w, fun = max, na.policy = "omit", pad = TRUE)
+  neighbors_33 = terra::focal(mask_33, w = w, fun = max, na.policy = "omit", pad = TRUE)
   
   # Update landuse cells: if cell == 1 and has any 33 neighbor, assign 33
-  landuse[landuse == 1 & neighbors_33 == 1] <- 33
+  landuse[landuse == 1 & neighbors_33 == 1] = 33
   
   return(landuse)
 }
 
 ## Apply to all rasters
-rasters_reclass_w_mspa <- map2(rasters, rasters_mspa, mask_with_mspa)
+rasters_reclass_w_mspa = map2(rasters, rasters_mspa, mask_with_mspa)
 
 # Quick check
-plot(rasters_reclass_w_mspa[[36]])
+plot(rasters_reclass_w_mspa[[36]], col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e", "orange"))
 freq(rasters[[36]])
 freq(rasters_reclass_w_mspa[[36]])
 
 #### Add corridors unmarked as corridors by MSPA -----
 # -> Here, we overlay plantios on MSPA rasters and assign value 33 where there is an intersection with the plantio ("Corredor") AND the raster year is equal or after date_refor
 # This function assigns a value if intersect AND attribute matches AND according to the year
-assign_if_intersect_attr_year <- function(raster, year, vect,
+assign_if_intersect_attr_year = function(raster, year, vect,
                                           year_field,
                                           attr, attr_value,
                                           target_values, new_value){
   
   if (nrow(vect) == 0) return(raster)
-  
   # keep only vectors already present at this year
   vect_year <- vect[!is.na(vect[[year_field]]) & vect[[year_field]] <= year, ]
-  
   if (nrow(vect_year) == 0) return(raster)
-  
   # keep only desired attribute
   vect_sub <- vect_year[vect_year[[attr]] == attr_value, ]
-  
   if (nrow(vect_sub) == 0) return(raster)
-  
+  # Rasterize vectors
   vect_rast <- terra::rasterize(vect_sub, raster, field = 1, background = NA)
+  # If raster pixel has the "target value" and is within the rasterized vector, then assign "new value"
+  raster[raster %in% target_values & !is.na(vect_rast)] = new_value
   
-  raster[raster %in% target_values & !is.na(vect_rast)] <- new_value
-  
+  # Output = raster
   raster
 }
 
 # Wrap
-rasters_reclass_w_mspa2 <- purrr::map2(rasters_reclass_w_mspa, mspa_years, function(r, yr){
-  r <- assign_if_intersect_attr_year(r, yr, plantios,
+rasters_reclass_w_mspa2 = purrr::map2(rasters_reclass_w_mspa, mspa_years, function(r, yr){
+  r = assign_if_intersect_attr_year(r, yr, plantios,
                                      year_field = "date_refor",
                                      attr = "Ecologia",
                                      attr_value = "Corredor",
@@ -256,19 +255,19 @@ freq(rasters_reclass_w_mspa[[36]])
 freq(rasters_reclass_w_mspa2[[36]])
 
 # Visual check
-year_to_check <- 2024
-r_index <- which(mspa_years == year_to_check)
-r_check <- rasters_reclass_w_mspa2[[r_index]]
+year_to_check = 2024
+r_index = which(mspa_years == year_to_check)
+r_check = rasters_reclass_w_mspa2[[r_index]]
 
 # Subset plantios with the selected IDs
-plantios_selected <- plantios[plantios$id %in% 65, ]
+plantios_selected = plantios[plantios$id %in% 65, ]
 
 # Get the extent of the plantios to zoom in
-zoom_extent <- terra::ext(plantios_selected)
+zoom_extent = terra::ext(plantios_selected)
 
 # Plot the raster zoomed to the plantios extent
 plot(r_check, main = paste("Raster with plantios overlay - Year", year_to_check),
-     col = rainbow(6), ext = zoom_extent)
+     col=c("#32a65e", "#FFFFB2", "orange"), ext = zoom_extent)
 
 # Overlay the plantios polygons
 plot(plantios_selected, border = "black", add = TRUE)
