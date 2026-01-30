@@ -164,7 +164,7 @@ extract_values <- function(r, coords_df) {
 # Rationale:
 # The workflow starts from rasters_tm[[35]], a raster identifying all cells that experienced at least one land-use/land-cover (LULC) change event during the study period. These “changed cells” form the core sample on which all covariates will be calculated.
 # For each event row, the pipeline computes a set of covariates that describe biophysical, legal, and landscape-context characteristics of the cell at the time of its change. All covariates are extracted or computed dynamically with respect to the event year.
-# Dataset A: reforested (6) cells + a random sample of intact cells (value = 1 in rasters_tm). Sample must match the number of 6-cells per year.
+# Dataset A: reforested (6) cells + a random sample of intact cells (value = 4 in rasters_tm). Sample must match the number of 6-cells per year.
 # Dataset B: deforested (7) cells + a random sample of intact cells (value = 1 in rasters_tm). Sample must match the number of 7-cells per year.
 
 #### Parameters ----------
