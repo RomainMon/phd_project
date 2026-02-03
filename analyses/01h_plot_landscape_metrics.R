@@ -17,7 +17,9 @@ library(ggrepel)
 library(ggstream)
 library(ggtern)
 library(extrafont)
-font_import()
+
+# Font Import
+# font_import()
 loadfonts()
 fonttable()
 
@@ -40,7 +42,7 @@ forest_cat_metrics = readr::read_csv(
   show_col_types = FALSE
 )
 cons_cat_metrics = readr::read_csv(
-  file.path(base_path, "cons_cat_metrics_bbox_1989_2024.csv"),
+  file.path(base_path, "cons_cat_metrics_bbox_2004_2024.csv"),
   show_col_types = FALSE
 )
 forest_age_metrics = readr::read_csv(
@@ -56,7 +58,8 @@ defor_refor_metrics = readr::read_csv(
 # Create color palette using the Legend codes provided by MapBiomas
 class_colors = tibble::tibble(
   class = c(1,2,3,4,5,6),
-  Description = c("Forest","Other non-forest formation", "Wetlands and mangroves", "Agriculture","Water","Non vegetated areas"
+  Description = c("Forest", "Other non-forest formation", "Wetlands and mangroves", "Agriculture",
+                  "Water","Non vegetated areas"
   ),
   Color = c(
     "#32a65e", "#ad975a", "#519799", "#D1D100", "#0000FF", "#d4271e"
@@ -97,7 +100,7 @@ ggplot(donut, aes(ymax = ymax, ymin = ymin, xmax = 4, xmin = 3, fill = Descripti
   coord_polar(theta = "y") +
   xlim(c(0, 4.8)) +
   theme_void() +
-  scale_fill_manual(name = "Land use class", values = setNames(class_colors$Color, class_colors$Description)) +
+  scale_fill_manual(name = "Land use class (2024)", values = setNames(class_colors$Color, class_colors$Description)) +
   theme(legend.position = "right",
         legend.title = element_text(size = 9, family = "Arial Narrow"),
         legend.text  = element_text(size = 7, family = "Arial Narrow"),
@@ -240,7 +243,7 @@ ggplot(data, aes(x = year, y = ca, color = Description, group = Description)) +
   labs(x = "Year", y = "Area (ha)", color = "Land use class") +
   scale_x_continuous(expand = expansion(mult = c(0.02, 0.12))) +   # small left margin + larger right margin
   coord_cartesian(clip = "off") +
-  theme_classic() +
+  theme_minimal() +
   theme(legend.position = "bottom",
         axis.title = element_text(size = 10, family = "Arial Narrow"),
         axis.text = element_text(size = 8, family = "Arial"),
@@ -312,7 +315,7 @@ png(here("outputs","plot","01h_lm_pland_barplot0.png"), width = 2500, height = 1
 
 ggplot(data, aes(x = year, y = delta_ca, group = Description)) +
   geom_col(data = data,aes(x = year, y = delta_ca, fill = Description),
-           position = position_dodge(width = 0.5),
+           position = position_dodge(width = 0.8), # Increase width to increase non-overlapping between bars
            color = "white", linewidth = 0.2, width = 1) +
   geom_smooth(data = data, aes(x = year, y = delta_ca, color = Description), 
               method = "loess",
@@ -436,6 +439,7 @@ forest_text = forest_dyn %>%
 # print the text
 cat("Forest temporal dynamics were structured in the following distinct periods:\n")
 cat(paste0("* ", forest_text, collapse="\n"), "\n\n")
+
 
 ##### Waffle plot -------
 ## 2024
@@ -593,7 +597,7 @@ ggplot(donut, aes(ymax = ymax, ymin = ymin, xmax = 4, xmin = 3, fill = Descripti
   coord_polar(theta = "y") +
   xlim(c(0, 4.8)) +
   theme_void() +
-  scale_fill_manual(name = "Forest status", values = setNames(class_colors$Color, class_colors$Description)) +
+  scale_fill_manual(name = "Forest status (2024)", values = setNames(class_colors$Color, class_colors$Description)) +
   theme(legend.position = "right",
         legend.title = element_text(size = 9, family = "Arial Narrow"),
         legend.text  = element_text(size = 7, family = "Arial Narrow"),
@@ -844,26 +848,25 @@ cat(paste0("* ", res_text, collapse = "\n"), "\n")
 
 ##### Line plot -----
 data = forest_age_metrics %>%
-  mutate(
-    AgeClass = case_when(
-      class == 5 ~ "1-5 years",
-      class == 15 ~ "6-15 years",
-      class == 25 ~ "16-25 years",
-      class == 99 ~ ">25 years",
-      TRUE ~ as.character(class)
-    )
-  )
+  dplyr::mutate(
+    AgeClass = factor(
+      dplyr::case_when(
+        class == 10 ~ "<=10 years",
+        class == 20 ~ "11–20 years",
+        class == 30 ~ "21–30 years",
+        class == 31 ~ ">30 years"),
+      levels = c("<=10 years", "11–20 years", "21–30 years", ">30 years")))
 
 total_forest = all_lulc_metrics %>%
   dplyr::filter(class == 1) %>% 
   dplyr::select(year, ca)
 
 age_cols = c(
-  "1-5 years"   = "#9ad9f5",
-  "6-15 years" = "#49b5e7",
-  "16-25 years" = "#138fcf",
-  ">25 years"   = "#0b5fa5"
-)  
+  "<=10 years" = "#9ad9f5",
+  "11–20 years" = "#49b5e7",
+  "21–30 years" = "#138fcf",
+  ">30 years"  = "#0b5fa5"
+)
 
 # Bar + line plot
 ggplot() +
@@ -899,3 +902,103 @@ ggplot() +
     panel.grid.minor = element_blank(),
     legend.position = "right"
   )
+
+
+## Bar + line plot - Old vs Young forest (with extra bar)
+# Total forest area in 2024
+total_2024 = total_forest %>%
+  dplyr::filter(year == 2024) %>% 
+  dplyr::pull(ca)
+
+# Create composition bar (percentages)
+data_comp = data %>%
+  dplyr::filter(year == 2024) %>%
+  dplyr::mutate(
+    ca = ca,
+    prop = round(100 * ca / total_2024,1))  %>% 
+  dplyr::select(year, AgeClass, ca, prop)
+
+# Mutate label position on the plot
+data_comp = data_comp %>% 
+  dplyr::mutate(pos = dplyr::case_when(AgeClass == "<=10 years" ~ 168000,
+                                       AgeClass == "11–20 years" ~ 162000,
+                                       AgeClass == "21–30 years" ~ 155000,
+                                       AgeClass == ">30 years"~ 100000))
+
+# Data old vs young
+data_old_young = data %>% 
+  dplyr::mutate(AgeClass = factor(dplyr::case_when(AgeClass %in% c("<=10 years", "11–20 years", "21–30 years") ~ "Young (<30 years)",
+                                                   AgeClass %in% c(">30 years") ~ "Old (>30 years)"), 
+                                      levels = c("Young (<30 years)", "Old (>30 years)"))) %>% 
+  dplyr::group_by(AgeClass, year) %>% 
+  dplyr::summarise(ca = sum(ca), .groups = "drop") %>% 
+  dplyr::filter(year != 2024) %>% 
+  dplyr::ungroup()
+
+age_cols = c(
+  "<=10 years" = "#9ad9f5",
+  "11–20 years" = "#49b5e7",
+  "21–30 years" = "#138fcf",
+  ">30 years"  = "#0b5fa5",
+  "Young (<30 years)" = "#9ad9f5",
+  "Old (>30 years)"  = "#0b5fa5"
+)
+
+png(here("outputs","plot","01h_lm_forest_age_barplot.png"), width = 2500, height = 1500, res = 300)
+
+# Bar + line plot
+ggplot() +
+  ## Stacked bars = forest age structure
+  geom_col(data = data_old_young,
+           aes(x = year, y = ca, fill = AgeClass),
+           width = 0.9,
+           color = "white",
+           linewidth = 0.2) +
+  ## Last bar: AgeClass composition
+  geom_col(data = data_comp,
+           aes(x = year + 0.5, y = ca, fill = AgeClass),
+           stat = "identity",
+           width = 2,
+           color = "white",
+           linewidth = 0.2,
+           show.legend = FALSE) +
+  ## Proportion labels
+  geom_text(data = data_comp,
+            aes(x = year + 3.8, y = pos, label = AgeClass),
+            size = 4,
+            family = "Arial Narrow") +
+  geom_text(data = data_comp,
+            aes(x = year + 0.5, y = pos, label = paste0(prop, "%")),
+            size = 4,
+            family = "Arial Narrow") +
+  ## Total forest cover line
+  geom_line(data = total_forest,
+            aes(x = year, y = ca),
+            color = "black",
+            linewidth = 1) +
+  geom_point(data = total_forest,
+             aes(x = year, y = ca),
+             color = "black",
+             size = 2) +
+  scale_fill_manual(
+    values = age_cols,
+    breaks = c("Young (<30 years)", "Old (>30 years)"),
+    name = "Native forest age"
+  ) +
+  scale_x_continuous(breaks = seq(min(data$year), max(data$year), by = 2)) +
+  labs(
+    x = "Year",
+    y = "Forest area (ha)") +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(face = "bold", hjust = 0.5, family = "Arial Narrow"),
+    axis.title = element_text(size = 12, family = "Arial Narrow"),
+    axis.text  = element_text(size = 10, family = "Arial"),
+    axis.text.x = element_text(size = 8, angle = 45, hjust = 1, family = "Arial"),
+    legend.title = element_text(size = 11, family = "Arial Narrow"),
+    legend.text  = element_text(size = 10),
+    panel.grid.minor = element_blank(),
+    legend.position = "bottom"
+  )
+
+dev.off()

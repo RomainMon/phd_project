@@ -14,6 +14,7 @@ library(landscapemetrics)
 library(ggplot2)
 library(cowplot)
 library(exactextractr)
+library(geodata)
 
 ### Import rasters -------
 
@@ -33,7 +34,8 @@ years_lulc = raster_df$years_lulc
 for (i in seq_along(rasters_reclass)) {
   cat("Year", years_lulc[i], " → raster name:", basename(raster_df$file[i]), "\n")
 }
-plot(rasters_reclass[[35]], col=c("#32a65e", "#ad975a", "#FFFFB2", "#0000FF", "#d4271e"))
+plot(rasters_reclass[[35]], col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e"))
+
 
 ## Cumulative rasters
 base_path = here("outputs", "data", "MapBiomas", "Rasters_cumulative_tm")
@@ -51,18 +53,50 @@ years_tm = raster_df$years_tm
 for (i in seq_along(rasters_tm)) {
   cat("Year", years_tm[i], " → raster name:", basename(raster_df$file[i]), "\n")
 }
-plot(rasters_tm[[35]], col=c("#32a65e", "#ad975a", "#FFFFB2", "#0000FF", "#d4271e", "lightgreen", "pink"))
+plot(rasters_tm[[35]], col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e", "chartreuse", "pink"))
 
 
-## Years of change
-base_path = here("outputs", "data", "MapBiomas", "Rasters_years_forest_change")
+## Forest age
+base_path = here("outputs", "data", "MapBiomas", "Rasters_forest_age")
 raster_files = list.files(base_path, pattern = "\\.tif$", full.names = TRUE)
-lulcc_years = lapply(raster_files, terra::rast)
-plot(lulcc_years[[1]])
+
+# Extract years
+years_age = stringr::str_extract(basename(raster_files), "(?<!\\d)\\d{4}(?!\\d)")
+# Create a dataframe to link files and years
+raster_df = data.frame(file = raster_files, years_age = as.numeric(years_age)) %>%
+  dplyr::arrange(years_age)
+# Load rasters in chronological order
+rasters_forest_age = lapply(raster_df$file, terra::rast)
+years_age = raster_df$years_age
+# Check
+for (i in seq_along(rasters_forest_age)) {
+  cat("Year", years_age[i], " → raster name:", basename(raster_df$file[i]), "\n")
+}
+plot(rasters_forest_age[[36]])
+
+## Forest status
+base_path = here("outputs", "data", "MapBiomas", "Rasters_reclass_forest_cat")
+raster_files = list.files(base_path, pattern = "\\.tif$", full.names = TRUE)
+
+# Extract years
+years_for_cat = stringr::str_extract(basename(raster_files), "(?<!\\d)\\d{4}(?!\\d)")
+# Create a dataframe to link files and years
+raster_df = data.frame(file = raster_files, years_for_cat = as.numeric(years_for_cat)) %>%
+  dplyr::arrange(years_for_cat)
+# Load rasters in chronological order
+rasters_forest_status = lapply(raster_df$file, terra::rast)
+years_for_cat = raster_df$years_for_cat
+# Check
+for (i in seq_along(rasters_forest_status)) {
+  cat("Year", years_for_cat[i], " → raster name:", basename(raster_df$file[i]), "\n")
+}
+plot(rasters_forest_status[[36]])
 
 ## Slope
 slope_r = terra::rast(here("data", "geo", "TOPODATA", "work", "slope_bbox.tif"))
 plot(slope_r)
+
+## WorldClim
 
 ### Import vectors -----
 ## CAR (Properties)
@@ -87,6 +121,10 @@ roads = terra::vect(here("data", "geo", "OSM", "work", "Highway_OSM_clean.shp"))
 roads = terra::project(roads, "EPSG:31983")
 plot(roads)
 roads_sf = sf::st_as_sf(roads)
+br101 = roads_sf %>% 
+  dplyr::filter(ref == "BR-101")
+plot(rasters_reclass[[36]], col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e"))
+plot(st_geometry(br101), col="#ff3399", add=TRUE)
 
 ## Rivers
 rivers = terra::vect(here("data", "geo", "OSM", "work", "Waterway_OSM_AMLD_clean.shp"))
@@ -104,42 +142,19 @@ plot(urb_centers)
 plot(urb, add=TRUE)
 urb_centers_sf = sf::st_as_sf(urb_centers)
 
-## Poco das Antas
-pda = terra::vect(here("data", "geo", "MMA", "protected_areas", "ucs", "poco_das_antas.shp"))
-pda = terra::project(pda, "EPSG:31983")
-plot(pda)
-pda_sf = sf::st_as_sf(pda)
-
-## Uniao
-uniao = terra::vect(here("data", "geo", "MMA", "protected_areas", "ucs", "uniao.shp"))
-uniao = terra::project(uniao, "EPSG:31983")
-plot(uniao)
-uniao_sf = sf::st_as_sf(uniao)
-
 ## APA mld
 apa_mld = terra::vect(here("data", "geo", "MMA", "protected_areas", "ucs", "apa_mld.shp"))
 apa_mld = terra::project(apa_mld, "EPSG:31983")
 plot(apa_mld)
 apa_mld_sf = sf::st_as_sf(apa_mld)
 
-## Merge Poco das Antas and Uniao
-public_reserves_sf = dplyr::bind_rows(uniao_sf, pda_sf)
-plot(st_geometry(public_reserves_sf))
-
 
 
 ### Helpers -----------
 # Rasterize vector -> binary raster (0/NA or 1/0 depending on background)
-# Takes a vector layer (sf_obj) and burns it onto a template raster
-# Cells covered by the vector get value
-# All other cells get background
-# If the vector is empty or NULL, returns a raster filled entirely with background
-rasterize_binary <- function(sf_obj, template_rast, value, background) {
-  if (is.null(sf_obj) || nrow(sf_obj) == 0) {
-    r <- rast(template_rast)
-    values(r) <- background
-    return(r)
-  }
+# Takes a vector layer (sf_obj) and rasterizes it using a template raster
+# Cells covered by the vector get value ; all other cells get background
+rasterize_binary = function(sf_obj, template_rast, value, background) {
   terra::rasterize(terra::vect(sf_obj), template_rast,
                    field = value, background = background)
 }
@@ -149,11 +164,11 @@ rasterize_binary <- function(sf_obj, template_rast, value, background) {
 # Always returns one numeric value per coordinate
 # If the raster is NULL, returns all NAs
 # Strips out IDs from terra::extract()
-extract_values <- function(r, coords_df) {
+extract_values = function(r, coords_df) {
   if (is.null(r)) {
     return(rep(NA_real_, nrow(coords_df)))
   }
-  out <- terra::extract(r, coords_df, ID = FALSE) # ID = FALSE returns only the extracted values
+  out = terra::extract(r, coords_df, ID = FALSE) # ID = FALSE returns only the extracted values
   if (is.data.frame(out)) {
     return(as.numeric(out[[1]]))
   }
@@ -164,65 +179,182 @@ extract_values <- function(r, coords_df) {
 # Rationale:
 # The workflow starts from rasters_tm[[35]], a raster identifying all cells that experienced at least one land-use/land-cover (LULC) change event during the study period. These “changed cells” form the core sample on which all covariates will be calculated.
 # For each event row, the pipeline computes a set of covariates that describe biophysical, legal, and landscape-context characteristics of the cell at the time of its change. All covariates are extracted or computed dynamically with respect to the event year.
-# Dataset A: reforested (6) cells + a random sample of intact cells (value = 4 in rasters_tm). Sample must match the number of 6-cells per year.
-# Dataset B: deforested (7) cells + a random sample of intact cells (value = 1 in rasters_tm). Sample must match the number of 7-cells per year.
+# Dataset A: reforested cells + a random sample of intact cells (agricultural cells in rasters_tm). Sample must match the number of reforested cells per year.
+# Dataset B: deforested cells + a random sample of intact cells (intact forests in rasters_tm). Sample must match the number of deforested cells per year.
 
 #### Parameters ----------
-change_codes = c(6,7) # reforest=6, deforest=7 in rasters_tm
-template_rast = rasters_reclass[[35]]  # general template/resolution/extent
-roads_year_col <- "date_crea" # column name in roads_sf with creation year (may be date/character/numeric)
-
-#### SECTION 0 — Identify changed cells (cells with >=1 change) --------
-cat("\nSECTION 0: Identify changed cells\n")
-
-# Use last raster in the list to get all changes
-cumulative_mask <- rasters_tm[[length(rasters_tm)]]
-
-# Get indices of cells with reforest/deforest events
-changed_cell_ids <- which(values(cumulative_mask) %in% change_codes)
-
-# Sanity check
-stopifnot(length(changed_cell_ids) > 0)
-
-cat("Changed cells:", length(changed_cell_ids), "\n")
+template_rast = rasters_reclass[[35]] # general template/resolution/extent
+roads_year_col = "date_crea" # column name in roads_sf with creation year (may be date/character/numeric)
 
 
-#### SECTION 1 — Build master table of all change events --------
-# For each changed cell, read the 10 lulcc_years rasters and convert to long table
+#### SECTION 1 — Build table of all change events --------
+# We create a table with: the cell id, the coordinates, the type of change (deforestation, reforestation), the previous land use, the following land use, the year of change
 cat("\nSECTION 1: Build event table\n")
 
-# extract values (always returns a matrix)
-vals_mat <- do.call(cbind,lapply(lulcc_years, function(r) terra::values(r)[changed_cell_ids, drop = FALSE]))
-colnames(vals_mat) <- seq_len(ncol(vals_mat))
-head(vals_mat)
+## Example
+# Select two rasters
+prev = values(rasters_reclass[[1]])
+curr = values(rasters_reclass[[2]])
 
-# build long event table
-dt_long <- as.data.frame(vals_mat) %>% 
-  dplyr::mutate(cell_id = changed_cell_ids) %>% 
-  tidyr::pivot_longer(cols = -cell_id,
-                      names_to = "change_rank",
-                      values_to = "change_year",
-                      values_drop_na = TRUE) %>% 
-  dplyr::mutate(change_rank = as.integer(change_rank))
-head(dt_long)
+# Work on non-NA cells
+ok = !is.na(prev) & !is.na(curr)
+head(ok)
 
-# add coordinates
-xy <- terra::xyFromCell(template_rast, dt_long$cell_id)
-dt_long <- dt_long %>% dplyr::mutate(x = xy[, 1], y = xy[, 2])
-head(dt_long)
+# Detect deforested cells (forest to other land use)
+idx_def = which(ok & prev == 1 & curr %in% 2:6)
+head(idx_def)
+coords_def = raster::xyFromCell(rasters_reclass[[2]], idx_def)
+head(coords_def)
+# Create a data.frame
+defor_1989_1990 = data.frame(cell_id = idx_def,
+                             year = years_lulc[2],
+                             from = 1,
+                             to = curr[idx_def],
+                             change_type = 8L,
+                             x = coords_def[,1],
+                             y = coords_def[,2])
 
-# add change code and type from cumulative mask
-dt_long <- dt_long %>% 
-  dplyr::mutate(change_code = terra::values(cumulative_mask)[cell_id],
-                change_type = dplyr::case_when(change_code == 6 ~ "reforest",
-                                               change_code == 7 ~ "deforest",
-                                               TRUE ~ NA_character_))
-head(dt_long)
+# Check
+# Center coordinates
+x_center = 778151.2
+y_center = 7508862.8
 
-cat("Number of distinct cells:", dplyr::n_distinct(dt_long$cell_id), "\n")
-cat("Events (of reforestation or deforestation):", nrow(dt_long), "\n")
+# Zoom buffer (in same units as raster CRS)
+buffer_size = 2000
+zoom_ext = ext(
+  x_center - buffer_size, x_center + buffer_size,
+  y_center - buffer_size, y_center + buffer_size
+)
+
+# Crop the raster to the zoom window
+cumul_crop = crop(rasters_tm[[1]], zoom_ext)
+
+# Plot the cropped raster
+plot(cumul_crop, main = "Cumulative Raster 1990 (Zoomed)", col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#d4271e", "chartreuse", "pink"))
+
+# Add deforestation points within the same window
+# Filter points inside the zoom window
+points_zoom = subset(defor_1989_1990,
+                     x >= xmin(zoom_ext) & x <= xmax(zoom_ext) & y >= ymin(zoom_ext) & y <= ymax(zoom_ext))
+
+points(points_zoom$x, points_zoom$y, col = "red", pch = 20, cex = 0.5)
 
 
+## This function detects each forest change event between pairs of rasters and store them in a table
+# Therefore: if a cell changed twice, it could appear twice
+detect_forest_transitions = function(rasters, years) {
+
+  stopifnot(length(rasters) == length(years))
+
+  events = list()
+
+  # Loop over consecutive years (t-1 → t)
+  for (i in 2:length(rasters)) {
+
+    message("Detecting transitions: ", years[i - 1], " → ", years[i], " (raster ", i - 1, " → ", i, ")")
+
+    prev = values(rasters[[i - 1]])
+    curr = values(rasters[[i]])
+
+    # Work on non-NA cells
+    ok = !is.na(prev) & !is.na(curr)
+
+    # Detect deforested cells (forest to other land use)
+    idx_def = which(ok & prev == 1 & curr %in% 2:6)
+    if (length(idx_def) > 0) {
+      coords_def = raster::xyFromCell(rasters[[i]], idx_def)
+      # Append the new data.frame as the next element in the events list
+      events[[length(events) + 1]] =
+        data.frame(cell_id = idx_def,
+                   year = years[i],
+                   from = 1,
+                   to = curr[idx_def],
+                   change_type = 8L,
+                   x = coords_def[,1],
+                   y = coords_def[,2])
+      }
+
+    # Detect reforested cells (other land use to forest)
+    idx_ref = which(ok & prev %in% 2:6 & curr == 1)
+    if (length(idx_ref) > 0) {
+      coords_ref = raster::xyFromCell(rasters[[i]], idx_ref)
+      # Append the new data.frame as the next element in the events list
+      events[[length(events) + 1]] =
+        data.frame(cell_id = idx_ref,
+                   year = years[i],
+                   from = prev[idx_ref],
+                   to = 1,
+                   change_type = 7L,
+                   x = coords_ref[,1],
+                   y = coords_ref[,2])
+    }
+  }
+
+  changes = dplyr::bind_rows(events)
+  changes
+}
+
+# Apply
+changes = detect_forest_transitions(rasters = rasters_reclass, years = years_lulc)
+
+# Mutate change order
+changes = changes %>%
+  dplyr::arrange(cell_id, year) %>%
+  dplyr::group_by(cell_id) %>%
+  dplyr::mutate(change_order = dplyr::row_number()) %>%
+  dplyr::ungroup()
+
+# Inspect results
+head(changes)
+changes[["year"]] == 1990 # To check that changes between baseline (1989) and the right-up foloowing year were taken into account (TRUE means changes occurred between those years)
+
+# Results
+cat("Changed cells:", length(changes$cell_id), "\n")
+cat("Unique changed cells:", length(unique(changes$cell_id)), "\n")
+f = terra::freq(rasters_tm[[35]])
+cat("... Now check that it equals the total number of cells that have underwent reforestation or deforestation in cumulative rasters, being:", sum(f$count[f$value %in% c(7,8)]))
+
+# Some statistics
+# Types of reforestation
+reforest_summary = changes %>% 
+  dplyr::filter(change_type == 7) %>% 
+  dplyr::group_by(from, to) %>% 
+  dplyr::summarise(n=dplyr::n()) %>% 
+  dplyr::ungroup() %>% 
+  dplyr::mutate(prop = n * 100 / sum(n))
+
+cat("Reforestation events:\n")
+for(i in 1:nrow(reforest_summary)) {
+  cat(sprintf("- %d cells changed from %d to %d (%.1f%% of all reforestation events)\n",
+              reforest_summary$n[i],
+              reforest_summary$from[i],
+              reforest_summary$to[i],
+              reforest_summary$prop[i]))
+}
+
+# Types of deforestation
+deforest_summary = changes %>% 
+  dplyr::filter(change_type == 8) %>% 
+  dplyr::group_by(from, to) %>% 
+  dplyr::summarise(n=dplyr::n()) %>% 
+  dplyr::ungroup() %>% 
+  dplyr::mutate(prop = n * 100 / sum(n))
+
+cat("Deforestation events:\n")
+for(i in 1:nrow(deforest_summary)) {
+  cat(sprintf("- %d cells changed from %d to %d (%.1f%% of all deforestation events)\n",
+              deforest_summary$n[i],
+              deforest_summary$from[i],
+              deforest_summary$to[i],
+              deforest_summary$prop[i]))
+}
+
+# Maximum number of LULCC per pixel
+changes %>%
+  dplyr::count(cell_id, name = "n_changes") %>%
+  dplyr::count(n_changes, name = "n_cells") %>%
+  dplyr::arrange(n_changes) %>% 
+  dplyr::mutate(cum_n = cumsum(n_cells))
 
 #### SECTION 2 — Select controls ---------
 # We select controls, i.e., cells that were never deforested nor reforested during the study period
@@ -231,33 +363,45 @@ cat("Events (of reforestation or deforestation):", nrow(dt_long), "\n")
 
 cat("\nSECTION 2: Selecting intact control cells\n")
 
-# Step 1: Identify intact cells from the LAST year only
-last_rast <- rasters_tm[[length(rasters_tm)]]
-intact_ids <- which(terra::values(last_rast) == 1)  # intact forest
-length(intact_ids)
+# Step 1: Select relevant reforestation/deforestation events
+# We remove cells that have changes more than 3 times
+changes_subset = changes %>% 
+  dplyr::group_by(cell_id) %>% 
+  dplyr::filter(dplyr::n() <= 3) %>% 
+  dplyr::ungroup()
+max(changes_subset$change_order)
+changes_subset %>% 
+  dplyr::summarise(n=dplyr::n_distinct(cell_id))
+# We subset reforested events to agricultural pixels becoming forests
+# We subset deforested events to forests becoming agricultural pixels
+changes_subset = changes_subset %>% 
+  dplyr::filter((from == 4 & to == 1) | (from == 1 & to == 4))
 
-# Step 2: Count changed cells of each type per year
-events_per_year <- dt_long %>%
-  dplyr::count(change_year, change_code, name = "N")
-colnames(events_per_year)[3] <- "n_events"
+# Step 2: Identify intact cells from the LAST year only
+last_rast = rasters_tm[[length(rasters_tm)]]
+intact_for = which(terra::values(last_rast) == 1) # intact forest
+intact_agri = which(terra::values(last_rast) == 4) # intact agriculture
+
+# Are there more pixels of intact forests than of deforested cells?
+length(intact_for) > length(changes$change_type[[8]])
+# Are there more pixels of agriculture than of reforested cells?
+length(intact_agri) > length(changes$change_type[[7]])
+
+# Step 3: Count changed cells of each type per year
+events_per_year = changes_subset %>%
+  dplyr::count(year, change_type, name = "n_events")
 head(events_per_year)
 
-# Step 3: Sampling function
-sample_intact <- function(n_needed){
-  if (length(intact_ids) < n_needed) {
-    warning("Not enough intact cells — taking all available.")
-    return(intact_ids)
-  }
-  sample(intact_ids, n_needed)
-}
+# Step 3: Select intact controls for reforest
+# Number of cells to be selected each year
+reforest_events = events_per_year %>%
+  dplyr::filter(change_type == 7)
 
-# Step 4: Select intact controls for reforest (=6)
-reforest_events <- events_per_year %>%
-  dplyr::filter(change_code == 6)
-reforest_controls <- reforest_events %>%
-  dplyr::group_by(change_year) %>%
-  dplyr::summarise(sampled_cells = list(sample_intact(n_events)),
-                   .groups = "drop")
+# Random sample of raster cells
+terra::spatSample(rasters_tm[[1]], size=11890, method="random", xy=TRUE, na.rm=TRUE)
+
+
+
 
 reforest_controls_dt <- reforest_controls %>%
   tidyr::unnest(sampled_cells) %>%

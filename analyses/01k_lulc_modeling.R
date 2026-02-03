@@ -78,27 +78,7 @@ data_defor_pixel %>%
   dplyr::summarise(across(starts_with("area"), list(mean = mean)))
 
 #### VIF ---------
-# Select predictors
-predictors = data_defor_pixel %>% 
-  dplyr::select(change_code, in_car:area_m2_class_5) %>%
-  dplyr::select(-c(in_rl, legal_status))
-predictors = predictors %>% dplyr::select(-area_m2_class_3) # Remove problematic variable and rerun the VIF
-# Run model
-model <- lm(change_code ~ ., data = predictors)
-# Extract VIF
-vif_values <- vif(model)
-# Visualizing VIF
-barplot(vif_values, col = "skyblue", main = "Variance Inflation Factor (VIF)")
-vif_values
 
-# Identify multicollinearity
-cor(data_defor_pixel$area_m2_class_1, data_defor_pixel$area_m2_class_3)
-cor(data_defor_pixel$change_code, data_defor_pixel$area_m2_class_1)
-cor(data_defor_pixel$change_code, data_defor_pixel$area_m2_class_3)
-
-# Remove covariate based on VIF
-data_defor_pixel = data_defor_pixel %>% 
-  dplyr::select(-area_m2_class_3)
 
 #### Extract 20% of data -------
 # Split the dataset by change_type

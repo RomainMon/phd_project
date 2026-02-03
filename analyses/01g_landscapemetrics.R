@@ -49,25 +49,26 @@ years = raster_df$year
 for (i in seq_along(rasters_reclass_forest_cat)) {
   cat("Year", years[i], " → raster name:", basename(raster_df$file[i]), "\n")
 }
-plot(rasters_reclass_forest_cat[[36]])
+plot(rasters_reclass_forest_cat[[36]], col = c("#32a65e", "#006400", "#CDAD00", "#C1FFC1", "#CDCDC1"))
+
 
 #### With forest restoration activities --------
 base_path = here("outputs", "data", "MapBiomas", "Rasters_reclass_cons_cat")
 raster_files = list.files(base_path, pattern = "\\.tif$", full.names = TRUE)
 
 # Extract years
-years = stringr::str_extract(basename(raster_files), "(?<!\\d)\\d{4}(?!\\d)")
+years_cons = stringr::str_extract(basename(raster_files), "(?<!\\d)\\d{4}(?!\\d)")
 # Create a dataframe to link files and years
-raster_df = data.frame(file = raster_files, year = as.numeric(years)) %>%
-  dplyr::arrange(year)
+raster_df = data.frame(file = raster_files, years_cons = as.numeric(years_cons)) %>%
+  dplyr::arrange(years_cons)
 # Load rasters in chronological order
 rasters_reclass_cons_cat = lapply(raster_df$file, terra::rast)
-years = raster_df$year
+years_cons = raster_df$years_cons
 # Check
-for (i in seq_along(rasters_reclass_forest_cat)) {
-  cat("Year", years[i], " → raster name:", basename(raster_df$file[i]), "\n")
+for (i in seq_along(rasters_reclass_cons_cat)) {
+  cat("Year", years_cons[i], " → raster name:", basename(raster_df$file[i]), "\n")
 }
-plot(rasters_reclass_cons_cat[[36]])
+plot(rasters_reclass_cons_cat[[21]], col = c("#FF7F00", "#EE30A7", "darkred"))
 
 
 #### MSPA rasters (with corridors) -------
@@ -106,7 +107,7 @@ years_tm = raster_df$years_tm
 for (i in seq_along(rasters_tm)) {
   cat("Year", years_tm[i], " → raster name:", basename(raster_df$file[i]), "\n")
 }
-plot(rasters_tm[[35]], col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e", "lightgreen", "pink"))
+plot(rasters_tm[[35]], col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e", "chartreuse", "pink"))
 
 
 #### Forest age rasters -------
@@ -125,22 +126,7 @@ years = raster_df$year
 for (i in seq_along(rasters_forest_age)) {
   cat("Year", years[i], " → raster name:", basename(raster_df$file[i]), "\n")
 }
-plot(rasters_forest_age[[36]])
-
-
-### Import vectors -----
-# Regions Name
-regions = terra::vect(here("data", "geo", "APonchon", "GLT", "RegionsName.shp"))
-regions = terra::project(regions, "EPSG:31983")
-regions_sf = sf::st_as_sf(regions)
-plot(regions_sf)
-# BBOX
-bbox = terra::vect(here("data", "geo", "BBOX", "sampling_units_bbox_31983.shp"))
-bbox_sf = sf::st_as_sf(bbox)
-minbbox = terra::vect(here("data", "geo", "BBOX", "sampling_units_minbbox_buffer5km.shp"))
-plot(minbbox)
-plot(regions, add=TRUE)
-minbbox_sf = sf::st_as_sf(minbbox)
+plot(rasters_forest_age[[36]], col = c("#AFC0F1", "#BEC3EB","#CCC7E6", "#EACEDB"))
 
 
 ### Download Makurhini -----
@@ -157,7 +143,7 @@ minbbox_sf = sf::st_as_sf(minbbox)
 # Check landscape validity (for landscape metrics)
 check_landscape(rasters_reclass[[36]])
 check_landscape(rasters_reclass_forest_cat[[36]])
-check_landscape(rasters_reclass_cons_cat[[36]])
+check_landscape(rasters_reclass_cons_cat[[21]])
 check_landscape(rasters_mspa[[36]])
 check_landscape(rasters_tm[[35]])
 check_landscape(rasters_forest_age[[36]])
@@ -184,12 +170,6 @@ merge_classes = function(r, year, classes_to_merge, new_value) {
   
   return(r)
 }
-
-# example:
-r_example = merge_classes(rasters_reclass_forest_cat[[36]], years[[36]], classes_to_merge = c(2,3,4,5), new_value = 99)
-plot(r_example)
-unique(values(r_example))
-freq(r_example)
 
 # Function to compute class-level metrics for all classes
 # This function computes landscapemetrics at the class-level for a list of chronological rasters
@@ -270,10 +250,6 @@ plot(rasters_reclass_forest_cat[[36]])
 freq(rasters_reclass_forest_cat[[36]])
 raster_forest_cat_2024 = rasters_reclass_forest_cat[[36]]
 
-# First, we remove matrix values
-raster_forest_cat_2024[raster_forest_cat_2024 %in% c(0, 2, 3, 4, 5, 6)] <- NA
-plot(raster_forest_cat_2024)
-
 # compute metrics
 forest_cat_metrics = compute_class_metrics(raster_forest_cat_2024, 2024, metrics_to_compute = c("lsm_c_ca", "lsm_c_pland"))
 
@@ -287,12 +263,12 @@ summary(forest_cat_metrics)
 
 
 ##### Conservation activities --------
-freq(rasters_reclass_cons_cat[[36]])
+freq(rasters_reclass_cons_cat[[21]])
 
 # compute metrics
 cons_cat_metrics = purrr::map2_dfr(
   rasters_reclass_cons_cat,
-  years,
+  years_cons,
   ~ compute_class_metrics(.x, .y, metrics_to_compute = c("lsm_c_ca", "lsm_c_pland", "lsm_c_np"))
 )
 
@@ -305,7 +281,7 @@ cons_cat_metrics = cons_cat_metrics %>%
 summary(cons_cat_metrics)
 
 
-##### Evolution of deforestation and reforestation --------
+##### Deforestation and reforestation --------
 # First, we merge all matrix land uses
 # vector of classes to merge:
 matrix_classes = c(2,3,4,5,6)
@@ -314,7 +290,7 @@ matrix_classes = c(2,3,4,5,6)
 rasters_forest_vs_matrix = purrr::map2(
   rasters_tm,
   years_tm,
-  ~ merge_classes(.x, .y, matrix_classes, new_value = 99)
+  ~ merge_classes(.x, .y, matrix_classes, new_value = 0)
 )
 freq(rasters_forest_vs_matrix[[35]])
 
@@ -334,24 +310,14 @@ defor_refor_metrics = defor_refor_metrics %>%
 summary(defor_refor_metrics)
 
 
-##### Evolution of forest age --------
-freq(rasters_forest_age[[36]])
-# First, we remove the matrix
-for (i in seq_along(rasters_forest_age)) {
-  r <- rasters_forest_age[[i]]
-  r[r == 0] <- NA
-  rasters_forest_age[[i]] <- r
-}
-
-# Check
-plot(rasters_forest_age[[36]])
+##### Forest age --------
 freq(rasters_forest_age[[36]])
 
 # compute metrics
 forest_age_metrics = purrr::map2_dfr(
   rasters_forest_age,
   years,
-  ~ compute_class_metrics(.x, .y, metrics_to_compute = c("lsm_c_ca", "lsm_c_pland"))
+  ~ compute_class_metrics(.x, .y, metrics_to_compute = c("lsm_c_ca", "lsm_c_pland", "lsm_c_np"))
 )
 
 # to wide format
@@ -608,7 +574,7 @@ forest_class_metrics_FFI = forest_class_metrics_ED %>%
     ed_norm = (ed - min(ed, na.rm = TRUE)) / (max(ed, na.rm = TRUE) - min(ed, na.rm = TRUE)),
     pd_norm = (pd - min(pd, na.rm = TRUE)) / (max(pd, na.rm = TRUE) - min(pd, na.rm = TRUE)),
     area_mn_norm = 1 - (area_mn - min(area_mn, na.rm = TRUE)) / (max(area_mn, na.rm = TRUE) - min(area_mn, na.rm = TRUE)),
-    # Composite fragmentation index
+    # Forest fragmentation index
     FFI = (ed_norm + pd_norm + area_mn_norm) / 3
   )
 
@@ -628,6 +594,6 @@ write.csv(all_lulc_classes, file = file.path(base_path, "all_lulc_classes_bbox_1
 write.csv(forest_class_metrics_final, file = file.path(base_path, "forest_class_metrics_bbox_1989_2024.csv"), row.names=FALSE)
 write.csv(forest_core_corridor_metrics_final, file = file.path(base_path, "forest_core_corridors_metrics_bbox_1989_2024.csv"), row.names=FALSE)
 write.csv(forest_cat_metrics, file = file.path(base_path, "forest_cat_metrics_bbox_2024.csv"), row.names=FALSE)
-write.csv(cons_cat_metrics, file = file.path(base_path, "cons_cat_metrics_bbox_1989_2024.csv"), row.names=FALSE)
+write.csv(cons_cat_metrics, file = file.path(base_path, "cons_cat_metrics_bbox_2004_2024.csv"), row.names=FALSE)
 write.csv(forest_age_metrics, file = file.path(base_path, "forest_age_metrics_bbox_1989_2024.csv"), row.names=FALSE)
 write.csv(defor_refor_metrics, file = file.path(base_path, "defor_refor_metrics_bbox_1989_2024.csv"), row.names=FALSE)

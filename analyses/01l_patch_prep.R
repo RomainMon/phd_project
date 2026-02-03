@@ -48,6 +48,22 @@ freq(rasters_dilate[[36]])
 
 
 ### Compute patch-level metrics   ---------
+# Import Regions
+regions = terra::vect(here("data", "geo", "APonchon", "GLT", "RegionsName.shp"))
+regions = terra::project(regions, "EPSG:31983")
+regions_sf = sf::st_as_sf(regions)
+plot(regions_sf)
+
+# Import bounding box
+# BBOX
+bbox = terra::vect(here("data", "geo", "BBOX", "sampling_units_bbox_31983.shp"))
+# Create min bbox
+bbox_sf = sf::st_as_sf(bbox)
+minbbox = terra::vect(here("data", "geo", "BBOX", "sampling_units_minbbox_buffer5km.shp"))
+plot(minbbox)
+plot(regions, add=TRUE)
+minbbox_sf = sf::st_as_sf(minbbox)
+
 
 #### On a single raster -----
 ##### Patch selection (core only) ----------
