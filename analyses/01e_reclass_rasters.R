@@ -424,14 +424,6 @@ points(xy[1], xy[2], pch = 16, col = "red")
 
 par(mfrow = c(1, 1))
 
-# Temporal trajectory
-
-plot(years, mat_before[cell_id, ], type = "b",
-     ylim = range(c(mat_before[cell_id, ], mat_after[cell_id, ]), na.rm = TRUE),
-     xlab = "Year", ylab = "Class", main = paste("Cell", cell_id, "- Temporal filter"))
-lines(years, mat_after[cell_id, ], type = "b", col = "red")
-legend("topright", c("Before", "After"), col = c("black", "red"), lty = 1)
-
 ##### Step 3 – Spatial filter -----
 message("Step 3: Removing isolated cells...")
 

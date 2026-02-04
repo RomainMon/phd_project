@@ -294,7 +294,7 @@ freq(rasters[[1]])
 freq(age_rasters[[1]])
 plot(age_rasters[[1]], main = years[1])
 plot(age_rasters[[2]], main = years[2])
-freq(age_rasters[[2]]) # there are X forest cells whose age is 3 (= new forests)
+freq(age_rasters[[2]]) # there are X forest cells whose age is 3 (= new forests of age 3)
 freq(reclass_cumul_trans[[1]]) # there should also be X forest cells in category "reforestation" (new forests)
 plot(age_rasters[[36]], main = years[36])
 freq(age_rasters[[36]]) # there are X forest cells whose age is 38 (= stable forests)
@@ -333,7 +333,7 @@ for (i in seq_along(age_rasters)) {
 
 # Quick check
 plot(age_rasters[[1]])
-plot(age_rasters_cat[[1]])
+plot(age_rasters_cat[[1]]) # Initial forests classified as "Mature"
 freq(age_rasters[[1]])
 freq(age_rasters_cat[[1]])
 plot(age_rasters_cat[[36]])
