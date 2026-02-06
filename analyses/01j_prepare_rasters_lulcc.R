@@ -13,8 +13,8 @@ library(stringr)
 library(landscapemetrics)
 library(ggplot2)
 library(cowplot)
+library(sp)
 library(exactextractr)
-library(geodata)
 
 ### Import rasters -------
 
@@ -96,7 +96,67 @@ plot(rasters_forest_status[[36]])
 slope_r = terra::rast(here("data", "geo", "TOPODATA", "work", "slope_bbox.tif"))
 plot(slope_r)
 
-## WorldClim
+### WorldClim
+## Precipitations (sum)
+base_path = here("outputs", "data", "WorldClim", "prec")
+raster_files = list.files(base_path, pattern = "^prec_(sum)_\\d{4}_bbox\\.tif$", full.names = TRUE)
+
+# Extract years
+years_climate = stringr::str_extract(basename(raster_files), "(?<!\\d)\\d{4}(?!\\d)")
+
+# Create a dataframe to link files and years
+raster_df = data.frame(file = raster_files, years_climate = as.numeric(years_climate)) %>%
+  dplyr::arrange(years_climate)
+
+# Load rasters in chronological order
+rasters_prec_sum = lapply(raster_df$file, terra::rast)
+years_climate = raster_df$years_climate
+# Check
+for (i in seq_along(rasters_prec_sum)) {
+  cat("Year", years_climate[i], " → raster name:", basename(raster_df$file[i]), "\n")
+}
+plot(rasters_prec_sum[[36]])
+
+## Tmin (mean)
+base_path = here("outputs", "data", "WorldClim", "tmin")
+raster_files = list.files(base_path, pattern = "^tmin_(mean)_\\d{4}_bbox\\.tif$", full.names = TRUE)
+
+# Extract years
+years_climate = stringr::str_extract(basename(raster_files), "(?<!\\d)\\d{4}(?!\\d)")
+
+# Create a dataframe to link files and years
+raster_df = data.frame(file = raster_files, years_climate = as.numeric(years_climate)) %>%
+  dplyr::arrange(years_climate)
+
+# Load rasters in chronological order
+rasters_tmin_mean = lapply(raster_df$file, terra::rast)
+years_climate = raster_df$years_climate
+# Check
+for (i in seq_along(rasters_tmin_mean)) {
+  cat("Year", years_climate[i], " → raster name:", basename(raster_df$file[i]), "\n")
+}
+plot(rasters_tmin_mean[[36]])
+
+## Tmin (max)
+base_path = here("outputs", "data", "WorldClim", "tmax")
+raster_files = list.files(base_path, pattern = "^tmax_(mean)_\\d{4}_bbox\\.tif$", full.names = TRUE)
+
+# Extract years
+years_climate = stringr::str_extract(basename(raster_files), "(?<!\\d)\\d{4}(?!\\d)")
+
+# Create a dataframe to link files and years
+raster_df = data.frame(file = raster_files, years_climate = as.numeric(years_climate)) %>%
+  dplyr::arrange(years_climate)
+
+# Load rasters in chronological order
+rasters_tmax_mean = lapply(raster_df$file, terra::rast)
+years_climate = raster_df$years_climate
+# Check
+for (i in seq_along(rasters_tmax_mean)) {
+  cat("Year", years_climate[i], " → raster name:", basename(raster_df$file[i]), "\n")
+}
+plot(rasters_tmax_mean[[36]])
+
 
 ### Import vectors -----
 ## CAR (Properties)
@@ -168,6 +228,7 @@ uniao = terra::project(uniao, "EPSG:31983")
 plot(uniao)
 # Merge
 pub_res = rbind(pda, tp, uniao)
+pub_res_sf = sf::st_as_sf(pub_res)
 plot(pub_res)
 
 ### Prepare the cell-based dataset -----
@@ -177,8 +238,10 @@ plot(pub_res)
 # Dataset A: reforested cells + a random sample of intact cells (agricultural cells in rasters_tm). Sample must match the number of reforested cells per year.
 # Dataset B: deforested cells + a random sample of intact cells (intact forests in rasters_tm). Sample must match the number of deforested cells per year.
 
+#### Parameters -----
+template_rast = rasters_reclass[[36]]
 
-#### SECTION 1 — Build table of all change events --------
+#### 1. Build table of all change events --------
 # We create a table with: the cell id, the coordinates, the type of change (deforestation, reforestation), the previous land use, the following land use, the year of change
 cat("\nSECTION 1: Build event table\n")
 
@@ -347,7 +410,7 @@ changes %>%
   dplyr::arrange(n_changes) %>% 
   dplyr::mutate(cum_n = cumsum(n_cells))
 
-#### SECTION 2 — Select controls ---------
+#### 2. Select controls ---------
 # We select controls, i.e., cells that were never deforested nor reforested during the study period
 # Using the last raster ensures that: controls are still intact at the end, controls never experienced LULCC, we avoid “false controls” that are intact early but changed later
 # Control cells were selected among pixels that remained intact throughout the entire study period, and were randomly sampled to match the number of events per year
@@ -367,13 +430,12 @@ changes_subset %>%
 changes_subset = changes_subset %>% 
   dplyr::filter((from == 4 & to == 1) | (from == 1 & to == 4))
 
-
-# Step 3: Count changed cells of each type per year
+# Step 2: Count changed cells of each type per year
 events_per_year = changes_subset %>%
   dplyr::count(year, type, name = "n_events")
 head(events_per_year)
 
-# Step 4: Select intact controls for reforestation
+# Step 3: Select intact controls for reforestation
 # Select the last cumulative raster (where intact cells are displayed)
 last_rast = rasters_tm[[length(rasters_tm)]]
 # Binary mask: intact agriculture only
@@ -422,7 +484,7 @@ plot(rasters_tm[[35]], col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000F
 points(controls_2024$x, controls_2024$y, pch = 20, col = "magenta", cex = 0.4)
 terra::extract(rasters_tm[[35]], controls_2024[, c("x", "y")]) # Check the value
 
-# Step 5: Select intact controls for deforestation
+# Step 4: Select intact controls for deforestation
 # Select the last cumulative raster (where intact cells are displayed)
 last_rast = rasters_tm[[length(rasters_tm)]]
 # Binary mask: intact forest only
@@ -471,7 +533,7 @@ controls_2023 = controls_forest_df %>%
   dplyr::filter(year == 2023)
 plot(rasters_tm[[35]], col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e", "chartreuse", "pink"))
 points(controls_2024$x, controls_2024$y, pch = 20, col = "magenta", cex = 0.4)
-points(controls_2023$x, controls_2023$y, pch = 20, col = "darkslategray1", cex = 0.4)
+points(controls_2023$x, controls_2023$y, pch = 20, col = "darkslategray1", cex = 0.4) # Check that controls differ each year
 terra::extract(rasters_tm[[35]], controls_2024[, c("x", "y")]) # Check the value
 
 # Summary
@@ -485,7 +547,7 @@ cat("Controls (reforestation):", nrow(controls_agri_df), "\n")
 
 
 
-#### SECTION 3 — Build final datasets for modelling -------
+#### 3. Build final datasets for modelling -------
 
 # Dataset A: Reforest events + control cells (intact agriculture)
 data_refor = dplyr::bind_rows(
@@ -513,10 +575,9 @@ cat("Dataset B rows:", nrow(data_defor), "\n")
 
 
 
-#### SECTION 4 — LEGAL STATUS --------
+#### 4. Legal status --------
 # This block overlays the pixel with the legal status
 # Each layer is rasterized onto the reference grid and intersected with event coordinates.
-template_rast = rasters_reclass[[36]]
 
 cat("\nSECTION 4: Legal status\n")
 
@@ -603,28 +664,29 @@ table(data_refor$type, data_refor$legal_status)
 cat("Legal status computed\n")
 
 
-#### SECTION 5 — INTERSECT WITH APA (binary) --------
+#### 5. Intersect with APA--------
 # A binary indicator (in_APA) is added for each event.
 
 cat("\nSECTION 5: APA intersection\n")
 
 # Rasterize
-apa_r <- rasterize_binary(apa_mld_sf, template_rast, value = 1, background = 0)
+apa_mld_r = terra::rasterize(apa_mld, template_rast, field = 1, background = 0)
+plot(apa_mld_r)
 
 ## Dataset A
-data_defor <- data_defor %>%
-  dplyr::mutate(in_APA = as.integer(extract_values(apa_r, coords_defor) == 1))
-table(data_defor$change_code, data_defor$in_APA)
+data_defor = data_defor %>%
+  dplyr::mutate(in_apa = terra::extract(apa_mld_r, data_defor[, c("x", "y")], ID = FALSE)[,1],)
+table(data_defor$type, data_defor$in_apa)
 
 ## Dataset B
-data_refor <- data_refor %>%
-  dplyr::mutate(in_APA = as.integer(extract_values(apa_r, coords_refor) == 1))
-table(data_refor$change_code, data_refor$in_APA)
+data_refor = data_refor %>%
+  dplyr::mutate(in_apa = terra::extract(apa_mld_r, data_refor[, c("x", "y")], ID = FALSE)[,1],)
+table(data_refor$type, data_refor$in_apa)
 
 cat("APA intersection done\n")
 
 
-#### SECTION 6 — DISTANCES --------
+#### 6. Distances --------
 # Distances are computed from the event cell to different spatial features, all projected to match the template raster.
 # For roads: For each event year, only roads whose construction year is ≤ the event year are retained.
 # For forest edges: For each event year, a forest/non-forest raster is taken from rasters_reclass. Using landscapemetrics, forest boundaries are computed with get_boundaries().
@@ -632,284 +694,302 @@ cat("APA intersection done\n")
 cat("\nSECTION 6: Distances\n")
 
 # Rasterize
-rivers_bin <- rasterize_binary(rivers_sf, template_rast, 1, NA)
-urban_bin <- rasterize_binary(urb_centers_sf, template_rast, 1, NA)
+# NB: Background is NA here
+rivers_bin = terra::rasterize(rivers_sf, template_rast, field = 1, background = NA)
+plot(rivers_bin, col="purple")
+urban_bin = terra::rasterize(urb_sf, template_rast, field = 1, background = NA)
+plot(urban_bin, col="purple")
 
-# Distances
-dist_rivers_r <- terra::distance(rivers_bin)
+## Distances to rivers and urban centers
+dist_rivers_r = terra::distance(rivers_bin)
 plot(dist_rivers_r)
-dist_urban_r <- terra::distance(urban_bin)
+dist_urban_r = terra::distance(urban_bin)
 plot(dist_urban_r)
 
 
-## Dataset A
-data_defor <- data_defor %>%
-  dplyr::mutate(dist_water_m = extract_values(dist_rivers_r, coords_defor),  # distance to rivers
-                dist_urban_m = extract_values(dist_urban_r, coords_defor))    # distance to urban centers
+# Dataset A
+data_defor = data_defor %>%
+  dplyr::mutate(dist_river_m = terra::extract(dist_rivers_r, data_defor[, c("x", "y")], ID = FALSE)[,1],
+                dist_urban_m = terra::extract(dist_urban_r, data_defor[, c("x", "y")], ID = FALSE)[,1],)
+# Dataset B
+data_refor = data_refor %>%
+  dplyr::mutate(dist_river_m = terra::extract(dist_rivers_r, data_refor[, c("x", "y")], ID = FALSE)[,1],
+                dist_urban_m = terra::extract(dist_urban_r, data_refor[, c("x", "y")], ID = FALSE)[,1],)
 
-# Distance to roads (dynamic)
+
+## Distance to roads (dynamic)
 # To account for creation dates of roads, we subset roads by date_crea ≤ change_year
 # We recompute distance year by year
 # We extract distances only for events in that year
 
 # Initialize column
-data_defor$dist_road_m <- NA_real_
+data_defor$dist_road_m = NA_real_
+data_refor$dist_road_m = NA_real_
 
-# Loop over years
-unique_years <- sort(unique(data_defor$change_year))
-for (yr in unique_years) {
+# Loop over years (deforestation dataset)
+unique_years = sort(unique(data_defor$year))
+for (yr in sort(unique(data_defor$year))) {
   
-  # indices of rows for this year
-  idx <- which(data_defor$change_year == yr)
+  idx = which(data_defor$year == yr)
   if (length(idx) == 0) next
   
-  # subset roads up to this year
-  roads_sub <- roads_sf[roads_sf[[roads_year_col]] <= yr, ]
+  # Roads existing up to that year
+  roads_sub = roads_sf[roads_sf$date_crea <= yr, ]
   
-  if (nrow(roads_sub) == 0) {
-    data_defor$dist_road_m[idx] <- NA_real_
-    next
-  }
+  if (nrow(roads_sub) == 0) next
   
-  # rasterize roads and compute distance raster
-  roads_bin <- rasterize_binary(roads_sub, template_rast, 1, NA)
-  dist_r <- terra::distance(roads_bin)
+  # Rasterize roads
+  roads_bin = terra::rasterize(roads_sub, template_rast, field = 1, background = NA)
   
-  # extract distances for the points of this year
-  extracted_dist <- extract_values(dist_r, data_defor[idx, c("x", "y")])
+  # Distance to nearest road
+  dist_r = terra::distance(roads_bin)
   
-  # assign distances directly to the subset of rows
-  data_defor$dist_road_m[idx] <- extracted_dist
+  # Extract distances
+  d = terra::extract(dist_r, data_defor[idx, c("x", "y")], ID = FALSE)[,1]
+  data_defor$dist_road_m[idx] = d
 }
 
+# Loop over years (reforestation dataset)
+unique_years = sort(unique(data_refor$year))
+for (yr in sort(unique(data_refor$year))) {
+  
+  idx = which(data_refor$year == yr)
+  if (length(idx) == 0) next
+  
+  # Roads existing up to that year
+  roads_sub = roads_sf[roads_sf$date_crea <= yr, ]
+  
+  if (nrow(roads_sub) == 0) next
+  
+  # Rasterize roads
+  roads_bin = terra::rasterize(roads_sub, template_rast, field = 1, background = NA)
+  
+  # Distance to nearest road
+  dist_r = terra::distance(roads_bin)
+  
+  # Extract distances
+  d = terra::extract(dist_r, data_refor[idx, c("x", "y")], ID = FALSE)[,1]
+  data_refor$dist_road_m[idx] = d
+}
 
-# Distance to forest edges (dynamic)
+## Distance to forest edges (dynamic)
 # To account for the forest dynamics through time, we select the corresponding LULC map from rasters_reclass
 # We build binary forest mask (r == 1)
 # We use landscapemetrics::get_boundaries() to get edge pixels
 # We compute Euclidean distance with terra::distance()
 
 # Initialize column
-data_defor <- data_defor %>%
-  dplyr::mutate(dist_edge_m = NA_real_)
+data_defor$dist_edge_m = NA_real_
+data_refor$dist_edge_m = NA_real_
 
-# Loop over years
-unique_years <- sort(unique(data_defor$change_year))
+# Loop over years (deforestation dataset)
+unique_years = sort(unique(data_defor$year))
 for (yr in unique_years) {
   
   cat("  Processing forest edges for year:", yr, "\n")
   
   # Identify rows for this year
-  idx <- which(data_defor$change_year == yr)
+  idx = which(data_defor$year == yr)
   if (length(idx) == 0) next
   
   # Get the forest raster for the corresponding year
-  # ASSUMPTION: rasters_reclass is ordered chronologically: 1989–2024
-  r_year <- rasters_reclass[[which(years_lulc == yr)]]
+  r_year = rasters_reclass[[which(years_lulc == yr)]]
   
   # Build binary forest mask: 1 = forest, NA = other
-  forest_mask <- r_year == 1
-  forest_mask[forest_mask != 1] <- NA
+  forest_bin = r_year
+  forest_bin[forest_bin != 1] = NA
   
   # Compute forest edges
-  edge_list <- landscapemetrics::get_boundaries(forest_mask, as_NA = TRUE)
-  edge_rast <- edge_list[[1]]
-  
-  # Skip if edges missing
-  if (all(is.na(terra::values(edge_rast)))) {
-    data_defor$dist_edge_m[idx] <- NA_real_
-    next
-  }
+  edge_list = landscapemetrics::get_boundaries(forest_mask, as_NA = TRUE)
+  edge_rast = edge_list[[1]]
   
   # Compute distance raster
-  dist_edge_r <- terra::distance(edge_rast)
+  dist_edge_r = terra::distance(edge_rast)
   
   # Extract distances for rows of this year
-  coords_year <- coords_defor[idx, ]
-  extracted_dist <- extract_values(dist_edge_r, coords_year)
-  
-  # Assign distances directly to the relevant rows
-  data_defor$dist_edge_m[idx] <- extracted_dist
+  d = terra::extract(dist_edge_r, data_defor[idx, c("x", "y")], ID = FALSE)[,1]
+  data_defor$dist_edge_m[idx] = d
 }
 
-data_defor %>% dplyr::group_by(change_code) %>% dplyr::summarise_at(vars(starts_with("dist")), mean, na.rm = TRUE)
-
-
-## Dataset B
-data_refor <- data_refor %>%
-  dplyr::mutate(dist_water_m = extract_values(dist_rivers_r, coords_refor),  # distance to rivers
-                dist_urban_m = extract_values(dist_urban_r, coords_refor))    # distance to urban centers
-
-# Distance to roads (dynamic)
-# To account for creation dates of roads, we subset roads by date_crea ≤ change_year
-# We recompute distance year by year
-# We extract distances only for events in that year
-
-# Initialize column
-data_refor$dist_road_m <- NA_real_
-
-# Loop over years
-unique_years <- sort(unique(data_refor$change_year))
-for (yr in unique_years) {
-  
-  # indices of rows for this year
-  idx <- which(data_refor$change_year == yr)
-  if (length(idx) == 0) next
-  
-  # subset roads up to this year
-  roads_sub <- roads_sf[roads_sf[[roads_year_col]] <= yr, ]
-  
-  if (nrow(roads_sub) == 0) {
-    data_refor$dist_road_m[idx] <- NA_real_
-    next
-  }
-  
-  # rasterize roads and compute distance raster
-  roads_bin <- rasterize_binary(roads_sub, template_rast, 1, NA)
-  dist_r <- terra::distance(roads_bin)
-  
-  # extract distances for the points of this year
-  extracted_dist <- extract_values(dist_r, data_refor[idx, c("x", "y")])
-  
-  # assign distances directly to the subset of rows
-  data_refor$dist_road_m[idx] <- extracted_dist
-}
-
-
-# Distance to forest edges (dynamic)
-# To account for the forest dynamics through time, we select the corresponding LULC map from rasters_reclass
-# We build binary forest mask (r == 1)
-# We use landscapemetrics::get_boundaries() to get edge pixels
-# We compute Euclidean distance with terra::distance()
-
-# Initialize column
-data_refor <- data_refor %>%
-  dplyr::mutate(dist_edge_m = NA_real_)
-
-# Loop over years
-unique_years <- sort(unique(data_refor$change_year))
+# Loop over years (reforestation dataset)
+unique_years = sort(unique(data_refor$year))
 for (yr in unique_years) {
   
   cat("  Processing forest edges for year:", yr, "\n")
   
   # Identify rows for this year
-  idx <- which(data_refor$change_year == yr)
+  idx = which(data_refor$year == yr)
   if (length(idx) == 0) next
   
   # Get the forest raster for the corresponding year
-  # ASSUMPTION: rasters_reclass is ordered chronologically: 1989–2024
-  r_year <- rasters_reclass[[which(years_lulc == yr)]]
+  r_year = rasters_reclass[[which(years_lulc == yr)]]
   
   # Build binary forest mask: 1 = forest, NA = other
-  forest_mask <- r_year == 1
-  forest_mask[forest_mask != 1] <- NA
+  forest_bin = r_year
+  forest_bin[forest_bin != 1] = NA
   
   # Compute forest edges
-  edge_list <- landscapemetrics::get_boundaries(forest_mask, as_NA = TRUE)
-  edge_rast <- edge_list[[1]]
-  
-  # Skip if edges missing
-  if (all(is.na(terra::values(edge_rast)))) {
-    data_refor$dist_edge_m[idx] <- NA_real_
-    next
-  }
+  edge_list = landscapemetrics::get_boundaries(forest_mask, as_NA = TRUE)
+  edge_rast = edge_list[[1]]
   
   # Compute distance raster
-  dist_edge_r <- terra::distance(edge_rast)
+  dist_edge_r = terra::distance(edge_rast)
   
   # Extract distances for rows of this year
-  coords_year <- coords_defor[idx, ]
-  extracted_dist <- extract_values(dist_edge_r, coords_year)
-  
-  # Assign distances directly to the relevant rows
-  data_refor$dist_edge_m[idx] <- extracted_dist
+  d = terra::extract(dist_edge_r, data_refor[idx, c("x", "y")], ID = FALSE)[,1]
+  data_refor$dist_edge_m[idx] = d
 }
 
-data_refor %>% dplyr::group_by(change_code) %>% dplyr::summarise_at(vars(starts_with("dist")), mean, na.rm = TRUE)
+# Statistics
+data_defor %>% 
+  dplyr::group_by(type) %>% 
+  dplyr::summarise_at(vars(starts_with("dist")), mean, na.rm = TRUE)
+data_refor %>% 
+  dplyr::group_by(type) %>% 
+  dplyr::summarise_at(vars(starts_with("dist")), mean, na.rm = TRUE)
 
 cat(" Distances computed.\n")
 
 
-#### SECTION 7 — SLOPE --------
+#### 7. Slope --------
 # Slope value is extracted for each event location.
 cat("SECTION 7: extracting slope values\n")
 
-## Dataset A
-data_defor <- data_defor %>%
-  dplyr::mutate(slope_pct = extract_values(slope_r, coords_defor))
-summary(data_defor$slope_pct)
+data_defor = data_defor %>%
+  dplyr::mutate(slope_pct = terra::extract(slope_r, data_defor[, c("x", "y")], ID = FALSE)[,1],)
+data_refor = data_refor %>%
+  dplyr::mutate(slope_pct = terra::extract(slope_r, data_refor[, c("x", "y")], ID = FALSE)[,1],)
+
 data_defor %>% dplyr::group_by(type) %>% dplyr::summarise(mean_slope = mean(slope_pct, na.rm=TRUE))
-
-## Dataset B
-data_refor <- data_refor %>%
-  dplyr::mutate(slope_pct = extract_values(slope_r, coords_refor))
-summary(data_refor$slope_pct)
 data_refor %>% dplyr::group_by(type) %>% dplyr::summarise(mean_slope = mean(slope_pct, na.rm=TRUE))
-
 
 cat("Slope extraction completed\n")
 
 
-
-#### SECTION 8 - LAND USE AREA ----------
+#### 8. Land use area ----------
 # We extract land-use areas within a buffer around each point, year by year, for specified land-use classes
+# Numerous options: sample_lsm (landscapemetrics), packahe multilandr, exact_extractr... but all these options are slow
+# Instead, we can use a moving window approach (faster with numerous points)
 
 cat("\nSECTION 8: Land use area extraction around buffers\n")
-names(rasters_reclass) <- years_lulc
 
-compute_landuse_buffer <- function(dt, rasters_reclass, classes, radius) {
+## On an example
+# Pick one class
+cl = 1
+# Pick one raster
+r = rasters_reclass[[2]]
+# Pick one point
+pt = data_defor %>%
+  dplyr::filter(year == 1990) %>%
+  dplyr::slice(1) %>%
+  dplyr::select(x, y)
+pt_vect = terra::vect(pt, geom = c("x", "y"), crs = crs(r))
+# Zoom window
+zoom_radius = 250  # meters around point
+ext_zoom = ext(
+  pt$x - zoom_radius, pt$x + zoom_radius,
+  pt$y - zoom_radius, pt$y + zoom_radius
+)
+# Binary raster
+r_bin = r == cl
+plot(r_bin,
+     main = paste("Binary raster: class", cl),
+     col = c("lightgrey", "darkgreen"))
+# Moving window
+radius = 100 # meters
+w = terra::focalMat(r_bin, type = "circle", d = radius)
+image(w, main = "Focal window")
+focal_count = terra::focal(r_bin, w = w, fun = "sum", na.rm = TRUE)
+plot(focal_count, main = "Forest pixel count")
+# Valid landscape (for proportion)
+r_valid = !is.na(r)
+focal_valid = terra::focal(r_valid, w = w, fun = "sum", na.rm = TRUE)
+plot(focal_valid, main = "Valid pixel count")
+# Convert pixel count to area
+pixel_area = prod(res(r)) # m²
+focal_area_m2 = focal_count * pixel_area
+valid_area_m2 = focal_valid * pixel_area
+plot(focal_area_m2, main = "Forest area (m²)")
+plot(valid_area_m2, main = "Valid area (m²)")
+# Extract value
+area_at_point = terra::extract(focal_area_m2, pt_vect)[, 2]
+valid_at_point = terra::extract(valid_area_m2, pt_vect)[, 2]
+area_at_point
+area_at_point/valid_at_point
+# Plot everything zoomed around point
+par(mfrow = c(2, 2))
+plot(r_bin, main = paste("Binary raster: class", cl), col = c("lightgrey", "darkgreen"), ext = ext_zoom)
+points(pt$x, pt$y, pch = 20, col = "red")
+
+plot(focal_count, main = "Forest pixel count", ext = ext_zoom)
+points(pt$x, pt$y, pch = 20, col = "red")
+
+plot(focal_area_m2, main = "Forest area (m²)", ext = ext_zoom)
+points(pt$x, pt$y, pch = 20, col = "red")
+
+plot(valid_area_m2, main = "Valid area (m²)", ext = ext_zoom)
+points(pt$x, pt$y, pch = 20, col = "red")
+par(mfrow = c(1, 1))
+
+
+## Function
+names(rasters_reclass) = years_lulc
+compute_landuse_buffer = function(dt, rasters, classes, radii) {
   
   cat("\n--- Starting land use area extraction ---\n")
   
-  # resolution and pixel area
-  pixel_res  <- res(rasters_reclass[[1]])[1]
-  pixel_area <- pixel_res^2
-  
-  cat("Pixel resolution:", pixel_res, "m\n")
+  # Pixel area
+  pixel_area = prod(terra::res(rasters[[1]]))
   cat("Pixel area:", pixel_area, "m²\n")
   
-  # circular weight matrix (1 km radius)
-  cat("Creating focal matrix...\n")
-  w <- terra::focalMat(rasters_reclass[[1]], type = "circle", d = radius, fillNA = TRUE)
-  
   # list of unique years present in this dataset
-  years <- sort(unique(dt$change_year))
+  years = sort(unique(dt$year))
   
-  # loop over years
-  for (year in years) {
+  for (radius in radii) {
     
-    cat("\nProcessing YEAR:", year, "\n")
+    cat("\n### Buffer radius:", radius, "m ###\n")
+  
+    # circular weight matrix
+    w = terra::focalMat(rasters[[1]], type = "circle", d = radius, fillNA = TRUE)
     
-    # select raster for this year
-    r_year <- rasters_reclass[[as.character(year)]]
-    
-    # extract the coordinates for this year
-    pts_year <- dt %>%
-      dplyr::filter(change_year == year) %>%
-      dplyr::select(x, y)
-    
-    pts_vect <- terra::vect(pts_year, geom = c("x", "y"), crs = crs(r_year))
-    
-    # loop over classes
-    for (cl in classes) {
+    # loop over years
+    for (yr in years) {
+      cat("\nProcessing YEAR:", yr, "\n")
       
-      cat("   → Class", cl, "...\n")
+      # select raster for this year
+      r_year = rasters[[as.character(yr)]]
       
-      # binary raster for that class
-      r_bin <- r_year == cl
+      # extract the coordinates for this year
+      pts_year = dt %>%
+        dplyr::filter(year == yr) %>%
+        dplyr::select(x, y)
+      pts_vect = terra::vect(pts_year, geom = c("x", "y"), crs = crs(r_year))
       
-      # moving window sum
-      focal_count <- terra::focal(r_bin, w = w, fun = "sum", na.rm = TRUE) # NA values are ignored in the sum
+      # Extract what cells are "valid" (NOT NA)
+      r_valid = !is.na(r_year)
+      # Here, we compute the "valid area" to compute the proportion of LULC classes within each moving window
+      # This way, we account for cells at the border of the landscape
+      focal_valid = terra::focal(r_valid, w = w, fun = "sum", na.rm = TRUE)
+      valid_area_m2 = focal_valid * pixel_area
       
-      # convert pixel count to area
-      focal_area_m2 <- focal_count * pixel_area
-      
-      # extract area values for the points
-      area_values <- terra::extract(focal_area_m2, pts_vect)[, 2]
-      
-      # assign values back into the dataframe
-      col_name <- paste0("area_m2_class_", cl)
-      dt[[col_name]][dt$change_year == year] <- area_values
+      # loop over classes
+      for (cl in classes) {
+        cat("   → Class", cl, "...\n")
+        # binary raster for that class
+        r_bin = r_year == cl
+        # moving window sum
+        focal_count = terra::focal(r_bin, w = w, fun = "sum", na.rm = TRUE) # NA values are ignored in the sum
+        # convert pixel count to area
+        focal_area_m2 = focal_count * pixel_area
+        # extract values for the points
+        area_values = terra::extract(focal_area_m2, pts_vect)[, 2]
+        valid_vals = terra::extract(valid_area_m2, pts_vect)[, 2]
+        # assign values back into the dataframe
+        col_area_name = paste0("area_m2_class_", cl)
+        dt[[col_area_name]][dt$year == yr] = area_values
+        col_prop_name = paste0("prop_class_", cl)
+        dt[[col_prop_name]][dt$year == yr] = area_values / valid_vals
+      }
     }
   }
   
@@ -917,13 +997,188 @@ compute_landuse_buffer <- function(dt, rasters_reclass, classes, radius) {
   return(dt)
 }
 
-data_defor <- compute_landuse_buffer(data_defor, rasters_reclass, classes = c(1,3,5), radius = 1000)
-data_refor <- compute_landuse_buffer(data_refor, rasters_reclass, classes = c(1,3,5), radius = 1000)
 
-data_defor %>% dplyr::group_by(change_code) %>% dplyr::summarise_at(vars(starts_with("area")), mean, na.rm = TRUE)
-data_refor %>% dplyr::group_by(change_code) %>% dplyr::summarise_at(vars(starts_with("area")), mean, na.rm = TRUE)
+data_defor = compute_landuse_buffer(dt = data_defor, rasters = rasters_reclass, classes = c(1,4,6), radii = c(100,250,500))
+data_refor = compute_landuse_buffer(dt = data_refor, rasters = rasters_reclass, classes = c(1,4,6), radii = c(100,250,500))
+
+# Summary statistics
+data_defor %>% dplyr::group_by(type) %>% dplyr::summarise_at(vars(starts_with("area")), mean, na.rm = TRUE)
+data_refor %>% dplyr::group_by(type) %>% dplyr::summarise_at(vars(starts_with("area")), mean, na.rm = TRUE)
 
 cat("Land use area computation complete.\n")
+
+#### 9. Forest age ----------
+# We extract the forest age for deforested/intact cells only
+# To do so, we extract the age one year before the change
+# In the end, we add +1 to the final value (i.e., forest age when deforested/remained intact)
+cat("Forest age extraction for the deforestation dataset.\n")
+
+# Loop over years (deforestation dataset)
+data_defor$forest_age = NA_real_
+
+names(rasters_forest_age) = years_age
+
+for (yr in sort(unique(data_defor$year))) {
+  
+  idx = which(data_defor$year == yr)
+  if (!as.character(yr - 1) %in% names(rasters_forest_age)) next
+  
+  r_prev = rasters_forest_age[[as.character(yr - 1)]] # Select previous raster
+  
+  vals = terra::extract(
+    r_prev,
+    data_defor[idx, c("x", "y")],
+    ID = FALSE
+  )[,1]
+  
+  data_defor$forest_age[idx] = vals + 1 # Add +1
+}
+
+# Statistics
+data_defor %>% 
+  dplyr::group_by(type) %>% dplyr::summarise(mean_age = mean(forest_age))
+
+cat("Forest age extraction completed.\n")
+
+
+#### 10. Climate ----------
+# Climatic values are extracted for each event location.
+cat("Extracting climate variables (precipitations and temperatures).\n")
+
+# Function
+# Inputs = dataframe, climate rasters, name of the output variable (var_name) (e.g., prec_mean)
+# We extract the value at point location
+# Some points may not have a value (rasters do not overlay all locations); therefore, the nearest value is taken
+names(rasters_prec_sum) = years_climate
+names(rasters_tmax_mean) = years_climate
+names(rasters_tmin_mean) = years_climate
+
+compute_climate = function(dt, rasters, var_name) {
+  
+  cat("\n--- Extracting", var_name, "---\n")
+  
+  dt[[var_name]] = NA_real_
+  
+  for (yr in sort(unique(dt$year))) {
+    
+    if (!as.character(yr) %in% names(rasters)) next
+    
+    idx = which(dt$year == yr)
+    if (length(idx) == 0) next
+    
+    r = rasters[[as.character(yr)]]
+    
+    pts = terra::vect(
+      dt[idx, c("x", "y")],
+      geom = c("x", "y"),
+      crs = crs(r)
+    )
+    
+    vals = terra::extract(r, pts, ID = FALSE)[,1]
+    
+    # identify NA
+    na_idx = which(is.na(vals))
+    
+    if (length(na_idx) > 0) {
+      nearest = terra::extract(
+        r,
+        pts[na_idx],
+        method = "simple"
+      )[,1]
+      vals[na_idx] = nearest
+    }
+    
+    dt[[var_name]][idx] = vals
+  }
+  
+  dt
+}
+
+# Extract for deforestation 
+data_defor = compute_climate(data_defor, rasters_prec_sum, "prec_sum")
+data_defor = compute_climate(data_defor, rasters_tmin_mean, "tmin_mean")
+data_defor = compute_climate(data_defor, rasters_tmax_mean, "tmax_mean")
+
+# Extract for reforestation
+data_refor = compute_climate(data_refor, rasters_prec_sum, "prec_sum")
+data_refor = compute_climate(data_refor, rasters_tmin_mean, "tmin_mean")
+data_refor = compute_climate(data_refor, rasters_tmax_mean, "tmax_mean")
+
+# Presence of NAs
+sum(is.na(data_refor$prec_sum))
+sum(is.na(data_refor$tmin_mean))
+sum(is.na(data_refor$tmax_mean))
+
+# Summary
+data_defor %>% dplyr::group_by(type) %>% dplyr::summarise(mean_prec = mean(prec_sum),
+                                                       mean_tmin = mean(tmin_mean),
+                                                       mean_tmax = mean(tmax_mean))
+data_refor %>% dplyr::group_by(type) %>% dplyr::summarise(mean_prec = mean(prec_sum),
+                                                          mean_tmin = mean(tmin_mean),
+                                                          mean_tmax = mean(tmax_mean))
+
+cat("Climatic variables extraction completed.\n")
+
+#### 11. North and South of BR-101 ----------
+cat("Extracting whether pixels are located North or South of the highway.\n")
+
+# Sample regular points along BR-101
+br101_sp = as_Spatial(br101)
+pts_br101 = spsample(br101_sp, n = 1000, type = "regular")
+pts_br101_sf = sf::st_as_sf(pts_br101)
+
+# Add x and y coordinates as columns
+pts_br101_sf$x = sf::st_coordinates(pts_br101_sf)[,1]
+pts_br101_sf$y = sf::st_coordinates(pts_br101_sf)[,2]
+
+# Compute North/South of BR-101 using X and Y coordinates
+
+# Function to compute North/South
+compute_ns = function(x0, y0, br_x, br_y) {
+  # Find index of closest longitude
+  idx = which.min(abs(br_x - x0))
+  if (length(idx) == 0) return(NA_character_)
+  if (y0 > br_y[idx]) {
+    return("North")
+  } else {
+    return("South")
+  }
+}
+
+# Apply function to all points
+# Deforestation dataset
+data_defor = data_defor %>%
+  dplyr::rowwise() %>%
+  dplyr::mutate(
+    ns_br101 = compute_ns(x, y, pts_br101_sf$x, pts_br101_sf$y)
+  ) %>%
+  dplyr::ungroup()
+
+# Reforestation dataset
+data_refor = data_refor %>%
+  dplyr::rowwise() %>%
+  dplyr::mutate(
+    ns_br101 = compute_ns(x, y, pts_br101_sf$x, pts_br101_sf$y)
+  ) %>%
+  dplyr::ungroup()
+
+# Check
+pts_plot = data_refor %>% dplyr::sample_n(300) %>% sf::st_as_sf(coords = c("x", "y"), crs = st_crs(br101))
+# Plot
+ggplot() +
+  geom_sf(data = br101, color = "red", size = 1) +   # BR-101 line
+  geom_sf(data = pts_plot, aes(color = ns_br101), size = 2) +  # Points colored by North/South
+  scale_color_manual(values = c("North" = "blue", "South" = "green")) +
+  theme_minimal() +
+  labs(color = "Position relative to BR-101",
+       title = "North/South of points relative to BR-101")
+
+
+# Summary
+table(data_defor$type, data_defor$ns_br101)
+table(data_refor$type, data_refor$ns_br101)
+
+cat("Relative location of points regarding the BR-101 highway determined\n")
 
 #### Export datasets ----------
 saveRDS(data_defor,
@@ -937,110 +1192,91 @@ saveRDS(data_refor,
 ### Select one point from each dataset
 set.seed(123)
 
-pt_def <- data_defor %>% dplyr::slice_sample(n = 1)
-pt_refor <- data_refor %>% dplyr::slice_sample(n = 1)
+pt_defor = data_defor %>% dplyr::slice_sample(n = 1)
 
-cat("Selected defor point:", pt_def$cell_id, "year:", pt_def$change_year, "\n")
-cat("Selected refor point:", pt_refor$cell_id, "year:", pt_refor$change_year, "\n")
+cat("Selected defor point:", pt_defor$cell_id, "year:", pt_defor$year, "\n")
 
-### Helper function to make map for 1 point
-make_point_plot <- function(pt, rasters_reclass, years_lulc,
-                            roads_sf, rivers_sf, car_sf, rl_sf, urb_sf,
-                            public_reserves_sf, apa_mld_sf,
-                            radius = 1000) {
+### Function to make map for 1 point
+make_point_plot = function(pt, rasters_reclass, years_lulc,
+                            roads_sf, rivers_sf, car_sf, rl_sf, pub_res_sf, apa_mld_sf,
+                            radius) {
   
-  year <- pt$change_year
-  r_year <- rasters_reclass[[which(years_lulc == year)]]
+  year = pt$year
+  r_year = rasters_reclass[[which(years_lulc == year)]]
   
   # convert point → sf
-  pt_sf <- st_as_sf(pt, coords = c("x","y"), crs = crs(r_year))
+  pt_sf = sf::st_as_sf(pt, coords = c("x","y"), crs = crs(r_year))
   
   # 1 km buffer
-  buf <- st_buffer(pt_sf, dist = radius)
+  buf = sf::st_buffer(pt_sf, dist = radius)
   
-  # crop raster to 2 km window for clarity
-  r_crop <- terra::crop(r_year, vect(st_buffer(pt_sf, 2000)))
+  # crop raster to 1 km window
+  r_crop = terra::crop(r_year, vect(st_buffer(pt_sf, 1000)))
   
-  # convert raster → dataframe for ggplot
-  r_df <- as.data.frame(r_crop, xy = TRUE)
+  # convert raster to dataframe for ggplot
+  r_df = as.data.frame(r_crop, xy = TRUE)
   colnames(r_df)[3] <- "lulc"
   
   # crop vectors
-  roads_c  <- st_intersection(roads_sf, st_buffer(pt_sf, 2000))
-  rivers_c <- st_intersection(rivers_sf, st_buffer(pt_sf, 2000))
-  car_c    <- st_intersection(car_sf, st_buffer(pt_sf, 2000))
-  rl_c     <- st_intersection(rl_sf, st_buffer(pt_sf, 2000))
-  urb_c    <- st_intersection(urb_sf, st_buffer(pt_sf, 2000))
-  pub_c    <- st_intersection(public_reserves_sf, st_buffer(pt_sf, 2000))
-  apa_c    <- st_intersection(apa_mld_sf, st_buffer(pt_sf, 2000))
+  roads_c = st_intersection(roads_sf, st_buffer(pt_sf, 1000))
+  rivers_c = st_intersection(rivers_sf, st_buffer(pt_sf, 1000))
+  car_c = st_intersection(car_sf, st_buffer(pt_sf, 1000))
+  rl_c = st_intersection(rl_sf, st_buffer(pt_sf, 1000))
+  pub_c = st_intersection(pub_res_sf, st_buffer(pt_sf, 1000))
+  apa_c = st_intersection(apa_mld_sf, st_buffer(pt_sf, 1000))
   
-  # COLORS for lulc: same as your plot
-  lut <- c("#32a65e", "#ad975a", "#FFFFB2", "#0000FF", "#d4271e")
-  names(lut) <- as.character(sort(unique(r_df$lulc)))
+  # LULCC colors
+  lut = c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e")
+  names(lut) = as.character(sort(unique(r_df$lulc)))
   
   # Make ggplot
-  p <- ggplot() +
+  p = ggplot() +
     geom_raster(data = r_df, aes(x, y, fill = factor(lulc))) +
     scale_fill_manual(values = lut, name = "LULC") +
     geom_sf(data = roads_c,  color = "black", size = 0.4) +
     geom_sf(data = rivers_c, color = "blue", size = 0.5) +
-    geom_sf(data = car_c,    fill = NA, color = "brown", linetype = 3) +
-    geom_sf(data = rl_c,     fill = NA, color = "green3", linetype = 2) +
-    geom_sf(data = urb_c,    fill = NA, color = "magenta", alpha = 0.4) +
-    geom_sf(data = pub_c,    fill = NA, color = "red", size = 0.7) +
-    geom_sf(data = apa_c,    fill = NA, color = "orange", linetype = 2) +
-    
+    geom_sf(data = car_c, fill = NA, color = "brown", linetype = 3) +
+    geom_sf(data = rl_c, fill = NA, color = "green3", linetype = 2) +
+    geom_sf(data = pub_c, fill = NA, color = "red", size = 0.7) +
+    geom_sf(data = apa_c, fill = NA, color = "orange", linetype = 2) +
     geom_sf(data = buf, fill = NA, color = "yellow", linetype = 2, size = 1) +
     geom_sf(data = pt_sf, shape = 21, fill = "red", size = 3) +
     coord_sf() +
     theme_minimal()
   
   ### Covariate text box
-  txt <- paste0(
-    "change_code = ", pt$change_code, "\n",
+  txt = paste0(
+    "type = ", pt$type, "\n",
     "legal = ", pt$legal_status, "\n",
-    "dist_water_m = ", round(pt$dist_water_m), "\n",
+    "dist_water_m = ", round(pt$dist_river_m), "\n",
     "dist_urban_m = ", round(pt$dist_urban_m), "\n",
     "dist_road_m = ", round(pt$dist_road_m), "\n",
     "dist_edge_m = ", round(pt$dist_edge_m), "\n",
     "slope_pct = ", round(pt$slope_pct, 1), "\n",
-    "area_class_1 = ", round(pt$area_m2_class_1), "\n",
-    "area_class_3 = ", round(pt$area_m2_class_3), "\n",
-    "area_class_5 = ", round(pt$area_m2_class_5)
+    "forest_age = ", round(pt$forest_age), "\n",
+    "prec_sum = ", round(pt$prec_sum), "\n",
+    "tmin_mean = ", round(pt$tmin_mean), "\n",
+    "tmax_mean = ", round(pt$tmax_mean), "\n",
+    "ns_br101 = ", pt$ns_br101
   )
   
-  p_label <- ggdraw() + draw_label(txt, x = 0, y = 1, hjust = 0, vjust = 1, size = 11)
+  p_label = ggdraw() + draw_label(txt, x = 0, y = 1, hjust = 0, vjust = 1, size = 11)
   
   return(plot_grid(p, p_label, ncol = 2, rel_widths = c(1.3, 0.9)))
 }
 
 
 ### Generate both plots
-p_def   <- make_point_plot(pt_def,   rasters_reclass, years_lulc,
-                           roads_sf, rivers_sf, car_sf, rl_sf, urb_sf,
-                           public_reserves_sf, apa_mld_sf)
-
-p_refor <- make_point_plot(pt_refor, rasters_reclass, years_lulc,
-                           roads_sf, rivers_sf, car_sf, rl_sf, urb_sf,
-                           public_reserves_sf, apa_mld_sf)
-
-### Show side-by-side
-final_plot <- plot_grid(
-  p_def,
-  p_refor,
-  ncol = 1,
-  labels = c("DEFORESTATION SAMPLE", "REFORESTATION SAMPLE"),
-  label_size = 14
-)
-
-print(final_plot)
+final_plot = make_point_plot(pt_defor, rasters_reclass, years_lulc,
+                           roads_sf, rivers_sf, car_sf, rl_sf, pub_res_sf, apa_mld_sf,
+                radius=500)
 
 # Export PNG (high resolution)
 ggsave(
-  filename = here("outputs", "plot", "01j_defor_refor_dataset_demo.png"),
+  filename = here("outputs", "plot", "01j_defor_dataset_demo.png"),
   plot = final_plot,
-  width = 12,
-  height = 16,
+  width = 8,
+  height = 5,
   dpi = 300,
   bg="white"
 )
@@ -1051,268 +1287,228 @@ ggsave(
 # Here, the spatial unit is the private property (features in CAR)
 # We measure covariates at the property scale
 
-# Base dataset from car_sf
-car_dt <- tibble::tibble(
-  car_id = car_sf$car_id,
-  cod_imovel = car_sf$cod_imovel,
-  car_area_m2 = car_sf$car_area_m2,
-  car_area_ha = car_sf$car_area_ha
-)
+#### 1. Prepare the property-dataset ------
 
+## Filter initial dataset
+# Base dataset from car_sf
+car_sf_filtered = car_sf %>% 
+  dplyr::select(c(car_id, cod_imovel, car_area_m2, car_area_ha))
+
+## Remove too small properties
 # Pixel area
-r <- rasters_tm[[35]]
-px_area_m2 <- terra::res(r)[1] * terra::res(r)[2]
-px_area_ha <- px_area_m2 / 10000
+r = rasters_tm[[35]]
+px_area_m2 = prod(terra::res(r))
+px_area_ha = px_area_m2 / 10000
 px_area_ha
 
 # Remove properties < 1 pixel
-car_dt = car_dt %>% 
+car_sf_filtered = car_sf_filtered %>% 
   dplyr::filter(car_area_m2 > px_area_m2)
 
-# Properties filtered to match car_dt
-car_sf_filtered <- car_sf %>%
-  dplyr::filter(car_id %in% car_dt$car_id)
+## Number of intersecting properties
+car_sf_filtered %>% 
+  dplyr::mutate(
+    n_overlaps = lengths(st_intersects(.))) %>%
+  sf::st_drop_geometry() %>% 
+  dplyr::filter(n_overlaps > 1) %>% # >1 because each feature intersects itself
+  dplyr::summarise(n = n())
 
-#### SECTION 1 — Compute reforestation and deforestation areas ------
 
+#### 2. Compute reforestation and deforestation areas ------
+
+## Deforestation map
 # Use the last transition map
-tm_last <- rasters_tm[[length(rasters_tm)]]
+tm_defor = rasters_tm[[length(rasters_tm)]]
+tm_defor[tm_defor != 8] = NA
+plot(tm_defor, col="pink")
 
-# Extract values for each CAR property
-ext_vals <- terra::extract(tm_last, vect(car_sf))
+## Reforestation map
+# Use the last transition map
+tm_refor = rasters_tm[[length(rasters_tm)]]
+tm_refor[tm_refor != 7] = NA
+plot(tm_refor, col="chartreuse")
 
-# Convert
-ext_dt <- tibble::as_tibble(ext_vals)
-# Identify the value column (all columns except "ID")
-val_col <- setdiff(names(ext_dt), "ID")
-# Rename that column to "value"
-ext_dt <- ext_dt %>%
-  dplyr::rename(value = dplyr::all_of(val_col))
+## Extract values for each CAR property
+car_sf_filtered$defor_pixels = exact_extract(tm_defor, car_sf_filtered, 'count')
+car_sf_filtered$refor_pixels = exact_extract(tm_refor, car_sf_filtered, 'count')
 
-# Count pixels per CAR
-pixel_summary <- ext_dt %>%
-  dplyr::group_by(ID) %>%
-  dplyr::summarise(
-    n_deforest  = sum(value == 7, na.rm = TRUE),
-    n_reforest  = sum(value == 6, na.rm = TRUE),
-    n_total_pix = sum(!is.na(value)),
-    .groups = "drop"
-  )
+## Compute reforested/deforested surface areas in ha
+car_sf_filtered = car_sf_filtered %>%
+  dplyr::mutate(area_deforest_ha = round(defor_pixels * px_area_ha, 2),
+                area_reforest_ha = round(refor_pixels * px_area_ha, 2),
+                prop_deforest = round(area_deforest_ha * 100 / car_area_ha, 2),
+                prop_reforest = round(area_reforest_ha * 100 / car_area_ha, 2))
 
-# Rename ID → car_id for consistent join
-pixel_summary <- pixel_summary %>%
-  dplyr::rename(car_id = ID)
+## Quick statistics
+cor(car_sf_filtered$car_area_ha, car_sf_filtered$area_deforest_ha)
+cor(car_sf_filtered$car_area_ha, car_sf_filtered$area_reforest_ha)
+cor(car_sf_filtered$car_area_ha, car_sf_filtered$prop_deforest)
+cor(car_sf_filtered$car_area_ha, car_sf_filtered$prop_reforest)
 
-# Merge with base property table
-car_dt <- merge(
-  car_dt,
-  pixel_summary,
-  by = "car_id",
-  all.x = TRUE
-)
 
-# Compute reforested/deforested surface areas in ha
-car_dt <- car_dt %>%
+#### 3. Compute land use ON properties --------
+
+## Select LULC rasters
+# Forest
+lu1989_1 = rasters_reclass[[1]]
+lu1989_1[lu1989_1 != 1] = NA
+lu2024_1 = rasters_reclass[[length(rasters_reclass)]]
+lu2024_1[lu2024_1 != 1] = NA
+# Agriculture
+lu1989_4 = rasters_reclass[[1]]
+lu1989_4[lu1989_4 != 4] = NA
+lu2024_4 = rasters_reclass[[length(rasters_reclass)]]
+lu2024_4[lu2024_4 != 4] = NA
+# Urban
+lu1989_6 = rasters_reclass[[1]]
+lu1989_6[lu1989_6 != 6] = NA
+lu2024_6 = rasters_reclass[[length(rasters_reclass)]]
+lu2024_6[lu2024_6 != 6] = NA
+
+## Extract values for each CAR property
+# Forest
+car_sf_filtered$forest_pixels_1989 = exact_extract(lu1989_1, car_sf_filtered, 'count')
+car_sf_filtered$forest_pixels_2024 = exact_extract(lu2024_1, car_sf_filtered, 'count')
+# Agriculture
+car_sf_filtered$agri_pixels_1989 = exact_extract(lu1989_4, car_sf_filtered, 'count')
+car_sf_filtered$agri_pixels_2024 = exact_extract(lu2024_4, car_sf_filtered, 'count')
+# Urban
+car_sf_filtered$urb_pixels_1989 = exact_extract(lu1989_6, car_sf_filtered, 'count')
+car_sf_filtered$urb_pixels_2024 = exact_extract(lu2024_6, car_sf_filtered, 'count')
+
+## Surface, proportions, evolutions
+# Surface and proportions
+car_sf_filtered = car_sf_filtered %>%
+  dplyr::mutate(area_forest_1989_ha = round(forest_pixels_1989 * px_area_ha, 2),
+                area_forest_2024_ha = round(forest_pixels_2024 * px_area_ha, 2),
+                prop_forest_1989 = round(area_forest_1989_ha * 100 / car_area_ha, 2),
+                prop_forest_2024 = round(area_forest_2024_ha * 100 / car_area_ha, 2),
+                area_agri_1989_ha = round(agri_pixels_1989 * px_area_ha, 2),
+                area_agri_2024_ha = round(agri_pixels_2024 * px_area_ha, 2),
+                prop_agri_1989 = round(area_agri_1989_ha * 100 / car_area_ha, 2),
+                prop_agri_2024 = round(area_agri_2024_ha * 100 / car_area_ha, 2),
+                area_urb_1989_ha = round(urb_pixels_1989 * px_area_ha, 2),
+                area_urb_2024_ha = round(urb_pixels_2024 * px_area_ha, 2),
+                prop_urb_1989 = round(area_urb_1989_ha * 100 / car_area_ha, 2),
+                prop_urb_2024 = round(area_urb_2024_ha * 100 / car_area_ha, 2))
+
+# Compute the evolution
+car_sf_filtered = car_sf_filtered %>%
   dplyr::mutate(
-    area_deforest_ha = round(n_deforest * px_area_ha, 2),
-    area_reforest_ha = round(n_reforest * px_area_ha, 2)
-  )
+    forest_evol_pct = dplyr::if_else(prop_forest_1989 > 0,
+                                     round(100 * (prop_forest_2024 - prop_forest_1989) / prop_forest_1989, 2),
+                                     NA_real_),
+    agri_evol_pct = dplyr::if_else(prop_agri_1989 > 0,
+                                   round(100 * (prop_agri_2024 - prop_agri_1989) / prop_agri_1989, 2),
+                                   NA_real_),
+    urb_evol_pct = dplyr::if_else(prop_urb_1989 > 0,
+                                   round(100 * (prop_urb_2024 - prop_urb_1989) / prop_urb_1989, 2),
+                                   NA_real_))
 
-# Compute proportions
-car_dt <- car_dt %>%
+## Quick correlations
+# Deforestation data
+cor(car_sf_filtered$area_deforest_ha, car_sf_filtered$area_forest_1989_ha)
+cor(car_sf_filtered$area_deforest_ha, car_sf_filtered$area_forest_2024_ha)
+cor(car_sf_filtered$area_deforest_ha, car_sf_filtered$area_agri_1989_ha)
+cor(car_sf_filtered$area_deforest_ha, car_sf_filtered$area_agri_2024_ha)
+cor(car_sf_filtered$area_deforest_ha, car_sf_filtered$area_urb_1989_ha)
+cor(car_sf_filtered$area_deforest_ha, car_sf_filtered$area_urb_2024_ha)
+# Reforestation data
+cor(car_sf_filtered$area_reforest_ha, car_sf_filtered$area_forest_1989_ha)
+cor(car_sf_filtered$area_reforest_ha, car_sf_filtered$area_forest_2024_ha)
+cor(car_sf_filtered$area_reforest_ha, car_sf_filtered$area_agri_1989_ha)
+cor(car_sf_filtered$area_reforest_ha, car_sf_filtered$area_agri_2024_ha)
+cor(car_sf_filtered$area_reforest_ha, car_sf_filtered$area_urb_1989_ha)
+cor(car_sf_filtered$area_reforest_ha, car_sf_filtered$area_urb_2024_ha)
+
+
+#### 4. Compute land use AROUND properties --------
+# We create buffers around properties
+# We extract the values in the buffers
+# The number of pixels outside properties equals: total pixels - pixels inside
+
+## Create buffers
+car_buffer = sf::st_buffer(car_sf_filtered, 500) # in meters
+plot(car_buffer$geometry)
+
+## Extract LULC in buffers (TOTAL: inside + outside properties)
+# Forest
+car_sf_filtered$forest_buf_tot_1989 = exact_extract(lu1989_1, car_buffer, 'count')
+car_sf_filtered$forest_buf_tot_2024 = exact_extract(lu2024_1, car_buffer, 'count')
+
+# Agriculture
+car_sf_filtered$agri_buf_tot_1989 = exact_extract(lu1989_4, car_buffer, 'count')
+car_sf_filtered$agri_buf_tot_2024 = exact_extract(lu2024_4, car_buffer, 'count')
+
+# Urban
+car_sf_filtered$urb_buf_tot_1989 = exact_extract(lu1989_6, car_buffer, 'count')
+car_sf_filtered$urb_buf_tot_2024 = exact_extract(lu2024_6, car_buffer, 'count')
+
+## Pixels AROUND properties = buffer total − pixels ON properties
+car_sf_filtered = car_sf_filtered %>%
   dplyr::mutate(
-    prop_deforest  = round(n_deforest / n_total_pix, 2),
-    prop_reforest  = round(n_reforest / n_total_pix, 2)
-  )
-
-
-#### SECTION 2 — Compute land use on properties --------
-# Use first land-use raster (1989)
-lu1989 <- rasters_reclass[[1]]
-
-# Extract values per property
-ext_vals_1989 <- terra::extract(lu1989, vect(car_sf))
-
-# Convert
-dt1989 <- tibble::as_tibble(ext_vals_1989)
-dt1989 <- dt1989 %>%
-  # Identify the value column and rename it to "value"
-  dplyr::rename(value = dplyr::all_of(setdiff(names(dt1989), "ID"))) %>%
-  # Keep only the classes of interest
-  dplyr::filter(value %in% c(1, 3, 5))
-
-# Count per class and property
-lu1989_summary <- dt1989 %>%
-  dplyr::group_by(ID) %>%
-  dplyr::summarise(
-    n_forest       = sum(value == 1, na.rm = TRUE),
-    n_agriculture  = sum(value == 3, na.rm = TRUE),
-    n_urban        = sum(value == 5, na.rm = TRUE),
+    forest_buf_pix_1989 = forest_buf_tot_1989 - forest_pixels_1989,
+    forest_buf_pix_2024 = forest_buf_tot_2024 - forest_pixels_2024,
     
-    ha_forest      = round(sum(value == 1, na.rm = TRUE) * px_area_ha, 2),
-    ha_agriculture = round(sum(value == 3, na.rm = TRUE) * px_area_ha, 2),
-    ha_urban       = round(sum(value == 5, na.rm = TRUE) * px_area_ha, 2),
+    agri_buf_pix_1989 = agri_buf_tot_1989 - agri_pixels_1989,
+    agri_buf_pix_2024 = agri_buf_tot_2024 - agri_pixels_2024,
     
-    .groups = "drop"
-  )
+    urb_buf_pix_1989 = urb_buf_tot_1989 - urb_pixels_1989,
+    urb_buf_pix_2024 = urb_buf_tot_2024 - urb_pixels_2024) %>% 
+  dplyr::select(-c(forest_buf_tot_1989, agri_buf_tot_1989, urb_buf_tot_1989))
 
-# Rename ID → car_id to merge properly
-lu1989_summary <- lu1989_summary %>%
-  dplyr::rename(car_id = ID)
+## Buffer area
+# Total valid pixels in buffer
+car_sf_filtered$buffer_pixels_tot =
+  exact_extract(!is.na(lu1989_1), car_buffer, 'count')
+# Pixels inside property
+car_sf_filtered$property_pixels =
+  exact_extract(!is.na(lu1989_1), car_sf_filtered, 'count')
+# Pixels AROUND property
+car_sf_filtered$buffer_pixels_ring =
+  car_sf_filtered$buffer_pixels_tot - car_sf_filtered$property_pixels
+# Area in ha
+car_sf_filtered$buffer_area_ha =
+  car_sf_filtered$buffer_pixels_ring * px_area_ha
 
-# Merge with car_dt
-car_dt <- merge(
-  car_dt,
-  lu1989_summary,
-  by = "car_id",
-  all.x = TRUE
-)
-
-# Remove potential NAs
-car_dt <- car_dt %>%
+## Surface areas and proportions
+car_sf_filtered = car_sf_filtered %>%
   dplyr::mutate(
-    n_forest = dplyr::coalesce(n_forest, 0),
-    n_agriculture  = dplyr::coalesce(n_agriculture, 0),
-    n_urban = dplyr::coalesce(n_urban, 0),
-    ha_forest = dplyr::coalesce(ha_forest, 0),
-    ha_agriculture = dplyr::coalesce(ha_agriculture, 0),
-    ha_urban  = dplyr::coalesce(ha_urban, 0)
+    area_forest_buf_1989_ha = round(forest_buf_pix_1989 * px_area_ha, 2),
+    area_forest_buf_2024_ha = round(forest_buf_pix_2024 * px_area_ha, 2),
+    prop_forest_buf_1989 = round(area_forest_buf_1989_ha * 100 / buffer_area_ha, 2),
+    prop_forest_buf_2024 = round(area_forest_buf_2024_ha * 100 / buffer_area_ha, 2),
+    
+    area_agri_buf_1989_ha = round(agri_buf_pix_1989 * px_area_ha, 2),
+    area_agri_buf_2024_ha = round(agri_buf_pix_2024 * px_area_ha, 2),
+    prop_agri_buf_1989 = round(area_agri_buf_1989_ha * 100 / buffer_area_ha, 2),
+    prop_agri_buf_2024 = round(area_agri_buf_2024_ha * 100 / buffer_area_ha, 2),
+    
+    area_urb_buf_1989_ha = round(urb_buf_pix_1989 * px_area_ha, 2),
+    area_urb_buf_2024_ha = round(urb_buf_pix_2024 * px_area_ha, 2),
+    prop_urb_buf_1989 = round(area_urb_buf_1989_ha * 100 / buffer_area_ha, 2),
+    prop_urb_buf_2024 = round(area_urb_buf_2024_ha * 100 / buffer_area_ha, 2)
   )
 
-# Add proportions
-car_dt <- car_dt %>%
+## Evolution
+car_sf_filtered = car_sf_filtered %>%
   dplyr::mutate(
-    prop_forest = round(n_forest / n_total_pix, 3),
-    prop_agriculture = round(n_agriculture / n_total_pix, 3),
-    prop_urban = round(n_urban / n_total_pix, 3)
+    forest_buf_evol_pct = if_else(
+      prop_forest_buf_1989 > 0,
+      round(100 * (prop_forest_buf_2024 - prop_forest_buf_1989) / prop_forest_buf_1989, 2),
+      NA_real_
+    ),
+    agri_buf_evol_pct = if_else(
+      prop_agri_buf_1989 > 0,
+      round(100 * (prop_agri_buf_2024 - prop_agri_buf_1989) / prop_agri_buf_1989, 2),
+      NA_real_
+    ),
+    urb_buf_evol_pct = if_else(
+      prop_urb_buf_1989 > 0,
+      round(100 * (prop_urb_buf_2024 - prop_urb_buf_1989) / prop_urb_buf_1989, 2),
+      NA_real_
+    )
   )
-
-# Quick correlations
-cor(car_dt$n_deforest, car_dt$n_forest)
-cor(car_dt$n_deforest, car_dt$n_agriculture)
-cor(car_dt$n_deforest, car_dt$n_urban)
-cor(car_dt$n_reforest, car_dt$n_forest)
-cor(car_dt$n_reforest, car_dt$n_agriculture)
-cor(car_dt$n_reforest, car_dt$n_urban)
-
-
-#### SECTION 3 — Compute land use around properties --------
-# 1 km buffer (in metres)
-car_buffer <- terra::buffer(vect(car_sf), width = 1000)
-plot(car_buffer)
-
-# Extract land use (first year)
-# 1989 raster
-lu1989 <- rasters_reclass[[1]]
-
-# Extract values inside buffers
-ext1989 <- terra::extract(lu1989, car_buffer)
-
-dt1989_buf <- tibble::as_tibble(ext1989)
-# Identify the value column and rename it to "value"
-val_col <- setdiff(names(dt1989_buf), "ID")
-dt1989_buf <- dt1989_buf %>%
-  dplyr::rename(value = dplyr::all_of(val_col))
-
-# Keep only classes 1, 3, 5
-dt1989_buf <- dt1989_buf %>%
-  dplyr::filter(value %in% c(1, 3, 5))
-
-# Summarize
-buf1989_summary <- dt1989_buf %>%
-  dplyr::group_by(ID) %>%
-  dplyr::summarise(
-    buf1989_n_forest      = sum(value == 1, na.rm = TRUE),
-    buf1989_n_agriculture = sum(value == 3, na.rm = TRUE),
-    buf1989_n_urban       = sum(value == 5, na.rm = TRUE),
-    
-    buf1989_ha_forest      = round(sum(value == 1, na.rm = TRUE) * px_area_ha, 2),
-    buf1989_ha_agriculture = round(sum(value == 3, na.rm = TRUE) * px_area_ha, 2),
-    buf1989_ha_urban       = round(sum(value == 5, na.rm = TRUE) * px_area_ha, 2),
-    
-    .groups = "drop"
-  ) %>%
-  dplyr::rename(car_id = ID)
-
-# Extract land use (last year)
-lu2024 <- rasters_reclass[[length(rasters_reclass)]]
-
-ext2024 <- terra::extract(lu2024, car_buffer)
-
-dt2024_buf <- tibble::as_tibble(ext2024)
-
-# Identify the value column and rename it to "value"
-val_col <- setdiff(names(dt2024_buf), "ID")
-dt2024_buf <- dt2024_buf %>%
-  dplyr::rename(value = dplyr::all_of(val_col)) %>%
-  dplyr::filter(value %in% c(1, 3, 5))
-
-# Summarise counts and areas per class
-buf2024_summary <- dt2024_buf %>%
-  dplyr::group_by(ID) %>%
-  dplyr::summarise(
-    buf2024_n_forest      = sum(value == 1, na.rm = TRUE),
-    buf2024_n_agriculture = sum(value == 3, na.rm = TRUE),
-    buf2024_n_urban       = sum(value == 5, na.rm = TRUE),
-    
-    buf2024_ha_forest      = round(sum(value == 1, na.rm = TRUE) * px_area_ha, 2),
-    buf2024_ha_agriculture = round(sum(value == 3, na.rm = TRUE) * px_area_ha, 2),
-    buf2024_ha_urban       = round(sum(value == 5, na.rm = TRUE) * px_area_ha, 2),
-    
-    .groups = "drop"
-  ) %>%
-  dplyr::rename(car_id = ID)
-
-# Merge
-car_dt <- merge(car_dt, buf1989_summary, by = "car_id", all.x = TRUE)
-car_dt <- merge(car_dt, buf2024_summary, by = "car_id", all.x = TRUE)
-
-# Compute % evolution
-car_dt <- car_dt %>%
-  dplyr::mutate(
-    # Absolute change in PIXELS
-    buf_change_pix_forest      = buf2024_n_forest      - buf1989_n_forest,
-    buf_change_pix_agriculture = buf2024_n_agriculture - buf1989_n_agriculture,
-    buf_change_pix_urban       = buf2024_n_urban       - buf1989_n_urban,
-    
-    # Replace all NAs with 0 BEFORE pct calculations
-    buf1989_n_forest      = dplyr::if_else(is.na(buf1989_n_forest), 0L, buf1989_n_forest),
-    buf1989_n_agriculture = dplyr::if_else(is.na(buf1989_n_agriculture), 0L, buf1989_n_agriculture),
-    buf1989_n_urban       = dplyr::if_else(is.na(buf1989_n_urban), 0L, buf1989_n_urban),
-    
-    buf2024_n_forest      = dplyr::if_else(is.na(buf2024_n_forest), 0L, buf2024_n_forest),
-    buf2024_n_agriculture = dplyr::if_else(is.na(buf2024_n_agriculture), 0L, buf2024_n_agriculture),
-    buf2024_n_urban       = dplyr::if_else(is.na(buf2024_n_urban), 0L, buf2024_n_urban),
-    
-    # Percent change = (Δpixels / initial pixels) * 100
-    buf_change_pct_forest      = dplyr::if_else(buf1989_n_forest      > 0, 
-                                                100 * buf_change_pix_forest      / buf1989_n_forest,      0),
-    buf_change_pct_agriculture = dplyr::if_else(buf1989_n_agriculture > 0, 
-                                                100 * buf_change_pix_agriculture / buf1989_n_agriculture, 0),
-    buf_change_pct_urban       = dplyr::if_else(buf1989_n_urban       > 0, 
-                                                100 * buf_change_pix_urban       / buf1989_n_urban,       0),
-    # Change in HECTARES
-    buf_change_ha_forest      = buf_change_pix_forest      * px_area_ha,
-    buf_change_ha_agriculture = buf_change_pix_agriculture * px_area_ha,
-    buf_change_ha_urban       = buf_change_pix_urban       * px_area_ha
-  )
-
-# Correlations with reforested pixels
-cor_reforest <- c(
-  forest      = cor(car_dt$n_reforest, car_dt$buf_change_pix_forest),
-  agriculture = cor(car_dt$n_reforest, car_dt$buf_change_pix_agriculture),
-  urban       = cor(car_dt$n_reforest, car_dt$buf_change_pix_urban)
-)
-
-# Correlations with deforested pixels
-cor_deforest <- c(
-  forest      = cor(car_dt$n_deforest, car_dt$buf_change_pix_forest),
-  agriculture = cor(car_dt$n_deforest, car_dt$buf_change_pix_agriculture),
-  urban       = cor(car_dt$n_deforest, car_dt$buf_change_pix_urban)
-)
-
-cor_reforest
-cor_deforest
 
 
 #### SECTION 4 — Compute distances --------
