@@ -570,9 +570,8 @@ data_refor %>% dplyr::group_by(type) %>% dplyr::summarise(n=dplyr::n())
 data_defor %>% dplyr::group_by(type) %>% dplyr::summarise(n=dplyr::n())
 
 # Summary
-cat("Dataset A rows:", nrow(data_refor), "\n")
-cat("Dataset B rows:", nrow(data_defor), "\n")
-
+cat("Dataset 'Reforestation' rows:", nrow(data_refor), "\n")
+cat("Dataset 'Deforestation' rows:", nrow(data_defor), "\n")
 
 
 #### 4. Legal status --------
@@ -1189,7 +1188,7 @@ saveRDS(data_refor,
 
 
 #### Illustration ----------
-### Select one point from each dataset
+### Select one point
 set.seed(123)
 
 pt_defor = data_defor %>% dplyr::slice_sample(n = 1)
@@ -1346,7 +1345,7 @@ cor(car_sf_filtered$car_area_ha, car_sf_filtered$prop_deforest)
 cor(car_sf_filtered$car_area_ha, car_sf_filtered$prop_reforest)
 
 
-#### 3. Compute land use ON properties --------
+#### 3. Land use ON properties --------
 
 ## Select LULC rasters
 # Forest
@@ -1405,29 +1404,13 @@ car_sf_filtered = car_sf_filtered %>%
                                    round(100 * (prop_urb_2024 - prop_urb_1989) / prop_urb_1989, 2),
                                    NA_real_))
 
-## Quick correlations
-# Deforestation data
-cor(car_sf_filtered$area_deforest_ha, car_sf_filtered$area_forest_1989_ha)
-cor(car_sf_filtered$area_deforest_ha, car_sf_filtered$area_forest_2024_ha)
-cor(car_sf_filtered$area_deforest_ha, car_sf_filtered$area_agri_1989_ha)
-cor(car_sf_filtered$area_deforest_ha, car_sf_filtered$area_agri_2024_ha)
-cor(car_sf_filtered$area_deforest_ha, car_sf_filtered$area_urb_1989_ha)
-cor(car_sf_filtered$area_deforest_ha, car_sf_filtered$area_urb_2024_ha)
-# Reforestation data
-cor(car_sf_filtered$area_reforest_ha, car_sf_filtered$area_forest_1989_ha)
-cor(car_sf_filtered$area_reforest_ha, car_sf_filtered$area_forest_2024_ha)
-cor(car_sf_filtered$area_reforest_ha, car_sf_filtered$area_agri_1989_ha)
-cor(car_sf_filtered$area_reforest_ha, car_sf_filtered$area_agri_2024_ha)
-cor(car_sf_filtered$area_reforest_ha, car_sf_filtered$area_urb_1989_ha)
-cor(car_sf_filtered$area_reforest_ha, car_sf_filtered$area_urb_2024_ha)
-
-
-#### 4. Compute land use AROUND properties --------
+#### 4. Land use AROUND properties --------
 # We create buffers around properties
 # We extract the values in the buffers
 # The number of pixels outside properties equals: total pixels - pixels inside
 
 ## Create buffers
+# At 500 m
 car_buffer = sf::st_buffer(car_sf_filtered, 500) # in meters
 plot(car_buffer$geometry)
 
@@ -1460,10 +1443,10 @@ car_sf_filtered = car_sf_filtered %>%
 ## Buffer area
 # Total valid pixels in buffer
 car_sf_filtered$buffer_pixels_tot =
-  exact_extract(!is.na(lu1989_1), car_buffer, 'count')
+  exact_extract(!is.na(rasters_reclass[[1]]), car_buffer, 'count')
 # Pixels inside property
 car_sf_filtered$property_pixels =
-  exact_extract(!is.na(lu1989_1), car_sf_filtered, 'count')
+  exact_extract(!is.na(rasters_reclass[[1]]), car_sf_filtered, 'count')
 # Pixels AROUND property
 car_sf_filtered$buffer_pixels_ring =
   car_sf_filtered$buffer_pixels_tot - car_sf_filtered$property_pixels
@@ -1511,230 +1494,252 @@ car_sf_filtered = car_sf_filtered %>%
   )
 
 
-#### SECTION 4 — Compute distances --------
+#### 5. Distances --------
 
 ## Centroids (sf)
-car_centroids_sf <- car_sf_filtered %>%
+car_centroids_sf = car_sf_filtered %>%
   dplyr::mutate(geometry = sf::st_centroid(geometry))
 
 
 ### 1. Distance to urban centers
-dist_urban <- sf::st_distance(car_centroids_sf, urb_centers_sf)
-dist_urban_min <- apply(dist_urban, 1, min)
+nearest_id = sf::st_nearest_feature(car_centroids_sf, urb_centers_sf)
 
-dist_urb_dt <- tibble::tibble(
-  car_id          = car_sf_filtered$car_id,
-  dist_to_urban_m = as.numeric(dist_urban_min)
-)
+dist_m =
+  sf::st_distance(car_centroids_sf, urb_centers_sf[nearest_id, ],
+                  by_element = TRUE)
 
-car_dt <- merge(car_dt, dist_urb_dt, by = "car_id", all.x = TRUE)
+car_sf_filtered$dist_to_urban_m = as.numeric(dist_m)
 
 
 
 ### 2. Distance to ROADS
-dist_roads <- sf::st_distance(car_centroids_sf, roads_sf)
-dist_roads_min <- apply(dist_roads, 1, min)
+nearest_id = sf::st_nearest_feature(car_centroids_sf, roads_sf)
 
-dist_roads_dt <- tibble::tibble(
-  car_id        = car_sf_filtered$car_id,
-  dist_to_road_m = as.numeric(dist_roads_min)
-)
+dist_m =
+  sf::st_distance(car_centroids_sf, roads_sf[nearest_id, ],
+                  by_element = TRUE)
 
-car_dt <- merge(car_dt, dist_roads_dt, by = "car_id", all.x = TRUE)
+car_sf_filtered$dist_to_road_m = as.numeric(dist_m)
 
 
 ### 3. Distance to RIVERS
-dist_rivers <- sf::st_distance(car_centroids_sf, rivers_sf)
-dist_rivers_min <- apply(dist_rivers, 1, min)
+nearest_id = sf::st_nearest_feature(car_centroids_sf, rivers_sf)
 
-dist_rivers_dt <- tibble::tibble(
-  car_id          = car_sf_filtered$car_id,
-  dist_to_river_m = as.numeric(dist_rivers_min)
-)
+dist_m =
+  sf::st_distance(car_centroids_sf, rivers_sf[nearest_id, ],
+                  by_element = TRUE)
 
-car_dt <- merge(car_dt, dist_rivers_dt, by = "car_id", all.x = TRUE)
+car_sf_filtered$dist_to_river_m = as.numeric(dist_m)
 
-### 4. Distance to FOREST EDGES (1989 vs 2024)
+# Quick correlations
+cor(car_sf_filtered$area_deforest_ha, car_sf_filtered$dist_to_urban_m)
+cor(car_sf_filtered$area_reforest_ha, car_sf_filtered$dist_to_urban_m)
+
+cor(car_sf_filtered$area_deforest_ha, car_sf_filtered$dist_to_road_m)
+cor(car_sf_filtered$area_reforest_ha, car_sf_filtered$dist_to_road_m)
+
+cor(car_sf_filtered$area_deforest_ha, car_sf_filtered$dist_to_river_m)
+cor(car_sf_filtered$area_reforest_ha, car_sf_filtered$dist_to_river_m)
+
+#### 6. Forest edges --------
+# Mean distance to nearest forest edge within each property
+
 # Helper function
-compute_edge_distance <- function(rast) {
+compute_edge = function(rast, poly) {
   
   # Forest mask: 1 = forest, NA otherwise
-  forest_mask <- rast == 1
-  forest_mask[forest_mask != 1] <- NA
+  forest_mask = rast == 1
+  forest_mask[forest_mask != 1] = NA
   
   # Compute forest boundaries (edge pixels)
-  edge_list <- landscapemetrics::get_boundaries(forest_mask, as_NA = TRUE)
-  edge_rast <- edge_list[[1]]
+  edge_list = landscapemetrics::get_boundaries(forest_mask, as_NA = TRUE)
+  edge_rast = edge_list[[1]]
   
   # If no boundaries → return NA
   if (all(is.na(terra::values(edge_rast)))) {
-    return(rep(NA_real_, nrow(car_centroids_sf)))
+    return(rep(NA_real_, nrow(poly)))
   }
   
-  # Distance raster: Euclidean distance to nearest edge
-  dist_r <- terra::distance(edge_rast)
+  # Edge distance
+  dist_r = terra::distance(edge_rast)
   
-  # Extract distances to property centroids
-  d <- terra::extract(dist_r, vect(car_centroids_sf))[,2]
+  # Extract
+  d = exact_extract(dist_r, poly, 'mean')
   return(as.numeric(d))
 }
 
 
-### Compute distance for 1989 (first raster)
-lu1989 <- rasters_reclass[[1]]
-dist_edge_1989 <- compute_edge_distance(lu1989)
+### Compute first raster
+lu1989 = rasters_reclass[[1]]
+car_sf_filtered$for_edge_mean_dist_1989 = compute_edge(lu1989, car_sf_filtered)
 
-### Compute distance for 2024 (last raster)
-lu2024 <- rasters_reclass[[length(rasters_reclass)]]
-dist_edge_2024 <- compute_edge_distance(lu2024)
+### Compute last raster
+lu2024 = rasters_reclass[[length(rasters_reclass)]]
+car_sf_filtered$for_edge_mean_dist_2024 = compute_edge(lu2024, car_sf_filtered)
 
-### Bind to car_dt
-dist_edge_dt <- tibble::tibble(
-  car_id = car_sf_filtered$car_id,
-  dist_edge_1989_m = dist_edge_1989,
-  dist_edge_2024_m = dist_edge_2024
-)
-car_dt <- merge(car_dt, dist_edge_dt, by = "car_id", all.x = TRUE)
-
-
-### Compute change category
-car_dt <- car_dt %>%
+### Compute forest edge coverage and change
+car_sf_filtered = car_sf_filtered %>%
   dplyr::mutate(
-    forest_edge_change_m = dist_edge_2024_m - dist_edge_1989_m,
-    forest_edge_change = dplyr::case_when(
-      forest_edge_change_m < 0  ~ "closer",
-      forest_edge_change_m > 0  ~ "further",
-      TRUE                      ~ "same"
+    for_edge_dist_change = for_edge_mean_dist_2024 - for_edge_mean_dist_1989,
+    for_edge_dist_trend = dplyr::case_when(
+      for_edge_dist_change < 0 ~ "closer",
+      for_edge_dist_change > 0 ~ "further",
+      TRUE ~ "same"
     )
   )
 
-# Quick correlations
-cor(car_dt$n_reforest, car_dt$dist_to_urban_m)
-cor(car_dt$n_reforest, car_dt$dist_to_road_m)
-cor(car_dt$n_reforest, car_dt$dist_to_river_m)
-cor(car_dt$n_reforest, car_dt$dist_edge_1989_m)
-cor(car_dt$n_reforest, car_dt$forest_edge_change_m)
-car_dt %>% dplyr::group_by(forest_edge_change) %>% dplyr::summarise(mean=mean(n_reforest))
 
-cor(car_dt$n_deforest, car_dt$dist_to_urban_m)
-cor(car_dt$n_deforest, car_dt$dist_to_road_m)
-cor(car_dt$n_deforest, car_dt$dist_to_river_m)
-cor(car_dt$n_deforest, car_dt$dist_edge_1989_m)
-cor(car_dt$n_deforest, car_dt$forest_edge_change_m)
-car_dt %>% dplyr::group_by(forest_edge_change) %>% dplyr::summarise(mean=mean(n_deforest))
-
-
-#### SECTION 5 — Intersects properties with spatial vectors --------
-# helper that returns a named data.table
-compute_intersection <- function(car_sf, target_sf, colname) {
-  
-  inter <- sf::st_intersects(car_sf, target_sf, sparse = TRUE)
-  
-  dt <- tibble::tibble(
-    car_id = car_sf$car_id,
-    flag   = as.integer(lengths(inter) > 0)
-  )
-  
-  setnames(dt, "flag", colname)
-  
-  return(dt)
-}
-
+#### 7. Intersections --------
 # 1. Rivers
-int_rivers <- compute_intersection(
-  car_sf_filtered,
-  rivers_sf,
-  "intersects_river"
-)
+car_sf_filtered$intersects_river =
+  as.integer(lengths(sf::st_intersects(car_sf_filtered, rivers_sf)) > 0)
 
 # 2. APA
-int_apa <- compute_intersection(
-  car_sf_filtered,
-  apa_mld_sf,
-  "intersects_apa"
-)
+car_sf_filtered$intersects_apa =
+  as.integer(lengths(sf::st_intersects(car_sf_filtered, apa_mld_sf)) > 0)
 
-# 3. Public reserves (PDA + Uniao merged)
-int_public <- compute_intersection(
-  car_sf_filtered,
-  public_reserves_sf,
-  "intersects_public_reserve"
-)
+# 3. Public reserves
+car_sf_filtered$intersects_pub_res =
+  as.integer(lengths(sf::st_intersects(car_sf_filtered, pub_res_sf)) > 0)
 
-# Merge
-car_dt <- car_dt %>%
-  dplyr::left_join(int_rivers, by = "car_id") %>%
-  dplyr::left_join(int_apa, by = "car_id") %>%
-  dplyr::left_join(int_public, by = "car_id")
+# 4. RPPN
+car_sf_filtered$intersects_rppn =
+  as.integer(lengths(sf::st_intersects(car_sf_filtered, sf::st_as_sf(rppn))) > 0)
 
-# Quick correlations
-cor(car_dt$n_deforest, car_dt$intersects_river)
-cor(car_dt$n_deforest, car_dt$intersects_apa)
-cor(car_dt$n_deforest, car_dt$intersects_public_reserve)
-
-cor(car_dt$n_reforest, car_dt$intersects_river)
-cor(car_dt$n_reforest, car_dt$intersects_apa)
-cor(car_dt$n_reforest, car_dt$intersects_public_reserve)
+# 5. RL
+car_sf_filtered$intersects_rl =
+  as.integer(lengths(sf::st_intersects(car_sf_filtered, sf::st_as_sf(rl))) > 0)
 
 
+#### 8. Coverage --------
+## Prepare rasters
+apa_mld_r = terra::rasterize(apa_mld, template_rast, field = 1, background = NA)
+pub_res_r = terra::rasterize(pub_res_sf, template_rast, field = 1, background = NA)
+rppn_r = terra::rasterize(rppn, template_rast, field = 1, background = NA)
+rl_r = terra::rasterize(rl, template_rast, field = 1, background = NA)
+plot(apa_mld_r)
+plot(pub_res_r)
+plot(rppn_r)
+plot(rl_r)
 
-#### SECTION 6 — Reserva legal coverage --------
-# Get intersection between CAR and RL
-rl_inter <- sf::st_intersection(
-  car_sf_filtered %>% dplyr::select(car_id, geometry),
-  rl_sf %>% dplyr::select(geometry)
-)
+## Compute coverage
+# 1. APA
+car_sf_filtered$apa_cover = exact_extract(apa_mld_r, car_sf_filtered, 'count')
 
-# Compute area of the intersected region (in m2)
-rl_inter$rl_area_m2 <- as.numeric(sf::st_area(rl_inter$geometry))
-rl_inter$rl_area_ha <- round(rl_inter$rl_area_m2 / 10000, 2)
+# 2. Public reserves
+car_sf_filtered$pub_res_cover = exact_extract(pub_res_r, car_sf_filtered, 'count')
 
-# Sum per property
-# Intersection can produce multiple polygons → we aggregate
-rl_summary <- rl_inter %>%
-  dplyr::group_by(car_id) %>%
-  dplyr::summarise(
-    rl_area_m2 = sum(rl_area_m2),
-    rl_area_ha = sum(rl_area_ha)
-  ) %>%
-  dplyr::ungroup()
+# 3. RPPN
+car_sf_filtered$rppn_cover = exact_extract(rppn_r, car_sf_filtered, 'count')
 
-# Drop the geometry
-rl_summary_clean <- rl_summary %>%
-  sf::st_drop_geometry() %>% # drop geometry here
-  dplyr::select(car_id, rl_area_m2, rl_area_ha)
+# 4. RL
+car_sf_filtered$rl_cover = exact_extract(rl_r, car_sf_filtered, 'count')
 
-# Join
-car_dt <- car_dt %>%
-  dplyr::left_join(rl_summary_clean, by = "car_id") %>%
-  dplyr::mutate(
-    rl_area_m2 = dplyr::coalesce(rl_area_m2, 0),
-    rl_area_ha = dplyr::coalesce(rl_area_ha, 0),
-    rl_prop = round(rl_area_ha / car_area_ha, 2)
+## Proportions
+car_sf_filtered = car_sf_filtered %>% 
+  dplyr::mutate(apa_cover_ha = round(apa_cover * px_area_ha, 2),
+                pub_res_cover_ha = round(pub_res_cover * px_area_ha, 2),
+                rppn_cover_ha = round(rppn_cover * px_area_ha, 2),
+                rl_cover_ha = round(rl_cover * px_area_ha, 2),
+                apa_cover_prop = round(apa_cover_ha * 100 / car_area_ha, 2),
+                pub_res_cover_prop = round(pub_res_cover_ha * 100 / car_area_ha, 2),
+                rppn_cover_prop = round(rppn_cover_ha * 100 / car_area_ha, 2),
+                rl_cover_prop = round(rl_cover_ha * 100 / car_area_ha, 2))
+
+#### 9. Slope and climatic variables --------
+# Slope
+car_sf_filtered$slope_mean = exact_extract(slope_r, car_sf_filtered, 'mean')
+car_sf_filtered$slope_sd = exact_extract(slope_r, car_sf_filtered, 'stdev')
+car_sf_filtered$slope_cv = exact_extract(slope_r, car_sf_filtered, 'coefficient_of_variation')
+
+# Precipitations
+car_sf_filtered$prec_2024_mean = exact_extract(rasters_prec_sum[[36]], car_sf_filtered, 'mean')
+car_sf_filtered$prec_2024_sd = exact_extract(rasters_prec_sum[[36]], car_sf_filtered, 'stdev')
+car_sf_filtered$prec_2024_cv = exact_extract(rasters_prec_sum[[36]], car_sf_filtered, 'coefficient_of_variation')
+
+# Tmin
+car_sf_filtered$tmin_2024_mean = exact_extract(rasters_tmin_mean[[36]], car_sf_filtered, 'mean')
+car_sf_filtered$tmin_2024_sd = exact_extract(rasters_tmin_mean[[36]], car_sf_filtered, 'stdev')
+car_sf_filtered$tmin_2024_cv = exact_extract(rasters_tmin_mean[[36]], car_sf_filtered, 'coefficient_of_variation')
+
+# Tmax
+car_sf_filtered$tmax_2024_mean = exact_extract(rasters_tmax_mean[[36]], car_sf_filtered, 'mean')
+car_sf_filtered$tmax_2024_sd = exact_extract(rasters_tmax_mean[[36]], car_sf_filtered, 'stdev')
+car_sf_filtered$tmax_2024_cv = exact_extract(rasters_tmax_mean[[36]], car_sf_filtered, 'coefficient_of_variation')
+
+#### 10. Forest age --------
+## Rasters
+for_age_2000 = rasters_forest_age[[12]]
+for_age_2000[for_age_2000 == 0] = NA
+plot(for_age_2000)
+for_age_2010 = rasters_forest_age[[22]]
+for_age_2010[for_age_2010 == 0] = NA
+plot(for_age_2010)
+for_age_2024 = rasters_forest_age[[36]]
+for_age_2024[for_age_2024 == 0] = NA
+plot(for_age_2024)
+
+## Compute forest age
+car_sf_filtered$for_age_mean_2000 = exact_extract(for_age_2000, car_sf_filtered, 'mean')
+car_sf_filtered$for_age_mean_2010 = exact_extract(for_age_2010, car_sf_filtered, 'mean')
+car_sf_filtered$for_age_mean_2024 = exact_extract(for_age_2024, car_sf_filtered, 'mean')
+
+## Reclass
+car_sf_filtered = car_sf_filtered %>% 
+  dplyr::mutate(for_age_dynamics = dplyr::case_when(
+    (for_age_mean_2024 > for_age_mean_2000) | (for_age_mean_2024 > for_age_mean_2010) ~ "Older",
+    (for_age_mean_2024 < for_age_mean_2000) | (for_age_mean_2024 < for_age_mean_2010) ~ "Younger",
+    TRUE ~ "NA"
+  ))
+table(car_sf_filtered$for_age_dynamics)
+
+#### 11. North and South of BR-101 ----------
+# Sample regular points along BR-101
+br101_sp = as_Spatial(br101)
+pts_br101 = sp::spsample(br101_sp, n = 1000, type = "regular")
+pts_br101_sf = sf::st_as_sf(pts_br101)
+
+coords_br = sf::st_coordinates(pts_br101_sf)
+br_x = coords_br[, 1]
+br_y = coords_br[, 2]
+
+# Compute North/South of BR-101 using X and Y coordinates
+
+# Function to compute North/South
+compute_ns = function(x0, y0, br_x, br_y) {
+  # Find index of closest longitude
+  idx = which.min(abs(br_x - x0))
+  if (length(idx) == 0) return(NA_character_)
+  if (y0 > br_y[idx]) {
+    return("North")
+  } else {
+    return("South")
+  }
+}
+
+# CAR centroids
+car_centroids = sf::st_centroid(car_sf_filtered)
+coords_car = sf::st_coordinates(car_centroids)
+car_x = coords_car[, 1]
+car_y = coords_car[, 2]
+
+# Function
+car_sf_filtered$ns_br101 =
+  mapply(
+    compute_ns,
+    x0 = car_x,
+    y0 = car_y,
+    MoreArgs = list(br_x = br_x, br_y = br_y)
   )
 
-# Quick correlation
-cor(car_dt$n_deforest, car_dt$rl_area_ha)
-cor(car_dt$n_reforest, car_dt$rl_area_ha)
+# Plot
+plot(st_geometry(br101), col = "black", lwd = 2)
+plot(st_geometry(car_sf_filtered[car_sf_filtered$ns_br101 == "North", ]),
+     col = "blue", pch = 16, add = TRUE)
+plot(st_geometry(car_sf_filtered[car_sf_filtered$ns_br101 == "South", ]),
+     col = "red", pch = 16, add = TRUE)
 
-
-#### SECTION 7 — Mean slope --------
-# Compute mean slope per property
-mean_slope <- exact_extract(slope_r, car_sf_filtered, 'mean')
-
-# Add the results to car_sf
-car_sf_filtered$mean_slope <- mean_slope
-
-# Join 
-car_dt = car_sf_filtered %>% 
-  sf::st_drop_geometry() %>% 
-  dplyr::select(car_id, mean_slope) %>% 
-  dplyr::right_join(car_dt)
-
-# Quick correlations
-cor(car_dt$n_deforest, car_dt$mean_slope, use = "complete.obs")
-cor(car_dt$n_reforest, car_dt$mean_slope, use = "complete.obs")
 
 #### Export datasets ----------
-saveRDS(car_dt,
+saveRDS(car_sf_filtered,
         here("outputs", "data", "Mapbiomas", "LULCC_datasets", "data_defor_refor_car.rds"))
