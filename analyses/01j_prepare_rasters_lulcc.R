@@ -233,10 +233,10 @@ plot(pub_res)
 
 ### Prepare the cell-based dataset -----
 # Rationale:
-# The workflow starts from rasters_tm[[35]], a raster identifying all cells that experienced at least one land-use/land-cover (LULC) change event during the study period. These “changed cells” form the core sample on which all covariates will be calculated.
+# The workflow starts from the raster identifying all cells that experienced at least one land-use/land-cover (LULC) change event during the study period. These “changed cells” form the core sample on which all covariates will be calculated.
 # For each event row, the pipeline computes a set of covariates that describe biophysical, legal, and landscape-context characteristics of the cell at the time of its change. All covariates are extracted or computed dynamically with respect to the event year.
-# Dataset A: reforested cells + a random sample of intact cells (agricultural cells in rasters_tm). Sample must match the number of reforested cells per year.
-# Dataset B: deforested cells + a random sample of intact cells (intact forests in rasters_tm). Sample must match the number of deforested cells per year.
+# Dataset A: reforested cells + a random sample of intact cells (agricultural cells). Sample matches the number of reforested cells per year.
+# Dataset B: deforested cells + a random sample of intact cells (intact forests). Sample matches the number of deforested cells per year.
 
 #### Parameters -----
 template_rast = rasters_reclass[[36]]
@@ -257,7 +257,7 @@ head(ok)
 # Detect deforested cells (forest to other land use)
 idx_def = which(ok & prev == 1 & curr %in% 2:6)
 head(idx_def)
-coords_def = raster::xyFromCell(rasters_reclass[[2]], idx_def)
+coords_def = terra::xyFromCell(rasters_reclass[[2]], idx_def)
 head(coords_def)
 # Create a data.frame
 defor_1989_1990 = data.frame(cell_id = idx_def,
@@ -316,7 +316,7 @@ detect_forest_transitions = function(rasters, years) {
     # Detect deforested cells (forest to other land use)
     idx_def = which(ok & prev == 1 & curr %in% 2:6)
     if (length(idx_def) > 0) {
-      coords_def = raster::xyFromCell(rasters[[i]], idx_def)
+      coords_def = terra::xyFromCell(rasters[[i]], idx_def)
       # Append the new data.frame as the next element in the events list
       events[[length(events) + 1]] =
         data.frame(cell_id = idx_def,
@@ -331,7 +331,7 @@ detect_forest_transitions = function(rasters, years) {
     # Detect reforested cells (other land use to forest)
     idx_ref = which(ok & prev %in% 2:6 & curr == 1)
     if (length(idx_ref) > 0) {
-      coords_ref = raster::xyFromCell(rasters[[i]], idx_ref)
+      coords_ref = terra::xyFromCell(rasters[[i]], idx_ref)
       # Append the new data.frame as the next element in the events list
       events[[length(events) + 1]] =
         data.frame(cell_id = idx_ref,
@@ -445,7 +445,7 @@ plot(agri_mask)
 agri_cells = which(terra::values(agri_mask) == 1)
 
 # Are there more pixels of agriculture than of reforested cells?
-length(agri_cells) > length(changes$type[[7]])
+length(agri_cells) > sum(changes$type == 7)
 
 # Number of cells to be selected each year
 reforest_events = events_per_year %>%
@@ -494,7 +494,7 @@ plot(forest_mask)
 forest_cells = which(terra::values(forest_mask) == 1)
 
 # Are there more pixels of forest than of deforested cells?
-length(forest_cells) > length(changes$type[[8]])
+length(forest_cells) > sum(changes$type == 8)
 
 # Number of cells to be selected each year
 deforest_events = events_per_year %>%
@@ -776,12 +776,14 @@ for (yr in sort(unique(data_refor$year))) {
 # We build binary forest mask (r == 1)
 # We use landscapemetrics::get_boundaries() to get edge pixels
 # We compute Euclidean distance with terra::distance()
+# The logic is: Distance to the existing forest edge at the time deforestation happens (answering: How close was this loss to an existing forest edge?)
+# Which is slightly different for reforestation: For reforestation events, we compute distance to forest edge in year t − 1 (answering: How far from existing forest did reforestation occur?)
 
 # Initialize column
 data_defor$dist_edge_m = NA_real_
 data_refor$dist_edge_m = NA_real_
 
-# Loop over years (deforestation dataset)
+# DEFORESTATION — distance to forest edge in same year
 unique_years = sort(unique(data_defor$year))
 for (yr in unique_years) {
   
@@ -795,8 +797,8 @@ for (yr in unique_years) {
   r_year = rasters_reclass[[which(years_lulc == yr)]]
   
   # Build binary forest mask: 1 = forest, NA = other
-  forest_bin = r_year
-  forest_bin[forest_bin != 1] = NA
+  forest_mask = r_year
+  forest_mask[forest_mask != 1] = NA
   
   # Compute forest edges
   edge_list = landscapemetrics::get_boundaries(forest_mask, as_NA = TRUE)
@@ -810,7 +812,7 @@ for (yr in unique_years) {
   data_defor$dist_edge_m[idx] = d
 }
 
-# Loop over years (reforestation dataset)
+# REFORESTATION — distance to forest edge in previous year (t − 1)
 unique_years = sort(unique(data_refor$year))
 for (yr in unique_years) {
   
@@ -820,12 +822,14 @@ for (yr in unique_years) {
   idx = which(data_refor$year == yr)
   if (length(idx) == 0) next
   
-  # Get the forest raster for the corresponding year
-  r_year = rasters_reclass[[which(years_lulc == yr)]]
+  yr_pos = which(years_lulc == yr)
+  if (yr_pos <= 1) next   # no previous year
+  
+  r_prev = rasters_reclass[[yr_pos - 1]]
   
   # Build binary forest mask: 1 = forest, NA = other
-  forest_bin = r_year
-  forest_bin[forest_bin != 1] = NA
+  forest_mask = r_prev
+  forest_mask[forest_mask != 1] = NA
   
   # Compute forest edges
   edge_list = landscapemetrics::get_boundaries(forest_mask, as_NA = TRUE)
@@ -852,12 +856,46 @@ cat(" Distances computed.\n")
 
 #### 7. Slope --------
 # Slope value is extracted for each event location.
+# The extraction returns some NAs so we fix that by extracting closest values.
 cat("SECTION 7: extracting slope values\n")
 
-data_defor = data_defor %>%
-  dplyr::mutate(slope_pct = terra::extract(slope_r, data_defor[, c("x", "y")], ID = FALSE)[,1],)
-data_refor = data_refor %>%
-  dplyr::mutate(slope_pct = terra::extract(slope_r, data_refor[, c("x", "y")], ID = FALSE)[,1],)
+compute_slope = function(dt, slope_r, var_name) {
+  
+  cat("\n--- Extracting", var_name, "---\n")
+  
+  dt[[var_name]] = NA_real_
+  
+  # build point vector once
+  pts = terra::vect(
+    dt[, c("x", "y")],
+    geom = c("x", "y"),
+    crs = terra::crs(slope_r)
+  )
+  
+  # initial extraction (cell value)
+  vals = terra::extract(slope_r, pts, ID = FALSE)[,1]
+  
+  # identify NA values
+  na_idx = which(is.na(vals))
+  
+  if (length(na_idx) > 0) {
+    cat("  → Fixing", length(na_idx), "NA values using nearest cell\n")
+    
+    nearest = terra::extract(
+      slope_r,
+      pts[na_idx],
+      method = "near"
+    )[,1]
+    
+    vals[na_idx] = nearest
+  }
+  
+  dt[[var_name]] = vals
+  return(dt)
+}
+
+data_defor = compute_slope(data_defor, slope_r, var_name = "slope_pct")
+data_refor = compute_slope(data_refor, slope_r, var_name = "slope_pct")
 
 data_defor %>% dplyr::group_by(type) %>% dplyr::summarise(mean_slope = mean(slope_pct, na.rm=TRUE))
 data_refor %>% dplyr::group_by(type) %>% dplyr::summarise(mean_slope = mean(slope_pct, na.rm=TRUE))
@@ -984,9 +1022,10 @@ compute_landuse_buffer = function(dt, rasters, classes, radii) {
         area_values = terra::extract(focal_area_m2, pts_vect)[, 2]
         valid_vals = terra::extract(valid_area_m2, pts_vect)[, 2]
         # assign values back into the dataframe
-        col_area_name = paste0("area_m2_class_", cl)
+        col_area_name = paste0("area_m2_r", radius, "_class_", cl)
         dt[[col_area_name]][dt$year == yr] = area_values
-        col_prop_name = paste0("prop_class_", cl)
+        
+        col_prop_name = paste0("prop_r", radius, "_class_", cl)
         dt[[col_prop_name]][dt$year == yr] = area_values / valid_vals
       }
     }
@@ -995,7 +1034,6 @@ compute_landuse_buffer = function(dt, rasters, classes, radii) {
   cat("\n--- Extraction finished successfully ---\n")
   return(dt)
 }
-
 
 data_defor = compute_landuse_buffer(dt = data_defor, rasters = rasters_reclass, classes = c(1,4,6), radii = c(100,250,500))
 data_refor = compute_landuse_buffer(dt = data_refor, rasters = rasters_reclass, classes = c(1,4,6), radii = c(100,250,500))
@@ -1082,7 +1120,7 @@ compute_climate = function(dt, rasters, var_name) {
       nearest = terra::extract(
         r,
         pts[na_idx],
-        method = "simple"
+        method = "bilinear"
       )[,1]
       vals[na_idx] = nearest
     }
@@ -1542,7 +1580,7 @@ cor(car_sf_filtered$area_deforest_ha, car_sf_filtered$dist_to_river_m)
 cor(car_sf_filtered$area_reforest_ha, car_sf_filtered$dist_to_river_m)
 
 #### 6. Forest edges --------
-# Mean distance to nearest forest edge within each property
+# We compute the mean distance of all pixels in the property to the nearest forest edge
 
 # Helper function
 compute_edge = function(rast, poly) {
@@ -1576,17 +1614,6 @@ car_sf_filtered$for_edge_mean_dist_1989 = compute_edge(lu1989, car_sf_filtered)
 ### Compute last raster
 lu2024 = rasters_reclass[[length(rasters_reclass)]]
 car_sf_filtered$for_edge_mean_dist_2024 = compute_edge(lu2024, car_sf_filtered)
-
-### Compute forest edge coverage and change
-car_sf_filtered = car_sf_filtered %>%
-  dplyr::mutate(
-    for_edge_dist_change = for_edge_mean_dist_2024 - for_edge_mean_dist_1989,
-    for_edge_dist_trend = dplyr::case_when(
-      for_edge_dist_change < 0 ~ "closer",
-      for_edge_dist_change > 0 ~ "further",
-      TRUE ~ "same"
-    )
-  )
 
 
 #### 7. Intersections --------
@@ -1687,10 +1714,11 @@ car_sf_filtered$for_age_mean_2024 = exact_extract(for_age_2024, car_sf_filtered,
 ## Reclass
 car_sf_filtered = car_sf_filtered %>% 
   dplyr::mutate(for_age_dynamics = dplyr::case_when(
-    (for_age_mean_2024 > for_age_mean_2000) | (for_age_mean_2024 > for_age_mean_2010) ~ "Older",
-    (for_age_mean_2024 < for_age_mean_2000) | (for_age_mean_2024 < for_age_mean_2010) ~ "Younger",
-    TRUE ~ "NA"
-  ))
+    (for_age_mean_2024 > for_age_mean_2010) &
+      (for_age_mean_2010 > for_age_mean_2000) ~ "Consistently_older",
+    (for_age_mean_2024 < for_age_mean_2010) &
+      (for_age_mean_2010 < for_age_mean_2000) ~ "Consistently_younger",
+    TRUE ~ "Mixed"))
 table(car_sf_filtered$for_age_dynamics)
 
 #### 11. North and South of BR-101 ----------
