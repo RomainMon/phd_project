@@ -14,6 +14,10 @@ library(corrr)
 library(lme4)
 library(lattice)
 library(VSURF)
+library(Boruta)
+
+library(parallel)
+detectCores() # nombre de coeurs physiques
 
 ### Load datasets
 data_defor_pixel = readRDS(here("outputs", "data", "Mapbiomas", "LULCC_datasets", "data_defor_pixel.rds"))
@@ -476,7 +480,7 @@ data_defor_pixel %>%
 X_vif = data_defor_pixel %>% 
   dplyr::select(type, 
                 in_car, in_pub_res, in_rppn, in_rl, in_apa,
-                prop_r100_class_4,
+                prop_r100_class_4, prop_r100_class_6,
                 dist_river_log, dist_urban_log, dist_road_log, dist_edge_log,
                 slope_pct_log, prec_sum, tmin_mean,
                 forest_age) %>% 
@@ -540,7 +544,7 @@ data_refor_pixel %>%
 X_vif = data_refor_pixel %>% 
   dplyr::select(type, 
                 in_car, in_pub_res, in_rppn, in_rl, in_apa,
-                prop_r100_class_4,
+                prop_r100_class_4, prop_r100_class_6,
                 dist_river_log, dist_urban_log, dist_road_log, dist_edge_log,
                 slope_pct_log, prec_sum, tmin_mean) %>% 
   as.data.frame()
@@ -661,46 +665,68 @@ data_defor_80pct = data_defor_80pct %>%
   dplyr::mutate(type = dplyr::case_when(type == 1 ~ 0,
                                         type == 8 ~ 1,
                                         TRUE ~ NA))
+
 data_defor_20pct = data_defor_20pct %>% 
   dplyr::mutate(type = dplyr::case_when(type == 1 ~ 0,
                                         type == 8 ~ 1,
                                         TRUE ~ NA))
+
 data_refor_80pct = data_refor_80pct %>% 
   dplyr::mutate(type = dplyr::case_when(type == 4 ~ 0,
                                         type == 7 ~ 1,
                                         TRUE ~ NA))
+
 data_refor_20pct = data_refor_20pct %>% 
   dplyr::mutate(type = dplyr::case_when(type == 4 ~ 0,
                                         type == 7 ~ 1,
                                         TRUE ~ NA))
+
+# Transform the response variable to factor
+data_defor_80pct = data_defor_80pct %>%
+  mutate(type = factor(type, levels = c(0, 1)))
+
+data_defor_20pct = data_defor_20pct %>%
+  mutate(type = factor(type, levels = c(0, 1)))
+
+data_refor_80pct = data_refor_80pct %>%
+  mutate(type = factor(type, levels = c(0, 1)))
+
+data_refor_20pct = data_refor_20pct %>%
+  mutate(type = factor(type, levels = c(0, 1)))
+
+prop.table(table(data_defor_80pct$type))
+prop.table(table(data_defor_20pct$type))
+prop.table(table(data_refor_80pct$type))
+prop.table(table(data_refor_80pct$type))
 
 # We standardize to compare effect sizes with the function scale()
 # Deforestation dataset
 data_defor_80pct = data_defor_80pct %>% 
-  dplyr::mutate(dplyr::across(c(prop_r100_class_4,
+  dplyr::mutate(dplyr::across(c(prop_r100_class_4, prop_r100_class_6,
                                 dist_river_log, dist_urban_log, dist_road_log, dist_edge_log,
                                 slope_pct_log, prec_sum, tmin_mean, forest_age), 
-                              scale))
+                              ~ as.vector(scale(.x))))
 data_defor_20pct = data_defor_20pct %>% 
-  dplyr::mutate(dplyr::across(c(prop_r100_class_4,
+  dplyr::mutate(dplyr::across(c(prop_r100_class_4, prop_r100_class_6,
                                 dist_river_log, dist_urban_log, dist_road_log, dist_edge_log,
                                 slope_pct_log, prec_sum, tmin_mean, forest_age), 
-                              scale))
+                              ~ as.vector(scale(.x))))
 # Reforestation dataset
 data_refor_80pct = data_refor_80pct %>% 
-  dplyr::mutate(dplyr::across(c(prop_r100_class_4,
+  dplyr::mutate(dplyr::across(c(prop_r100_class_4, prop_r100_class_6,
                                 dist_river_log, dist_urban_log, dist_road_log, dist_edge_log,
                                 slope_pct_log, prec_sum, tmin_mean), 
-                              scale))
+                              ~ as.vector(scale(.x))))
 data_refor_20pct = data_refor_20pct %>% 
-  dplyr::mutate(dplyr::across(c(prop_r100_class_4,
+  dplyr::mutate(dplyr::across(c(prop_r100_class_4, prop_r100_class_6,
                                 dist_river_log, dist_urban_log, dist_road_log, dist_edge_log,
                                 slope_pct_log, prec_sum, tmin_mean), 
-                              scale))
+                              ~ as.vector(scale(.x))))
 
 #### Random Forest --------
 
-##### Example with VSURF ---------
+##### With VSURF ---------
+###### Example ---------
 # The following code is from Genuer et al. 2015, The R Journal
 
 data("toys")
@@ -745,11 +771,14 @@ summary(vozone)
 plot(vozone, step = "thres", imp.sd = FALSE, var.names = TRUE) # variable importance associated with each of the explanatory variables.
 # three very sensible groups of variables can be discerned ranging from the most to the least important
 number <- c(1:3, 5:13) # reorder the output variables of the procedure
-number[vozone$varselect.thres] # the 3 variables of negative importance (variables 6, 3 and 2) are eliminated
+# To know which index is which variable, refer to the Ozone dataset: variable index "1" is the first column (V1, the month)
+number[vozone$varselect.thres] # the 3 variables of negative importance (variables 6, 3 and 2) are eliminated (not in the list)
 number[vozone$varselect.interp] # the interpretation procedure leads to select the model with 5 variables, which contains all of the most important variables
 number[vozone$varselect.pred] # the prediction step does not remove any additional variable.
 
-##### On my dataset ---------
+###### On my dataset ---------
+
+### Deforestation
 subset = data_defor_80pct %>% 
   dplyr::select(c(type, legal_status, ns_br101,
                 in_car, in_pub_res, in_rppn, in_rl, in_apa,
@@ -757,7 +786,72 @@ subset = data_defor_80pct %>%
                 dist_river_log, dist_road_log, dist_urban_log, dist_edge_log,
                 slope_pct_log, prec_sum, tmin_mean,
                 forest_age))
-rf = VSURF(type ~ ., data = subset) # Very long ! See if we can optimize or try another option ?
+
+subset = subset %>% dplyr::sample_frac(0.05)
+
+rf = VSURF(type ~ ., data = subset, parallel = TRUE) # Very long ! See if we can optimize or try another option ?
+summary(rf)
+order = c(2:18) # reorder the output variables of the procedure (the index (e.g., 9) is the same index in the original dataframe) 
+order[rf$varselect.thres] # the variables of negative importance are eliminated (not in the list)
+order[rf$varselect.interp] # the interpretation procedure leads to select the model with X variables, which contains all of the most important variables
+order[rf$varselect.pred] # the prediction step
+
+### Reforestation
+subset = data_refor_80pct %>% 
+  dplyr::select(c(type, legal_status, ns_br101,
+                  in_car, in_pub_res, in_rppn, in_rl, in_apa,
+                  prop_r100_class_4, prop_r100_class_6,
+                  dist_river_log, dist_road_log, dist_urban_log, dist_edge_log,
+                  slope_pct_log, prec_sum, tmin_mean))
+
+subset = subset %>% dplyr::sample_frac(0.05)
+
+rf = VSURF(type ~ ., data = subset, parallel = TRUE) # Very long ! See if we can optimize or try another option ?
+summary(rf)
+order = c(2:17) # reorder the output variables of the procedure
+order[rf$varselect.thres] # the variables of negative importance are eliminated (not in the list)
+order[rf$varselect.interp] # the interpretation procedure leads to select the model with X variables, which contains all of the most important variables
+order[rf$varselect.pred] # the prediction step
+
+
+##### With Boruta ---------
+
+### Deforestation
+subset = data_defor_80pct %>% 
+  dplyr::select(c(type, legal_status, ns_br101,
+                  in_car, in_pub_res, in_rppn, in_rl, in_apa,
+                  prop_r100_class_4, prop_r100_class_6,
+                  dist_river_log, dist_road_log, dist_urban_log, dist_edge_log,
+                  slope_pct_log, prec_sum, tmin_mean,
+                  forest_age))
+
+subset = subset %>% dplyr::sample_frac(0.05)
+
+set.seed(1)
+# Setting doTrace argument to 1 or 2 makes Boruta report the progress of the process; version 2 is a little more verbose, namely it shows attribute decisions as soon as they are cleared
+Boruta.defor = Boruta(type ~ ., data = subset, doTrace = 2, ntree = 500)
+Boruta.defor # Result
+plot(Boruta.defor) # Z scores variability among attributes during the Boruta run
+getConfirmedFormula(Boruta.defor) # formula object that defines a model based only on confirmed attributes
+attStats(Boruta.defor) # creates a data frame containing each attribute’s Z score statistics and the fraction of random forest runs in which this attribute was more important than the most important shadow one
+
+### Reforestation
+subset = data_refor_80pct %>% 
+  dplyr::select(c(type, legal_status, ns_br101,
+                  in_car, in_pub_res, in_rppn, in_rl, in_apa,
+                  prop_r100_class_4, prop_r100_class_6,
+                  dist_river_log, dist_road_log, dist_urban_log, dist_edge_log,
+                  slope_pct_log, prec_sum, tmin_mean))
+
+subset = subset %>% dplyr::sample_frac(0.05)
+
+set.seed(1)
+# Setting doTrace argument to 1 or 2 makes Boruta report the progress of the process; version 2 is a little more verbose, namely it shows attribute decisions as soon as they are cleared
+Boruta.defor = Boruta(type ~ ., data = subset, doTrace = 2, ntree = 500)
+Boruta.defor # Result
+plot(Boruta.defor) # Z scores variability among attributes during the Boruta run
+getConfirmedFormula(Boruta.defor) # formula object that defines a model based only on confirmed attributes
+attStats(Boruta.defor) # creates a data frame containing each attribute’s Z score statistics and the fraction of random forest runs in which this attribute was more important than the most important shadow one
 
 #### Binomial GLMM -------
 
@@ -784,20 +878,19 @@ par(mfrow=c(1,1))
 ##### GLMMs -------
 
 ## GLMM with binomial distribution
-mod0 = glmer(type ~ 1 + (1|year), family=binomial, data=data_defor_80pct)
-...
+subset = data_refor_80pct %>% 
+  dplyr::select(c(type, legal_status, ns_br101,
+                  in_car, in_pub_res, in_rppn, in_rl, in_apa,
+                  prop_r100_class_4, prop_r100_class_6,
+                  dist_river_log, dist_road_log, dist_urban_log, dist_edge_log,
+                  slope_pct_log, prec_sum, tmin_mean,
+                  year))
 
-## Model selection
-cand.set <- list(mod0, mod1, mod2, mod3, mod4, mod5, mod6, mod7, mod8, mod9, mod10, mod11, mod12, mod13, mod14, mod15, mod16, mod17)
-names <- c("mod0", "mod1", "mod2", "mod3", "mod4", "mod5", "mod6", "mod7", "mod8", "mod9", "mod10", "mod11", "mod12", "mod13", "mod14", "mod15", "mod16", "mod17")
-aictab(cand.set, modnames=names, second.ord=TRUE, nobs=NULL, sort=TRUE)
-best_mod = glmmTMB(response ~ pct_hab_1m_sc + hab_loss_sc + frag_level3L + (1|year), REML=T, family=binomial, data=dataset)
+subset = subset %>% dplyr::sample_frac(0.05)
 
-# Dharma method
-# Left panel: QQplot to detect overall deviations from the expected distribution, by default with added tests for correct distribution (Kolmogorov-Smirnov test, ie is the distribution different from a theoretical distribution), dispersion (over- or under-dispersion) and outliers
-# Right panel: plot of the residuals against the predicted value (or other variable). Simulation outliers (data points that are outside the range of simulated values) are highlighted as red stars. Theoretically, lines should be horizontal.
-# DHARMa flags a difference between the observed and expected data.
-list_generalized_linear_model = list(mod14, mod0)
-for(i in 1:length(list_generalized_linear_model)) {
-  simulateResiduals(fittedModel = list_generalized_linear_model[[i]], plot = T)
-}
+mod1 = glmer(type ~ legal_status + ns_br101 + in_car + in_pub_res + in_rppn + in_rl + in_apa +
+               prop_r100_class_4 + prop_r100_class_6 + 
+               dist_river_log + dist_road_log + dist_urban_log + dist_edge_log + 
+               slope_pct_log + prec_sum + tmin_mean + (1|year), family=binomial, data=subset,
+             control = glmerControl(optimizer = "bobyqa"))
+summary(mod1)
