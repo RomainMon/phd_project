@@ -410,6 +410,7 @@ changes %>%
   dplyr::arrange(n_changes) %>% 
   dplyr::mutate(cum_n = cumsum(n_cells))
 
+
 #### 2. Select controls ---------
 # We select controls, i.e., cells that were never deforested nor reforested during the study period
 # Using the last raster ensures that: controls are still intact at the end, controls never experienced LULCC, we avoid “false controls” that are intact early but changed later
@@ -418,49 +419,86 @@ changes %>%
 cat("\nSECTION 2: Selecting intact control cells\n")
 
 # Step 1: Select relevant reforestation/deforestation events
-# We remove cells that have changes more than 3 times
-changes_subset = changes %>% 
-  dplyr::group_by(cell_id) %>% 
-  dplyr::filter(dplyr::n() <= 3) %>% 
+# Rationale:
+# - If a pixel changed multiple times, retain only its first change event.
+# - Then retain agriculture to forest (for reforestation) and forest to agriculture (for deforestation)
+
+## Reforestation events
+# We select reforestation events
+changes_refor_subset = changes %>% 
+  dplyr::filter(type == 7) 
+# We keep first event per pixel
+changes_refor_subset = changes_refor_subset %>%
+  dplyr::arrange(cell_id, change_order) %>%
+  dplyr::group_by(cell_id) %>%
+  dplyr::slice_min(change_order, n = 1, with_ties = FALSE) %>%
   dplyr::ungroup()
-changes_subset %>% 
-  dplyr::summarise(n=dplyr::n_distinct(cell_id))
 # We subset reforested events to agricultural pixels becoming forests
+changes_refor_subset = changes_refor_subset %>% 
+  dplyr::filter((from == 4 & to == 1))
+
+## Deforestation events
+# We select deforestation events
+changes_defor_subset = changes %>% 
+  dplyr::filter(type == 8) 
+# We keep first event per pixel
+changes_defor_subset = changes_defor_subset %>%
+  dplyr::arrange(cell_id, change_order) %>%
+  dplyr::group_by(cell_id) %>%
+  dplyr::slice_min(change_order, n = 1, with_ties = FALSE) %>%
+  dplyr::ungroup()
 # We subset deforested events to forests becoming agricultural pixels
-changes_subset = changes_subset %>% 
-  dplyr::filter((from == 4 & to == 1) | (from == 1 & to == 4))
+changes_defor_subset = changes_defor_subset %>% 
+  dplyr::filter((from == 1 & to == 4))
 
 # Step 2: Count changed cells of each type per year
-events_per_year = changes_subset %>%
-  dplyr::count(year, type, name = "n_events")
-head(events_per_year)
+## Reforestation
+refor_events_per_year = changes_refor_subset %>%
+  dplyr::count(year, name = "n_events")
+head(refor_events_per_year)
+
+## Reforestation
+defor_events_per_year = changes_defor_subset %>%
+  dplyr::count(year, name = "n_events")
+head(defor_events_per_year)
 
 # Step 3: Select intact controls for reforestation
 # Select the last cumulative raster (where intact cells are displayed)
 last_rast = rasters_tm[[length(rasters_tm)]]
+
 # Binary mask: intact agriculture only
 agri_mask = last_rast == 4
 plot(agri_mask)
+
 # Cell indices of intact agriculture
 agri_cells = which(terra::values(agri_mask) == 1)
 
-# Are there more pixels of agriculture than of reforested cells?
-length(agri_cells) > sum(changes$type == 7)
+# Remove ALL cells that ever changed
+changed_ids = unique(changes$cell_id)
 
-# Number of cells to be selected each year
-reforest_events = events_per_year %>%
-  dplyr::filter(type == 7)
+# Keep only true never-changed intact agriculture cells
+agri_cells = setdiff(agri_cells, changed_ids)
+
+# Create shrinking pool to avoid duplicates across years
+available_agri = agri_cells
 
 # Random selection of cells according to the number of changes
-controls_agri = vector("list", length = nrow(reforest_events))
-names(controls_agri) = reforest_events$year
+controls_agri = vector("list", length = nrow(refor_events_per_year))
+names(controls_agri) = refor_events_per_year$year
 
-for (i in seq_len(nrow(reforest_events))) {
-  yr = reforest_events$year[i]
-  n  = reforest_events$n_events[i]
+for (i in seq_len(nrow(refor_events_per_year))) {
+  yr = refor_events_per_year$year[i]
+  n = refor_events_per_year$n_events[i]
+  
+  if (length(available_agri) < n) {
+    stop("Not enough unique agriculture cells left to sample controls.")
+  }
   
   # Sample
-  cells = sample(agri_cells, size = n, replace = FALSE)
+  cells = sample(available_agri, size = n, replace = FALSE)
+  
+  # Remove used cells permanently
+  available_agri = setdiff(available_agri, cells)
   
   # Convert to coordinates
   coords = terra::xyFromCell(last_rast, cells)
@@ -487,29 +525,37 @@ terra::extract(rasters_tm[[35]], controls_2024[, c("x", "y")]) # Check the value
 # Step 4: Select intact controls for deforestation
 # Select the last cumulative raster (where intact cells are displayed)
 last_rast = rasters_tm[[length(rasters_tm)]]
+
 # Binary mask: intact forest only
 forest_mask = last_rast == 1
 plot(forest_mask)
-# Cell indices of intact agriculture
+
+# Cells of intact forest
 forest_cells = which(terra::values(forest_mask) == 1)
 
-# Are there more pixels of forest than of deforested cells?
-length(forest_cells) > sum(changes$type == 8)
+# Remove ALL cells that ever changed
+forest_cells = setdiff(forest_cells, changed_ids)
 
-# Number of cells to be selected each year
-deforest_events = events_per_year %>%
-  dplyr::filter(type == 8)
+# Create shrinking pool
+available_forest = forest_cells
 
 # Random selection of cells according to the number of changes
-controls_forest = vector("list", length = nrow(deforest_events))
-names(controls_forest) = deforest_events$year
+controls_forest = vector("list", length = nrow(defor_events_per_year))
+names(controls_forest) = defor_events_per_year$year
 
-for (i in seq_len(nrow(deforest_events))) {
-  yr = deforest_events$year[i]
-  n  = deforest_events$n_events[i]
+for (i in seq_len(nrow(defor_events_per_year))) {
+  yr = defor_events_per_year$year[i]
+  n  = defor_events_per_year$n_events[i]
+  
+  if (length(available_forest) < n) {
+    stop("Not enough unique forest cells left to sample controls.")
+  }
   
   # Sample
-  cells = sample(forest_cells, size = n, replace = FALSE)
+  cells = sample(available_forest, size = n, replace = FALSE)
+  
+  # Remove used cells permanently
+  available_forest = setdiff(available_forest, cells)
   
   # Convert to coordinates
   coords = terra::xyFromCell(last_rast, cells)
@@ -536,38 +582,62 @@ points(controls_2024$x, controls_2024$y, pch = 20, col = "magenta", cex = 0.4)
 points(controls_2023$x, controls_2023$y, pch = 20, col = "darkslategray1", cex = 0.4) # Check that controls differ each year
 terra::extract(rasters_tm[[35]], controls_2024[, c("x", "y")]) # Check the value
 
+
 # Summary
-# Number of events per type of change
-events_per_year %>% 
-  dplyr::group_by(type) %>% 
-  dplyr::summarise(n_cells = sum(n_events))
 # Check consistency
 cat("Controls (deforestation):", nrow(controls_forest_df), "\n")
 cat("Controls (reforestation):", nrow(controls_agri_df), "\n")
-
 
 
 #### 3. Build final datasets for modelling -------
 
 # Dataset A: Reforest events + control cells (intact agriculture)
 data_refor = dplyr::bind_rows(
-  changes_subset %>% # Take the filtered dataset!
-    dplyr::filter(type == 7) %>%
+  changes_refor_subset %>% # Take the filtered dataset!
     dplyr::select(year, cell_id, type, x, y),
   controls_agri_df)
 head(data_refor)
 
 # Dataset B: Deforest events + control cells (intact forest)
 data_defor = dplyr::bind_rows(
-  changes_subset %>% # Take the filtered dataset!
-    dplyr::filter(type == 8) %>%
+  changes_defor_subset %>% # Take the filtered dataset!
     dplyr::select(year, cell_id, type, x, y),
   controls_forest_df)
 head(data_defor)
 
 # Quick check
+# Number of rows per type of change
 data_refor %>% dplyr::group_by(type) %>% dplyr::summarise(n=dplyr::n())
 data_defor %>% dplyr::group_by(type) %>% dplyr::summarise(n=dplyr::n())
+
+# Number of cells per type of change
+data_refor %>% dplyr::group_by(type) %>% dplyr::summarise(n=dplyr::n_distinct(cell_id))
+data_defor %>% dplyr::group_by(type) %>% dplyr::summarise(n=dplyr::n_distinct(cell_id))
+
+# Is the number of cell_id equals the number of rows? Should be true if there is no duplicates
+data_refor %>% dplyr::summarise(n_cells = dplyr::n_distinct(cell_id)) == nrow(data_refor)
+data_defor %>% dplyr::summarise(n_cells = dplyr::n_distinct(cell_id)) == nrow(data_defor)
+
+# Should return 0 rows
+data_refor %>%
+  dplyr::count(cell_id) %>%
+  dplyr::filter(n > 1)
+data_defor %>%
+  dplyr::count(cell_id) %>%
+  dplyr::filter(n > 1)
+
+# Verify no overlap between controls and cells that changed (should return 0)
+# Between reforested and agricultural cells
+intersect(changes_refor_subset %>% dplyr::pull(cell_id), 
+          controls_agri_df$cell_id)
+
+# Between deforested and forest cells
+intersect(changes_defor_subset %>% dplyr::pull(cell_id), 
+          controls_forest_df$cell_id)
+
+# Year balance (events and controls should match perfectly)
+data_defor %>% dplyr::group_by(type, year) %>% dplyr::count() %>% dplyr::arrange(year)
+data_refor %>% dplyr::group_by(type, year) %>% dplyr::count() %>% dplyr::arrange(year)
 
 # Summary
 cat("Dataset 'Reforestation' rows:", nrow(data_refor), "\n")
@@ -1217,6 +1287,7 @@ table(data_refor$type, data_refor$ns_br101)
 
 cat("Relative location of points regarding the BR-101 highway determined\n")
 
+
 #### Export datasets ----------
 saveRDS(data_defor,
         here("outputs", "data", "Mapbiomas", "LULCC_datasets", "data_defor_pixel.rds"))
@@ -1244,7 +1315,7 @@ make_point_plot = function(pt, rasters_reclass, years_lulc,
   # convert point → sf
   pt_sf = sf::st_as_sf(pt, coords = c("x","y"), crs = crs(r_year))
   
-  # 1 km buffer
+  # buffer
   buf = sf::st_buffer(pt_sf, dist = radius)
   
   # crop raster to 1 km window
@@ -1289,6 +1360,9 @@ make_point_plot = function(pt, rasters_reclass, years_lulc,
     "dist_urban_m = ", round(pt$dist_urban_m), "\n",
     "dist_road_m = ", round(pt$dist_road_m), "\n",
     "dist_edge_m = ", round(pt$dist_edge_m), "\n",
+    "area_forests_100m = ", round(pt$area_m2_r100_class_1), "\n",
+    "area_agri_100m = ", round(pt$area_m2_r100_class_4), "\n",
+    "area_urb_100m = ", round(pt$area_m2_r100_class_6), "\n",
     "slope_pct = ", round(pt$slope_pct, 1), "\n",
     "forest_age = ", round(pt$forest_age), "\n",
     "prec_sum = ", round(pt$prec_sum), "\n",
@@ -1306,7 +1380,7 @@ make_point_plot = function(pt, rasters_reclass, years_lulc,
 ### Generate both plots
 final_plot = make_point_plot(pt_defor, rasters_reclass, years_lulc,
                            roads_sf, rivers_sf, car_sf, rl_sf, pub_res_sf, apa_mld_sf,
-                radius=500)
+                radius=100)
 
 # Export PNG (high resolution)
 ggsave(
@@ -1317,7 +1391,6 @@ ggsave(
   dpi = 300,
   bg="white"
 )
-
 
 
 ## Prepare the property-based dataset ----------

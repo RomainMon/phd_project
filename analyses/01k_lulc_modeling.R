@@ -15,6 +15,11 @@ library(lme4)
 library(lattice)
 library(VSURF)
 library(Boruta)
+library(glmmTMB)
+library(DHARMa)
+library(performance)
+library(spdep)
+library(sp)
 
 library(parallel)
 detectCores() # nombre de coeurs physiques
@@ -137,82 +142,9 @@ prop.table(table(data_refor_pixel$type, data_refor_pixel$ns_br101), margin = 1)
 prop.table(table(data_defor_pixel$type, data_defor_pixel$ns_br101), margin = 2)
 prop.table(table(data_refor_pixel$type, data_refor_pixel$ns_br101), margin = 2)
 
-data_defor_pixel %>% 
-  gtsummary::tbl_cross(row = ns_br101, col = type,
-                       percent = "column",
-                       margin = "row")
-data_refor_pixel %>% 
-  gtsummary::tbl_cross(row = ns_br101, col = type,
-                       percent = "column",
-                       margin = "row")
-
-
 ###### APA MLD -----
 table(data_defor_pixel$type, data_defor_pixel$in_apa)
 table(data_refor_pixel$type, data_refor_pixel$in_apa)
-
-data_defor_pixel %>% 
-  gtsummary::tbl_cross(row = in_apa, col = type,
-                       percent = "column",
-                       margin = "row")
-data_refor_pixel %>% 
-  gtsummary::tbl_cross(row = in_apa, col = type,
-                       percent = "column",
-                       margin = "row")
-
-###### CAR -----
-table(data_defor_pixel$type, data_defor_pixel$in_car)
-table(data_refor_pixel$type, data_refor_pixel$in_car)
-
-data_defor_pixel %>% 
-  gtsummary::tbl_cross(row = in_car, col = type,
-                       percent = "column",
-                       margin = "row")
-data_refor_pixel %>% 
-  gtsummary::tbl_cross(row = in_car, col = type,
-                       percent = "column",
-                       margin = "row")
-
-###### Public reserves -----
-table(data_defor_pixel$type, data_defor_pixel$in_pub_res)
-table(data_refor_pixel$type, data_refor_pixel$in_pub_res)
-
-data_defor_pixel %>% 
-  gtsummary::tbl_cross(row = in_pub_res, col = type,
-                       percent = "column",
-                       margin = "row")
-data_refor_pixel %>% 
-  gtsummary::tbl_cross(row = in_pub_res, col = type,
-                       percent = "column",
-                       margin = "row")
-
-###### RPPNs -----
-table(data_defor_pixel$type, data_defor_pixel$in_rppn)
-table(data_refor_pixel$type, data_refor_pixel$in_rppn)
-
-data_defor_pixel %>% 
-  gtsummary::tbl_cross(row = in_rppn, col = type,
-                       percent = "column",
-                       margin = "row")
-data_refor_pixel %>% 
-  gtsummary::tbl_cross(row = in_rppn, col = type,
-                       percent = "column",
-                       margin = "row")
-
-# Beware: few pixels intersect RPPNs
-
-###### Legal Reserves -----
-table(data_defor_pixel$type, data_defor_pixel$in_rl)
-table(data_refor_pixel$type, data_refor_pixel$in_rl)
-
-data_defor_pixel %>% 
-  gtsummary::tbl_cross(row = in_rl, col = type,
-                       percent = "column",
-                       margin = "row")
-data_refor_pixel %>% 
-  gtsummary::tbl_cross(row = in_rl, col = type,
-                       percent = "column",
-                       margin = "row")
 
 #### Quantitative variables ------
 ##### Cleveland dotplot ------
@@ -396,7 +328,6 @@ data_refor_pixel %>%
 hist(data_defor_pixel$prec_sum)
 hist(data_refor_pixel$prec_sum)
 
-
 ##### Tmin -------
 data_defor_pixel %>% 
   dplyr::group_by(type) %>% 
@@ -423,7 +354,7 @@ hist(data_refor_pixel$tmax_mean)
 ###### Pearson =====
 
 X = data_defor_pixel %>% 
-  dplyr::select(in_car, in_pub_res, in_rppn, in_rl, in_apa,
+  dplyr::select(in_apa,
         area_m2_r100_class_1, area_m2_r100_class_4, area_m2_r100_class_6,
         prop_r100_class_1, prop_r100_class_4, prop_r100_class_6,
         dist_river_log, dist_urban_log, dist_road_log, dist_edge_log,
@@ -447,7 +378,7 @@ high_corr
 ###### VIF ---------
 X_vif = data_defor_pixel %>% 
   dplyr::select(type, 
-                in_car, in_pub_res, in_rppn, in_rl, in_apa,
+                in_apa,
                 area_m2_r100_class_1, area_m2_r100_class_4, area_m2_r100_class_6,
                 prop_r100_class_1, prop_r100_class_4, prop_r100_class_6,
                 dist_river_log, dist_urban_log, dist_road_log, dist_edge_log,
@@ -472,14 +403,13 @@ data_defor_pixel %>%
                   tmin_mean, tmax_mean)) %>% 
   corrr::correlate() %>% 
   focus(type) 
-# Proportions are more strongly correlated to the response variable than the amounts
 # We retain the proportion of agriculture
 # Tmin is more strongly correlated than tmax
 
 ###### Re-run VIF ------
 X_vif = data_defor_pixel %>% 
   dplyr::select(type, 
-                in_car, in_pub_res, in_rppn, in_rl, in_apa,
+                in_apa,
                 prop_r100_class_4, prop_r100_class_6,
                 dist_river_log, dist_urban_log, dist_road_log, dist_edge_log,
                 slope_pct_log, prec_sum, tmin_mean,
@@ -491,7 +421,7 @@ vif.result[vif.result > 2.5] # All good !
 ##### Reforestation dataset -----
 ###### Pearson =====
 X = data_refor_pixel %>% 
-  dplyr::select(in_car, in_pub_res, in_rppn, in_rl, in_apa,
+  dplyr::select(in_apa,
                 area_m2_r100_class_1, area_m2_r100_class_4, area_m2_r100_class_6,
                 prop_r100_class_1, prop_r100_class_4, prop_r100_class_6,
                 dist_river_log, dist_urban_log, dist_road_log, dist_edge_log,
@@ -515,7 +445,7 @@ high_corr
 ###### VIF ---------
 X_vif = data_refor_pixel %>% 
   dplyr::select(type, 
-                in_car, in_pub_res, in_rppn, in_rl, in_apa,
+                in_apa,
                 area_m2_r100_class_1, area_m2_r100_class_4, area_m2_r100_class_6,
                 prop_r100_class_1, prop_r100_class_4, prop_r100_class_6,
                 dist_river_log, dist_urban_log, dist_road_log, dist_edge_log,
@@ -543,7 +473,7 @@ data_refor_pixel %>%
 ###### Re-run VIF ------
 X_vif = data_refor_pixel %>% 
   dplyr::select(type, 
-                in_car, in_pub_res, in_rppn, in_rl, in_apa,
+                in_apa,
                 prop_r100_class_4, prop_r100_class_6,
                 dist_river_log, dist_urban_log, dist_road_log, dist_edge_log,
                 slope_pct_log, prec_sum, tmin_mean) %>% 
@@ -552,176 +482,49 @@ vif.result = vif(X_vif, y.name="type")
 vif.result[vif.result > 2.5] # Be careful with distance to edges
 
 
-#### Extract 20% of data -------
-
-##### Deforestation dataset -----
-# Split the dataset by change_type
-defor_only = data_defor_pixel %>% dplyr::filter(type == 8)
-control_only = data_defor_pixel %>% dplyr::filter(type == 1)
-
-# Sample
-spl_defor = dplyr::sample_frac(defor_only, 0.20)
-spl_control = dplyr::sample_frac(control_only, 0.20)
-
-# Bind the sampled data (20% of full dataset)
-data_defor_20pct = dplyr::bind_rows(spl_defor, spl_control)
-
-# Create the remaining 80% dataset
-data_defor_80pct = dplyr::anti_join(data_defor_pixel, data_defor_20pct, by = colnames(data_defor_pixel))
-
-## Check
-# Number of rows
-count(data_defor_20pct) + count(data_defor_80pct)
-count(data_defor_pixel) == count(data_defor_20pct) + count(data_defor_80pct)
-count(data_defor_pixel) * 0.20
-
-# Number of events per category
-data_defor_20pct %>% 
-  dplyr::group_by(type) %>% 
-  dplyr::summarise(n=dplyr::n()) %>% 
-  dplyr::mutate(prop = n*100/sum(n))
-data_defor_80pct %>% 
-  dplyr::group_by(type) %>% 
-  dplyr::summarise(n=dplyr::n()) %>% 
-  dplyr::mutate(prop = n*100/sum(n))
-
-##### Reforestation dataset -----
-# Split the dataset by change_type
-refor_only = data_refor_pixel %>% dplyr::filter(type == 7)
-control_only = data_refor_pixel %>% dplyr::filter(type == 4)
-
-# Sample
-spl_refor = dplyr::sample_frac(refor_only, 0.20)
-spl_control = dplyr::sample_frac(control_only, 0.20)
-
-# Bind the sampled data (20% of full dataset)
-data_refor_20pct = dplyr::bind_rows(spl_refor, spl_control)
-
-# Create the remaining 80% dataset
-data_refor_80pct = dplyr::anti_join(data_refor_pixel, data_refor_20pct, by = colnames(data_refor_pixel))
-
-## Check
-# Number of rows
-count(data_refor_20pct) + count(data_refor_80pct)
-count(data_refor_pixel) == count(data_refor_20pct) + count(data_refor_80pct)
-count(data_refor_pixel) * 0.20
-
-# Number of events per category
-data_refor_20pct %>% 
-  dplyr::group_by(type) %>% 
-  dplyr::summarise(n=dplyr::n()) %>% 
-  dplyr::mutate(prop = n*100/sum(n))
-data_refor_80pct %>% 
-  dplyr::group_by(type) %>% 
-  dplyr::summarise(n=dplyr::n()) %>% 
-  dplyr::mutate(prop = n*100/sum(n))
-
-
 #### Prepare datasets for GLMM --------
 # We must transform categorical variables to factors
-data_defor_80pct = data_defor_80pct %>% 
-  dplyr::mutate(in_apa = factor(in_apa),
-                in_car = factor(in_car),
-                in_pub_res = factor(in_pub_res),
-                in_rppn = factor(in_rppn),
-                in_rl = factor(in_rl),
-                legal_status = factor(legal_status, levels=c("unknown","private","private_within_reserve","public_reserve","rl","rppn")),
+data_defor_pixel = data_defor_pixel %>% 
+  dplyr::mutate(in_apa = factor(in_apa, levels = c(0,1), labels = c("Outside","Inside")),
+                legal_status = factor(legal_status, levels=c("private","unknown","private_within_reserve","public_reserve","rl","rppn")),
                 ns_br101 = factor(ns_br101),
                 year = factor(year),
                 cell_id = factor(cell_id))
-data_defor_20pct = data_defor_20pct %>% 
-  dplyr::mutate(in_apa = factor(in_apa),
-                in_car = factor(in_car),
-                in_pub_res = factor(in_pub_res),
-                in_rppn = factor(in_rppn),
-                in_rl = factor(in_rl),
-                legal_status = factor(legal_status, levels=c("unknown","private","private_within_reserve","public_reserve","rl","rppn")),
-                ns_br101 = factor(ns_br101),
-                year = factor(year),
-                cell_id = factor(cell_id))
-data_refor_80pct = data_refor_80pct %>% 
-  dplyr::mutate(in_apa = factor(in_apa),
-                in_car = factor(in_car),
-                in_pub_res = factor(in_pub_res),
-                in_rppn = factor(in_rppn),
-                in_rl = factor(in_rl),
-                legal_status = factor(legal_status,levels=c("unknown","private","private_within_reserve","public_reserve","rl","rppn")),
-                ns_br101 = factor(ns_br101),
-                year = factor(year),
-                cell_id = factor(cell_id))
-data_refor_20pct = data_refor_20pct %>% 
-  dplyr::mutate(in_apa = factor(in_apa),
-                in_car = factor(in_car),
-                in_pub_res = factor(in_pub_res),
-                in_rppn = factor(in_rppn),
-                in_rl = factor(in_rl),
-                legal_status = factor(legal_status,levels=c("unknown","private","private_within_reserve","public_reserve","rl","rppn")),
+data_refor_pixel = data_refor_pixel %>% 
+  dplyr::mutate(in_apa = factor(in_apa, levels = c(0,1), labels = c("Outside","Inside")),
+                legal_status = factor(legal_status,levels=c("private","unknown","private_within_reserve","public_reserve","rl","rppn")),
                 ns_br101 = factor(ns_br101),
                 year = factor(year),
                 cell_id = factor(cell_id))
 
 # The response variable must be 0 (control) VS 1 (deforestation/reforestation)
-data_defor_80pct = data_defor_80pct %>% 
+data_defor_pixel = data_defor_pixel %>% 
   dplyr::mutate(type = dplyr::case_when(type == 1 ~ 0,
                                         type == 8 ~ 1,
                                         TRUE ~ NA))
 
-data_defor_20pct = data_defor_20pct %>% 
-  dplyr::mutate(type = dplyr::case_when(type == 1 ~ 0,
-                                        type == 8 ~ 1,
-                                        TRUE ~ NA))
-
-data_refor_80pct = data_refor_80pct %>% 
+data_refor_pixel = data_refor_pixel %>% 
   dplyr::mutate(type = dplyr::case_when(type == 4 ~ 0,
                                         type == 7 ~ 1,
                                         TRUE ~ NA))
 
-data_refor_20pct = data_refor_20pct %>% 
-  dplyr::mutate(type = dplyr::case_when(type == 4 ~ 0,
-                                        type == 7 ~ 1,
-                                        TRUE ~ NA))
+# Quick checks
+prop.table(table(data_defor_pixel$type))
+prop.table(table(data_refor_pixel$type))
 
-# Transform the response variable to factor
-data_defor_80pct = data_defor_80pct %>%
-  mutate(type = factor(type, levels = c(0, 1)))
-
-data_defor_20pct = data_defor_20pct %>%
-  mutate(type = factor(type, levels = c(0, 1)))
-
-data_refor_80pct = data_refor_80pct %>%
-  mutate(type = factor(type, levels = c(0, 1)))
-
-data_refor_20pct = data_refor_20pct %>%
-  mutate(type = factor(type, levels = c(0, 1)))
-
-prop.table(table(data_defor_80pct$type))
-prop.table(table(data_defor_20pct$type))
-prop.table(table(data_refor_80pct$type))
-prop.table(table(data_refor_80pct$type))
-
-# We standardize to compare effect sizes with the function scale()
-# Deforestation dataset
-data_defor_80pct = data_defor_80pct %>% 
-  dplyr::mutate(dplyr::across(c(prop_r100_class_4, prop_r100_class_6,
-                                dist_river_log, dist_urban_log, dist_road_log, dist_edge_log,
-                                slope_pct_log, prec_sum, tmin_mean, forest_age), 
-                              ~ as.vector(scale(.x))))
-data_defor_20pct = data_defor_20pct %>% 
-  dplyr::mutate(dplyr::across(c(prop_r100_class_4, prop_r100_class_6,
-                                dist_river_log, dist_urban_log, dist_road_log, dist_edge_log,
-                                slope_pct_log, prec_sum, tmin_mean, forest_age), 
-                              ~ as.vector(scale(.x))))
-# Reforestation dataset
-data_refor_80pct = data_refor_80pct %>% 
-  dplyr::mutate(dplyr::across(c(prop_r100_class_4, prop_r100_class_6,
-                                dist_river_log, dist_urban_log, dist_road_log, dist_edge_log,
-                                slope_pct_log, prec_sum, tmin_mean), 
-                              ~ as.vector(scale(.x))))
-data_refor_20pct = data_refor_20pct %>% 
-  dplyr::mutate(dplyr::across(c(prop_r100_class_4, prop_r100_class_6,
-                                dist_river_log, dist_urban_log, dist_road_log, dist_edge_log,
-                                slope_pct_log, prec_sum, tmin_mean), 
-                              ~ as.vector(scale(.x))))
+# # We standardize to compare effect sizes with the function scale()
+# # Deforestation dataset
+# data_defor_pixel = data_defor_pixel %>% 
+#   dplyr::mutate(dplyr::across(c(prop_r100_class_4, prop_r100_class_6,
+#                                 dist_river_log, dist_urban_log, dist_road_log, dist_edge_log,
+#                                 slope_pct_log, prec_sum, tmin_mean, forest_age), 
+#                               ~ as.vector(scale(.x))))
+# # Reforestation dataset
+# data_refor_pixel = data_refor_pixel %>% 
+#   dplyr::mutate(dplyr::across(c(prop_r100_class_4, prop_r100_class_6,
+#                                 dist_river_log, dist_urban_log, dist_road_log, dist_edge_log,
+#                                 slope_pct_log, prec_sum, tmin_mean), 
+#                               ~ as.vector(scale(.x))))
 
 #### Random Forest --------
 
@@ -779,7 +582,7 @@ number[vozone$varselect.pred] # the prediction step does not remove any addition
 ###### On my dataset ---------
 
 ### Deforestation
-subset = data_defor_80pct %>% 
+subset = data_defor_70pct %>% 
   dplyr::select(c(type, legal_status, ns_br101,
                 in_car, in_pub_res, in_rppn, in_rl, in_apa,
                 prop_r100_class_4, prop_r100_class_6,
@@ -797,7 +600,7 @@ order[rf$varselect.interp] # the interpretation procedure leads to select the mo
 order[rf$varselect.pred] # the prediction step
 
 ### Reforestation
-subset = data_refor_80pct %>% 
+subset = data_refor_70pct %>% 
   dplyr::select(c(type, legal_status, ns_br101,
                   in_car, in_pub_res, in_rppn, in_rl, in_apa,
                   prop_r100_class_4, prop_r100_class_6,
@@ -817,7 +620,7 @@ order[rf$varselect.pred] # the prediction step
 ##### With Boruta ---------
 
 ### Deforestation
-subset = data_defor_80pct %>% 
+subset = data_defor_70pct %>% 
   dplyr::select(c(type, legal_status, ns_br101,
                   in_car, in_pub_res, in_rppn, in_rl, in_apa,
                   prop_r100_class_4, prop_r100_class_6,
@@ -836,7 +639,7 @@ getConfirmedFormula(Boruta.defor) # formula object that defines a model based on
 attStats(Boruta.defor) # creates a data frame containing each attribute’s Z score statistics and the fraction of random forest runs in which this attribute was more important than the most important shadow one
 
 ### Reforestation
-subset = data_refor_80pct %>% 
+subset = data_refor_70pct %>% 
   dplyr::select(c(type, legal_status, ns_br101,
                   in_car, in_pub_res, in_rppn, in_rl, in_apa,
                   prop_r100_class_4, prop_r100_class_6,
@@ -856,41 +659,171 @@ attStats(Boruta.defor) # creates a data frame containing each attribute’s Z sc
 #### Binomial GLMM -------
 
 ##### Deforestation ----
-str(data_defor_80pct)
+str(data_defor_pixel)
 
 # We check whether the probability is close to 0.5 (we cannot model probability variance under 0.1 and above 0.9)
-prop.table(table(data_defor_80pct$type)) # Exactly 0.5 due to sampling strategy
+prop.table(table(data_defor_pixel$type)) # Exactly 0.5 due to sampling strategy
 
 # Plots
 par(mfrow=c(3,4))
-boxplot(prop_r100_class_4~type, data=data_defor_80pct)
-boxplot(prop_r100_class_6~type, data=data_defor_80pct)
-boxplot(dist_river_log~type, data=data_defor_80pct)
-boxplot(dist_urban_log~type, data=data_defor_80pct)
-boxplot(dist_road_log~type, data=data_defor_80pct)
-boxplot(dist_edge_log~type, data=data_defor_80pct)
-boxplot(slope_pct~type, data=data_defor_80pct)
-boxplot(prec_sum~type, data=data_defor_80pct)
-boxplot(tmin_mean~type, data=data_defor_80pct)
-boxplot(forest_age~type, data=data_defor_80pct)
+boxplot(prop_r100_class_4~type, data=data_defor_pixel)
+boxplot(prop_r100_class_6~type, data=data_defor_pixel)
+boxplot(dist_river_log~type, data=data_defor_pixel)
+boxplot(dist_urban_log~type, data=data_defor_pixel)
+boxplot(dist_road_log~type, data=data_defor_pixel)
+boxplot(dist_edge_log~type, data=data_defor_pixel)
+boxplot(slope_pct~type, data=data_defor_pixel)
+boxplot(prec_sum~type, data=data_defor_pixel)
+boxplot(tmin_mean~type, data=data_defor_pixel)
+boxplot(forest_age~type, data=data_defor_pixel)
 par(mfrow=c(1,1))
 
-##### GLMMs -------
+###### GLMMs -------
 
 ## GLMM with binomial distribution
-subset = data_refor_80pct %>% 
-  dplyr::select(c(type, legal_status, ns_br101,
-                  in_car, in_pub_res, in_rppn, in_rl, in_apa,
-                  prop_r100_class_4, prop_r100_class_6,
-                  dist_river_log, dist_road_log, dist_urban_log, dist_edge_log,
-                  slope_pct_log, prec_sum, tmin_mean,
-                  year))
-
-subset = subset %>% dplyr::sample_frac(0.05)
-
-mod1 = glmer(type ~ legal_status + ns_br101 + in_car + in_pub_res + in_rppn + in_rl + in_apa +
+# We use the logit function to predict values between 0 and 1
+# Binomial model
+mod1 = glmmTMB(type ~ legal_status + ns_br101 + in_apa +
                prop_r100_class_4 + prop_r100_class_6 + 
                dist_river_log + dist_road_log + dist_urban_log + dist_edge_log + 
-               slope_pct_log + prec_sum + tmin_mean + (1|year), family=binomial, data=subset,
-             control = glmerControl(optimizer = "bobyqa"))
+               slope_pct_log + prec_sum + tmin_mean + (1|year), 
+               REML=T, family=binomial, data=data_defor_pixel) # REML = true for model interpretation
 summary(mod1)
+
+###### Validation -----------
+
+### Check convergence
+check_convergence(mod1)
+
+# 1) Examine plots of residuals versus fitted values for the entire model
+# 2) Model residuals versus all explanatory variables to look for patterns
+# 3) For GLMMs: residuals versus fitted values for each grouping level of a random intercept factor
+
+#### Dharma method (from Hartig 2024)
+# Rationale: misspecifications in GL(M)Ms cannot reliably be diagnosed with standard residual plots
+# The "DHARMa" package uses a simulation-based approach to create readily interpretable scaled (quantile) residuals for fitted generalized linear (mixed) models
+# The resulting residuals are standardized to values between 0 and 1 and can be interpreted as intuitively as residuals from a linear regression
+# Also provides a number of plot and test functions for typical model misspecification problems, such as over/underdispersion, zero-inflation, and residual spatial, temporal and phylogenetic autocorrelation.
+# A residual of 0 means that all simulated values are larger than the observed value, and a residual of 0.5 means half of the simulated values are larger than the observed value.
+# NB: If you have a lot of data points, residual diagnostics will nearly inevitably become significant, because having a perfectly fitting model is very unlikely.
+# DHARMa only flags a difference between the observed and expected data - the user has to decide whether this difference is actually a problem for the analysis!
+
+# We will use a smaller model because DHARMa struggles with very large models
+spl = data_defor_pixel %>% 
+  dplyr::sample_frac(0.1)
+mod1_sample = glmmTMB(type ~ legal_status + ns_br101 + in_apa +
+                        prop_r100_class_4 + prop_r100_class_6 + 
+                        dist_river_log + dist_road_log + dist_urban_log + dist_edge_log + 
+                        slope_pct_log + prec_sum + tmin_mean + (1|year), 
+                      REML=T, family=binomial, data=spl)
+summary(mod1_sample)
+
+# Calculate the residuals, using the simulateResiduals() function (randomized quantile residuals)
+simulationOutput = simulateResiduals(fittedModel = mod1_sample, plot = F)
+# Access to residuals
+plot(simulationOutput)
+# Left panel: qq-plot to detect overall deviations from the expected distribution, by default with added tests for correct distribution (KS test), dispersion and outliers.
+# Right panel: plotResiduals (right panel) produces a plot of the residuals against the predicted value (or alternatively, other variable). Simulation outliers (data points that are outside the range of simulated values) are highlighted as red stars.
+# To provide a visual aid in detecting deviations from uniformity in y-direction, the plot function calculates an (optional default) quantile regression, which compares the empirical 0.25, 0.5 and 0.75 quantiles in y direction (red solid lines) with the theoretical 0.25, 0.5 and 0.75 quantiles (dashed black line), and provides a p-value for the deviation from the expected quantile
+plotQQunif(simulationOutput) # left plot in plot.DHARMa()
+plotResiduals(simulationOutput) # right plot in plot.DHARMa()
+
+# GL(M)Ms often display over/underdispersion, which means that residual variance is larger/smaller than expected under the fitted model.
+# If overdispersion is present, the main effect is that confidence intervals tend to be too narrow, and p-values to small, leading to inflated type I error. The opposite is true for underdispersion, i.e. the main issue of underdispersion is that you loose power.
+# To check for over/underdispersion, plot the simulateResiduals() and check for deviation around the red line (and residuals around 0 and 1); see examples in DHARMa vignette
+# DHARMa contains several overdispersion tests that compare the dispersion of simulated residuals to the observed residuals
+testDispersion(simulationOutput)
+# A significant ratio > 1 indicates overdispersion, a significant ratio < 1 underdispersion.
+
+# A second test that is typically run for LMs, but not for GL(M)Ms is to plot residuals against the predictors in the model (or potentially predictors that were not in the model) to detect possible misspecifications
+# If you plot the residuals against predictors, space or time, the resulting plots should not only show no systematic dependency of those residuals on the covariates, but they should also again be flat for each fixed situation
+plotResiduals(simulationOutput, spl$legal_status)
+plotResiduals(simulationOutput, spl$ns_br101)
+plotResiduals(simulationOutput, spl$in_apa)
+plotResiduals(simulationOutput, spl$prop_r100_class_4)
+plotResiduals(simulationOutput, spl$prop_r100_class_6)
+plotResiduals(simulationOutput, spl$dist_river_log)
+plotResiduals(simulationOutput, spl$dist_road_log)
+plotResiduals(simulationOutput, spl$dist_urban_log)
+plotResiduals(simulationOutput, spl$dist_edge_log)
+plotResiduals(simulationOutput, spl$slope_pct_log)
+plotResiduals(simulationOutput, spl$prec_sum)
+plotResiduals(simulationOutput, spl$tmin_mean)
+plotResiduals(simulationOutput, spl$year)
+
+## Autocorrelation
+testSpatialAutocorrelation(simulationOutput, x=spl$x, y=spl$y)
+
+###### Spatial autocorrelation ----------
+# If a distance between residuals can be defined (temporal, spatial, phylogenetic), you should check if there is a distance-dependence in the residuals
+# If autocorrelation is ignored, estimation of variance around predictors is biased = type I error risk
+
+# What is maximal distance between two points
+set.seed(123)
+sample_indices = sample(1:nrow(data_defor_pixel), 10000) # Sample
+coords_sample = cbind(data_defor_pixel$x[sample_indices], data_defor_pixel$y[sample_indices])
+distmat = as.matrix(dist(coords_sample))
+dim(distmat)
+max(distmat)
+# Compute max distance to build correlograms (~1/2 to 2/3 total dist)
+maxdist = 2/3*max(distmat)
+maxdist
+
+# We check spatial autocorrelation of GLMM residuals
+res_mod1_sample = residuals(mod1, type = "deviance")[sample_indices]
+correlog.sp = data.frame(dist=seq(from=5000, to=maxdist, by=5000),
+                          Morans.i=NA, Null.lcl=NA, Null.ucl=NA, Pvalue=NA)
+head(correlog.sp)
+
+# To spatial object
+coords_sp_sample = SpatialPoints(coords_sample)
+
+for (i in 1:nrow(correlog.sp)){
+  ## Step 1: Neighbor definition
+  # First and last values of distance class (for computing Moran's I)
+  d.start = correlog.sp[i,"dist"]-5000 # the inferior value equals d-5000
+  d.end = correlog.sp[i,"dist"] # the superior value equals d
+  # List of neighbors
+  neigh = dnearneigh(x=coords_sp_sample, d1=d.start, d.end)
+  ## Step 2: conversion into weights matrix
+  wts = nb2listw(neighbours=neigh, style='W', zero.policy=T)
+  ## Step 3: Compute Moran's I for this class of distance
+  mor.i = moran.mc(x=res_mod1_sample, listw=wts, nsim=99, alternative="greater", zero.policy=T)
+  
+  # Integrate results into data frame
+  correlog.sp[i, "dist"] = (d.end+d.start)/2  # Mean class distance
+  correlog.sp[i, "Morans.i"] = mor.i$statistic # Moran I
+  correlog.sp[i, "Null.lcl"] = quantile(mor.i$res, probs = 0.025,na.rm = TRUE)  # Confidence Interval (high envelop)
+  correlog.sp[i, "Null.ucl"] = quantile(mor.i$res, probs = 0.975,na.rm = TRUE)  # Confidence Interval (low envelop)
+  correlog.sp[i, "Pvalue"] = mor.i$p.value	# p-value (of Moran's I)
+}
+
+correlog.sp
+
+# Plot the correlogram
+plot(y=correlog.sp$Morans.i, x=correlog.sp$dist,
+     xlab="Lag Distance(m)", ylab="Moran's I", ylim=c(-0.3,0.3))         
+abline(h=0)                                                              
+lines(correlog.sp$dist, correlog.sp$Null.lcl,col = "red")	               
+lines(correlog.sp$dist, correlog.sp$Null.ucl,col = "red")
+
+# There is spatial autocorrelation until 10000 m
+# We must take into account this spatial structure
+
+###### K-fold cross-validation -----------
+# Based on a vignette by Ludvig Renbo Olsen (2024)
+# The essence of cross-validation is to test a model against data that it hasn’t been trained on, i.e. estimating out-of-sample error. 
+# It is done by first dividing the data into groups called folds.
+# Say we choose to divide the data into 5 folds. Then, in the first iteration, we train a model on the first four folds and test it on the fifth fold. In the second iteration, we then train on folds 2,3,4,5 and test on fold 1. We continue changing which fold is the test fold until all folds have been test folds (i.e. we train and test 5 times in total). 
+# In the end we get the average performance of the models and compare these to other cross-validated models.
+# The model with the lowest average error is believed to be the best at predicting unseen data from the same population(s) and thus chosen for further interpretation / use.
+
+###### R2 ----------
+# Marginal R2 = variance explained by only the fixed effects
+# Conditional R2 = variance explained by both fixed and random effects i.e. the variance explained by the whole model
+r2_nakagawa(mod1)
+
+
+
+##### Effect size -----------
+
