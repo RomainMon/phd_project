@@ -165,7 +165,7 @@ newvals[ok] = last_digit
 history = substr(sval, 1, nchar(sval) - 1)
 # Reforestation: now forest (1), previously non-forest (2–6)
 reforest = last_digit == 1 & grepl("[2-6]", history) # change other LULC values accordingly
-# Deforestation: now non-forest (2–5), previously forest (1)
+# Deforestation: now non-forest (2–6), previously forest (1)
 deforest = last_digit %in% 2:6 & grepl("1", history) # change other LULC values accordingly
 newvals[ok][reforest] = 7L # value for reforestation
 newvals[ok][deforest] = 8L # value for deforestation

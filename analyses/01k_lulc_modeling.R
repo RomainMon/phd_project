@@ -20,6 +20,8 @@ library(DHARMa)
 library(performance)
 library(spdep)
 library(sp)
+library(groupdata2)
+library(cvms)
 
 library(parallel)
 detectCores() # nombre de coeurs physiques
@@ -236,6 +238,24 @@ data_refor_pixel = data_refor_pixel %>%
 hist(data_defor_pixel$slope_pct_log)
 hist(data_refor_pixel$slope_pct_log)
 
+##### Altitude -------
+data_defor_pixel %>% 
+  dplyr::group_by(type) %>% 
+  dplyr::summarise(mean_alt=mean(alt_m))
+data_refor_pixel %>% 
+  dplyr::group_by(type) %>% 
+  dplyr::summarise(mean_alt=mean(alt_m))
+hist(data_defor_pixel$alt_m)
+hist(data_refor_pixel$alt_m)
+
+# Log transformation
+data_defor_pixel = data_defor_pixel %>%
+  dplyr::mutate(alt_m_log = log10(alt_m))
+data_refor_pixel = data_refor_pixel %>%
+  dplyr::mutate(alt_m_log = log10(abs(alt_m))) # We take the abs() of the altitude because some pixels have negative altitudes
+hist(data_defor_pixel$slope_pct_log)
+hist(data_refor_pixel$slope_pct_log)
+
 ##### Land use -----
 data_defor_pixel %>% 
   dplyr::group_by(type) %>% 
@@ -358,7 +378,8 @@ X = data_defor_pixel %>%
         area_m2_r100_class_1, area_m2_r100_class_4, area_m2_r100_class_6,
         prop_r100_class_1, prop_r100_class_4, prop_r100_class_6,
         dist_river_log, dist_urban_log, dist_road_log, dist_edge_log,
-        slope_pct_log, prec_sum, tmin_mean, tmax_mean,
+        slope_pct_log, alt_m_log,
+        prec_sum, tmin_mean, tmax_mean,
         forest_age)
 cor_mat = cor(X, use = "pairwise.complete.obs", method = "pearson")
 cor_mat
@@ -374,6 +395,7 @@ high_corr = cor_mat %>%
 high_corr
 # Beware: (i) the area of forest and of agriculture are strongly correlated
 # And (ii) tmin and tmax
+# And (iii) altitude and slope
 
 ###### VIF ---------
 X_vif = data_defor_pixel %>% 
@@ -382,7 +404,8 @@ X_vif = data_defor_pixel %>%
                 area_m2_r100_class_1, area_m2_r100_class_4, area_m2_r100_class_6,
                 prop_r100_class_1, prop_r100_class_4, prop_r100_class_6,
                 dist_river_log, dist_urban_log, dist_road_log, dist_edge_log,
-                slope_pct_log, prec_sum, tmin_mean, tmax_mean,
+                slope_pct_log, alt_m_log,
+                prec_sum, tmin_mean, tmax_mean,
                 forest_age) %>% 
   as.data.frame()
 vif.result = vif(X_vif, y.name="type")
@@ -393,18 +416,23 @@ vif.result = vif(X_vif, y.name="type")
 # Thus, the higher the VIF, the stronger the collinearity of i is with other variables (ie the information of i is already contained by others)
 # Check VIF > 2.5
 vif.result[vif.result > 2.5]
-# The results confirm strong correlations between: the amount of forest and of agriculture AND between tmin and tmax
+# The results confirm strong correlations between: 
+# - the amount of forest and of agriculture 
+# - tmin and tmax
+# - alt_m and slope_pct
 
 ###### Variable selection ----
 # We select variables based on their correlations with the response variable
 data_defor_pixel %>% 
   dplyr::select(c(type, area_m2_r100_class_1, area_m2_r100_class_4, area_m2_r100_class_6,
                   prop_r100_class_1, prop_r100_class_4, prop_r100_class_6,
+                  slope_pct_log, alt_m_log,
                   tmin_mean, tmax_mean)) %>% 
   corrr::correlate() %>% 
   focus(type) 
 # We retain the proportion of agriculture
 # Tmin is more strongly correlated than tmax
+# The altitude is more strongly correlated than the slope
 
 ###### Re-run VIF ------
 X_vif = data_defor_pixel %>% 
@@ -412,7 +440,8 @@ X_vif = data_defor_pixel %>%
                 in_apa,
                 prop_r100_class_4, prop_r100_class_6,
                 dist_river_log, dist_urban_log, dist_road_log, dist_edge_log,
-                slope_pct_log, prec_sum, tmin_mean,
+                alt_m_log,
+                prec_sum, tmin_mean,
                 forest_age) %>% 
   as.data.frame()
 vif.result = vif(X_vif, y.name="type")
@@ -425,7 +454,8 @@ X = data_refor_pixel %>%
                 area_m2_r100_class_1, area_m2_r100_class_4, area_m2_r100_class_6,
                 prop_r100_class_1, prop_r100_class_4, prop_r100_class_6,
                 dist_river_log, dist_urban_log, dist_road_log, dist_edge_log,
-                slope_pct_log, prec_sum, tmin_mean, tmax_mean)
+                slope_pct_log, alt_m_log,
+                prec_sum, tmin_mean, tmax_mean)
 cor_mat = cor(X, use = "pairwise.complete.obs", method = "pearson")
 cor_mat
 
@@ -441,6 +471,7 @@ high_corr
 # (i) the area of forest and of agriculture are strongly correlated
 # (ii) tmin and tmax are strongly correlated
 # (iii) the amount of forest habitat is strongly correlated to distance to edge
+# (iv) the slope is strongly correlated to the altitude
 
 ###### VIF ---------
 X_vif = data_refor_pixel %>% 
@@ -449,26 +480,33 @@ X_vif = data_refor_pixel %>%
                 area_m2_r100_class_1, area_m2_r100_class_4, area_m2_r100_class_6,
                 prop_r100_class_1, prop_r100_class_4, prop_r100_class_6,
                 dist_river_log, dist_urban_log, dist_road_log, dist_edge_log,
-                slope_pct_log, prec_sum, tmin_mean, tmax_mean) %>% 
+                slope_pct_log, alt_m_log,
+                prec_sum, tmin_mean, tmax_mean) %>% 
   as.data.frame()
 vif.result = vif(X_vif, y.name="type")
 
 # Check VIF > 2.5
 vif.result[vif.result > 2.5]
-# The results confirm strong correlations between: the amount of forest and of agriculture, between tmin and tmax, between distance to edges and forest/agriculture area
+# The results confirm strong correlations between: 
+# - the amount of forest and of agriculture
+# - tmin and tmax
+# - distance to edges and forest/agriculture area
+# - slope and altitude
 
 ###### Variable selection ----
 # We select variables based on their correlations with the response variable
 data_refor_pixel %>% 
   dplyr::select(c(type, area_m2_r100_class_1, area_m2_r100_class_4, area_m2_r100_class_6,
                   prop_r100_class_1, prop_r100_class_4, prop_r100_class_6,
+                  alt_m_log, slope_pct_log,
                   tmin_mean, tmax_mean,
                   dist_edge_log)) %>% 
   corrr::correlate() %>% 
   focus(type) 
 # Proportions are more strongly correlated to the response variable than the amounts
 # We retain the proportion of agriculture
-# Tmin is more strongly correlated than tmax
+# We keep tmin to remain consistent
+# We keep the altitude
 
 ###### Re-run VIF ------
 X_vif = data_refor_pixel %>% 
@@ -476,13 +514,17 @@ X_vif = data_refor_pixel %>%
                 in_apa,
                 prop_r100_class_4, prop_r100_class_6,
                 dist_river_log, dist_urban_log, dist_road_log, dist_edge_log,
-                slope_pct_log, prec_sum, tmin_mean) %>% 
+                alt_m_log, 
+                prec_sum, tmin_mean) %>% 
   as.data.frame()
 vif.result = vif(X_vif, y.name="type")
 vif.result[vif.result > 2.5] # Be careful with distance to edges
 
 
 #### Prepare datasets for GLMM --------
+
+##### Transform variables --------
+
 # We must transform categorical variables to factors
 data_defor_pixel = data_defor_pixel %>% 
   dplyr::mutate(in_apa = factor(in_apa, levels = c(0,1), labels = c("Outside","Inside")),
@@ -525,6 +567,31 @@ prop.table(table(data_refor_pixel$type))
 #                                 dist_river_log, dist_urban_log, dist_road_log, dist_edge_log,
 #                                 slope_pct_log, prec_sum, tmin_mean), 
 #                               ~ as.vector(scale(.x))))
+
+##### Prepare blocks to account for spatial autocorrelation --------
+# Deforestation dataset
+data_defor_pixel$block_x = floor(data_defor_pixel$x / 15000)
+data_defor_pixel$block_y = floor(data_defor_pixel$y / 15000)
+data_defor_pixel = data_defor_pixel %>% 
+  dplyr::mutate(sp_block = paste0(block_x, "_", block_y))
+data_defor_pixel$sp_block = factor(data_defor_pixel$sp_block)
+sample = data_defor_pixel %>% dplyr::sample_frac(0.1)
+ggplot(sample, aes(x = x, y = y, color = sp_block)) +
+  geom_point(size = 0.3) +
+  theme_minimal() +
+  guides(color = "none")
+
+# Reforestation dataset
+data_refor_pixel$block_x = floor(data_refor_pixel$x / 15000)
+data_refor_pixel$block_y = floor(data_refor_pixel$y / 15000)
+data_refor_pixel = data_refor_pixel %>% 
+  dplyr::mutate(sp_block = paste0(block_x, "_", block_y))
+data_refor_pixel$sp_block = factor(data_refor_pixel$sp_block)
+sample = data_refor_pixel %>% dplyr::sample_frac(0.1)
+ggplot(sample, aes(x = x, y = y, color = sp_block)) +
+  geom_point(size = 0.3) +
+  theme_minimal() +
+  guides(color = "none")
 
 #### Random Forest --------
 
@@ -672,7 +739,7 @@ boxplot(dist_river_log~type, data=data_defor_pixel)
 boxplot(dist_urban_log~type, data=data_defor_pixel)
 boxplot(dist_road_log~type, data=data_defor_pixel)
 boxplot(dist_edge_log~type, data=data_defor_pixel)
-boxplot(slope_pct~type, data=data_defor_pixel)
+boxplot(alt_m_log~type, data=data_defor_pixel)
 boxplot(prec_sum~type, data=data_defor_pixel)
 boxplot(tmin_mean~type, data=data_defor_pixel)
 boxplot(forest_age~type, data=data_defor_pixel)
@@ -683,10 +750,10 @@ par(mfrow=c(1,1))
 ## GLMM with binomial distribution
 # We use the logit function to predict values between 0 and 1
 # Binomial model
-mod1 = glmmTMB(type ~ legal_status + ns_br101 + in_apa +
+mod1 = glmmTMB(formula = type ~ legal_status + ns_br101 + in_apa +
                prop_r100_class_4 + prop_r100_class_6 + 
                dist_river_log + dist_road_log + dist_urban_log + dist_edge_log + 
-               slope_pct_log + prec_sum + tmin_mean + (1|year), 
+               alt_m_log + prec_sum + tmin_mean + (1|year) + (1|sp_block), 
                REML=T, family=binomial, data=data_defor_pixel) # REML = true for model interpretation
 summary(mod1)
 
@@ -714,7 +781,7 @@ spl = data_defor_pixel %>%
 mod1_sample = glmmTMB(type ~ legal_status + ns_br101 + in_apa +
                         prop_r100_class_4 + prop_r100_class_6 + 
                         dist_river_log + dist_road_log + dist_urban_log + dist_edge_log + 
-                        slope_pct_log + prec_sum + tmin_mean + (1|year), 
+                        alt_m_log + prec_sum + tmin_mean + (1|year) + (1|sp_block),
                       REML=T, family=binomial, data=spl)
 summary(mod1_sample)
 
@@ -746,19 +813,28 @@ plotResiduals(simulationOutput, spl$dist_river_log)
 plotResiduals(simulationOutput, spl$dist_road_log)
 plotResiduals(simulationOutput, spl$dist_urban_log)
 plotResiduals(simulationOutput, spl$dist_edge_log)
-plotResiduals(simulationOutput, spl$slope_pct_log)
+plotResiduals(simulationOutput, spl$alt_m_log)
 plotResiduals(simulationOutput, spl$prec_sum)
 plotResiduals(simulationOutput, spl$tmin_mean)
 plotResiduals(simulationOutput, spl$year)
+plotResiduals(simulationOutput, spl$sp_block)
+
 
 ## Autocorrelation
-testSpatialAutocorrelation(simulationOutput, x=spl$x, y=spl$y)
+# Spatial
+res2 = recalculateResiduals(simulationOutput, group = spl$year)
+testSpatialAutocorrelation(res2, 
+                           x = aggregate(spl$x, list(spl$year), mean)$x,
+                           y = aggregate(spl$y, list(spl$year), mean)$x)
+# Temporal
+testTemporalAutocorrelation(res2, time = unique(spl$year))
+
 
 ###### Spatial autocorrelation ----------
-# If a distance between residuals can be defined (temporal, spatial, phylogenetic), you should check if there is a distance-dependence in the residuals
-# If autocorrelation is ignored, estimation of variance around predictors is biased = type I error risk
+# If a distance between residuals can be defined (temporal, spatial, phylogenetic), we need to check if there is a distance-dependence in the residuals
+# If autocorrelation is ignored, estimation of variance around predictors is biased = type I error risk (significant effects that are actually not significant)
 
-# What is maximal distance between two points
+# What is maximal distance between two points?
 set.seed(123)
 sample_indices = sample(1:nrow(data_defor_pixel), 10000) # Sample
 coords_sample = cbind(data_defor_pixel$x[sample_indices], data_defor_pixel$y[sample_indices])
@@ -769,9 +845,49 @@ max(distmat)
 maxdist = 2/3*max(distmat)
 maxdist
 
-# We check spatial autocorrelation of GLMM residuals
-res_mod1_sample = residuals(mod1, type = "deviance")[sample_indices]
-correlog.sp = data.frame(dist=seq(from=5000, to=maxdist, by=5000),
+## Autocorrelation within the response variable
+sample = data_defor_pixel[sample_indices, ]
+
+correlog.sp = data.frame(dist=seq(from=10000, to=maxdist, by=10000),
+                         Morans.i=NA, Null.lcl=NA, Null.ucl=NA, Pvalue=NA)
+head(correlog.sp)
+
+# To spatial object
+coords_sp_sample = SpatialPoints(coords_sample)
+
+for (i in 1:nrow(correlog.sp)){
+  ## Step 1: Neighbor definition
+  # First and last values of distance class (for computing Moran's I)
+  d.start = correlog.sp[i,"dist"]-10000 # the inferior value equals d-X
+  d.end = correlog.sp[i,"dist"] # the superior value equals d
+  # List of neighbors
+  neigh = dnearneigh(x=coords_sp_sample, d1=d.start, d.end)
+  ## Step 2: conversion into weights matrix
+  wts = nb2listw(neighbours=neigh, style='W', zero.policy=T)
+  ## Step 3: Compute Moran's I for this class of distance
+  mor.i = moran.mc(x=sample$type, listw=wts, nsim=99, alternative="greater", zero.policy=T)
+  
+  # Integrate results into data frame
+  correlog.sp[i, "dist"] = (d.end+d.start)/2  # Mean class distance
+  correlog.sp[i, "Morans.i"] = mor.i$statistic # Moran I
+  correlog.sp[i, "Null.lcl"] = quantile(mor.i$res, probs = 0.025,na.rm = TRUE)  # Confidence Interval (high envelop)
+  correlog.sp[i, "Null.ucl"] = quantile(mor.i$res, probs = 0.975,na.rm = TRUE)  # Confidence Interval (low envelop)
+  correlog.sp[i, "Pvalue"] = mor.i$p.value	# p-value (of Moran's I)
+}
+
+correlog.sp
+
+# Plot the correlogram
+plot(y=correlog.sp$Morans.i, x=correlog.sp$dist,
+     xlab="Lag Distance(m)", ylab="Moran's I", ylim=c(-0.3,0.3))         
+abline(h=0)                                                              
+lines(correlog.sp$dist, correlog.sp$Null.lcl,col = "red")	               
+lines(correlog.sp$dist, correlog.sp$Null.ucl,col = "red")
+  
+
+## Autocorrelation of GLMM residuals
+res_mod1_sample = residuals(mod1, type = "pearson")[sample_indices]
+correlog.sp = data.frame(dist=seq(from=10000, to=maxdist, by=10000),
                           Morans.i=NA, Null.lcl=NA, Null.ucl=NA, Pvalue=NA)
 head(correlog.sp)
 
@@ -781,7 +897,7 @@ coords_sp_sample = SpatialPoints(coords_sample)
 for (i in 1:nrow(correlog.sp)){
   ## Step 1: Neighbor definition
   # First and last values of distance class (for computing Moran's I)
-  d.start = correlog.sp[i,"dist"]-5000 # the inferior value equals d-5000
+  d.start = correlog.sp[i,"dist"]-10000 # the inferior value equals d-X
   d.end = correlog.sp[i,"dist"] # the superior value equals d
   # List of neighbors
   neigh = dnearneigh(x=coords_sp_sample, d1=d.start, d.end)
@@ -807,16 +923,71 @@ abline(h=0)
 lines(correlog.sp$dist, correlog.sp$Null.lcl,col = "red")	               
 lines(correlog.sp$dist, correlog.sp$Null.ucl,col = "red")
 
-# There is spatial autocorrelation until 10000 m
+# There is spatial autocorrelation until 20000 m (model without spatial block as random effect)
 # We must take into account this spatial structure
+# When accounting for the spatial structure, the spatial autocorrelation is gone !
 
 ###### K-fold cross-validation -----------
+# Solution is still to be found !!!
+
 # Based on a vignette by Ludvig Renbo Olsen (2024)
 # The essence of cross-validation is to test a model against data that it hasn’t been trained on, i.e. estimating out-of-sample error. 
 # It is done by first dividing the data into groups called folds.
 # Say we choose to divide the data into 5 folds. Then, in the first iteration, we train a model on the first four folds and test it on the fifth fold. In the second iteration, we then train on folds 2,3,4,5 and test on fold 1. We continue changing which fold is the test fold until all folds have been test folds (i.e. we train and test 5 times in total). 
 # In the end we get the average performance of the models and compare these to other cross-validated models.
 # The model with the lowest average error is believed to be the best at predicting unseen data from the same population(s) and thus chosen for further interpretation / use.
+
+sample = data_defor_pixel %>% 
+  dplyr::sample_frac(0.01)
+
+## Fold data 
+# fold() creates a number of similarly sized partitions
+sample = groupdata2::fold(
+  data = sample, k = 4,
+  cat_col = 'type',
+  id_col = 'cell_id') 
+# Count cells per type and fold
+sample %>% 
+  dplyr::group_by(.folds, type, year) %>% 
+  dplyr::count() %>% 
+  dplyr::arrange(.folds, year)
+
+## Cross-validate a single model
+mixed_model_formula = c("type ~ legal_status + ns_br101 + in_apa + prop_r100_class_4 + prop_r100_class_6 + 
+dist_river_log + dist_road_log + dist_urban_log + dist_edge_log + alt_m_log + prec_sum + tmin_mean + (1|year) + (1|sp_block)")
+
+CV1 = cross_validate(
+  data = sample,
+  formulas = mixed_model_formula,
+  fold_cols = '.folds',
+  family = 'binomial',
+  REML = FALSE,
+  preprocessing = "standardize",
+  verbose = TRUE
+)
+
+# Show results
+CV1
+# Metrics and formulas
+CV1 %>% cvms::select_metrics() %>% kable()
+CV1 %>% select(1:9) %>% kable(digits = 5)
+CV2 %>% select(10:15) %>% kable()
+# Confusion matrix
+CV1$`Confusion Matrix`[[1]] %>% kable()
+# Just the formulas
+CV1 %>% cvms::select_definitions() %>% kable()
+# Nested predictions 
+# Note that [[1]] picks predictions for the first row
+CV1$Predictions[[1]] %>% head() %>% kable()
+# Nested results from the different folds
+CV1$Results[[1]] %>% kable()
+# Nested model coefficients
+# Note that you have the full p-values, 
+# but kable() only shows a certain number of digits
+CV1$Coefficients[[1]] %>% kable()
+# Additional information about the model
+# and the training process
+CV1 %>% select(14:19, 21) %>% kable()
 
 ###### R2 ----------
 # Marginal R2 = variance explained by only the fixed effects

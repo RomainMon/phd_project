@@ -96,6 +96,10 @@ plot(rasters_forest_status[[36]])
 slope_r = terra::rast(here("data", "geo", "TOPODATA", "work", "slope_bbox.tif"))
 plot(slope_r)
 
+## Altitude
+topo_r = terra::rast(here("data", "geo", "TOPODATA", "work", "topo_bbox.tif"))
+plot(topo_r)
+
 ### WorldClim
 ## Precipitations (sum)
 base_path = here("outputs", "data", "WorldClim", "prec")
@@ -518,8 +522,11 @@ controls_agri_df = dplyr::bind_rows(controls_agri)
 # Quick check
 controls_2024 = controls_agri_df %>%
   dplyr::filter(year == 2024)
+controls_2023 = controls_agri_df %>%
+  dplyr::filter(year == 2023)
 plot(rasters_tm[[35]], col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e", "chartreuse", "pink"))
 points(controls_2024$x, controls_2024$y, pch = 20, col = "magenta", cex = 0.4)
+points(controls_2023$x, controls_2023$y, pch = 20, col = "darkslategray1", cex = 0.4)
 terra::extract(rasters_tm[[35]], controls_2024[, c("x", "y")]) # Check the value
 
 # Step 4: Select intact controls for deforestation
@@ -618,7 +625,7 @@ data_defor %>% dplyr::group_by(type) %>% dplyr::summarise(n=dplyr::n_distinct(ce
 data_refor %>% dplyr::summarise(n_cells = dplyr::n_distinct(cell_id)) == nrow(data_refor)
 data_defor %>% dplyr::summarise(n_cells = dplyr::n_distinct(cell_id)) == nrow(data_defor)
 
-# Should return 0 rows
+# Are there duplicated cell_id (pseudoreplication) ? Should return 0 rows
 data_refor %>%
   dplyr::count(cell_id) %>%
   dplyr::filter(n > 1)
@@ -638,6 +645,23 @@ intersect(changes_defor_subset %>% dplyr::pull(cell_id),
 # Year balance (events and controls should match perfectly)
 data_defor %>% dplyr::group_by(type, year) %>% dplyr::count() %>% dplyr::arrange(year)
 data_refor %>% dplyr::group_by(type, year) %>% dplyr::count() %>% dplyr::arrange(year)
+
+# Plot datasets
+plot(rasters_tm[[35]], col = c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e", "chartreuse", "pink"))
+points(data_refor$x[data_refor$type == 4 & data_refor$year == 2024],
+       data_refor$y[data_refor$type == 4 & data_refor$year == 2024],
+       col = "magenta", pch = 20, cex = 0.5)
+points(data_refor$x[data_refor$type == 7 & data_refor$year == 2024],
+       data_refor$y[data_refor$type == 7 & data_refor$year == 2024],
+       col = "darkslategray1", pch = 20, cex = 0.5)
+
+plot(rasters_tm[[35]], col = c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e", "chartreuse", "pink"))
+points(data_defor$x[data_defor$type == 1 & data_defor$year == 2024],
+       data_defor$y[data_defor$type == 1 & data_defor$year == 2024],
+       col = "magenta", pch = 20, cex = 0.5)
+points(data_defor$x[data_defor$type == 8 & data_defor$year == 2024],
+       data_defor$y[data_defor$type == 8 & data_defor$year == 2024],
+       col = "darkslategray1", pch = 20, cex = 0.5)
 
 # Summary
 cat("Dataset 'Reforestation' rows:", nrow(data_refor), "\n")
@@ -924,12 +948,12 @@ data_refor %>%
 cat(" Distances computed.\n")
 
 
-#### 7. Slope --------
-# Slope value is extracted for each event location.
+#### 7. Slope and altitude --------
+# Slope and altitude values are extracted for each event location.
 # The extraction returns some NAs so we fix that by extracting closest values.
-cat("SECTION 7: extracting slope values\n")
+cat("SECTION 7: extracting topo values\n")
 
-compute_slope = function(dt, slope_r, var_name) {
+compute_topo = function(dt, raster, var_name) {
   
   cat("\n--- Extracting", var_name, "---\n")
   
@@ -939,11 +963,11 @@ compute_slope = function(dt, slope_r, var_name) {
   pts = terra::vect(
     dt[, c("x", "y")],
     geom = c("x", "y"),
-    crs = terra::crs(slope_r)
+    crs = terra::crs(raster)
   )
   
   # initial extraction (cell value)
-  vals = terra::extract(slope_r, pts, ID = FALSE)[,1]
+  vals = terra::extract(raster, pts, ID = FALSE)[,1]
   
   # identify NA values
   na_idx = which(is.na(vals))
@@ -952,7 +976,7 @@ compute_slope = function(dt, slope_r, var_name) {
     cat("  → Fixing", length(na_idx), "NA values using nearest cell\n")
     
     nearest = terra::extract(
-      slope_r,
+      raster,
       pts[na_idx],
       method = "near"
     )[,1]
@@ -964,13 +988,19 @@ compute_slope = function(dt, slope_r, var_name) {
   return(dt)
 }
 
-data_defor = compute_slope(data_defor, slope_r, var_name = "slope_pct")
-data_refor = compute_slope(data_refor, slope_r, var_name = "slope_pct")
+data_defor = compute_topo(data_defor, slope_r, var_name = "slope_pct")
+data_refor = compute_topo(data_refor, slope_r, var_name = "slope_pct")
+
+data_defor = compute_topo(data_defor, topo_r, var_name = "alt_m")
+data_refor = compute_topo(data_refor, topo_r, var_name = "alt_m")
 
 data_defor %>% dplyr::group_by(type) %>% dplyr::summarise(mean_slope = mean(slope_pct, na.rm=TRUE))
 data_refor %>% dplyr::group_by(type) %>% dplyr::summarise(mean_slope = mean(slope_pct, na.rm=TRUE))
 
-cat("Slope extraction completed\n")
+data_defor %>% dplyr::group_by(type) %>% dplyr::summarise(mean_alt = mean(alt_m, na.rm=TRUE))
+data_refor %>% dplyr::group_by(type) %>% dplyr::summarise(mean_alt = mean(alt_m, na.rm=TRUE))
+
+cat("Slope & altitude extraction completed\n")
 
 
 #### 8. Land use area ----------
@@ -1190,7 +1220,7 @@ compute_climate = function(dt, rasters, var_name) {
       nearest = terra::extract(
         r,
         pts[na_idx],
-        method = "bilinear"
+        method = "near"
       )[,1]
       vals[na_idx] = nearest
     }
@@ -1364,6 +1394,7 @@ make_point_plot = function(pt, rasters_reclass, years_lulc,
     "area_agri_100m = ", round(pt$area_m2_r100_class_4), "\n",
     "area_urb_100m = ", round(pt$area_m2_r100_class_6), "\n",
     "slope_pct = ", round(pt$slope_pct, 1), "\n",
+    "alt_m = ", round(pt$alt_m, 1), "\n",
     "forest_age = ", round(pt$forest_age), "\n",
     "prec_sum = ", round(pt$prec_sum), "\n",
     "tmin_mean = ", round(pt$tmin_mean), "\n",
@@ -1746,11 +1777,16 @@ car_sf_filtered = car_sf_filtered %>%
                 rppn_cover_prop = round(rppn_cover_ha * 100 / car_area_ha, 2),
                 rl_cover_prop = round(rl_cover_ha * 100 / car_area_ha, 2))
 
-#### 9. Slope and climatic variables --------
+#### 9. Slope, altitude and climatic variables --------
 # Slope
 car_sf_filtered$slope_mean = exact_extract(slope_r, car_sf_filtered, 'mean')
 car_sf_filtered$slope_sd = exact_extract(slope_r, car_sf_filtered, 'stdev')
 car_sf_filtered$slope_cv = exact_extract(slope_r, car_sf_filtered, 'coefficient_of_variation')
+
+# Altitude
+car_sf_filtered$alt_mean = exact_extract(topo_r, car_sf_filtered, 'mean')
+car_sf_filtered$alt_sd = exact_extract(topo_r, car_sf_filtered, 'stdev')
+car_sf_filtered$alt_cv = exact_extract(topo_r, car_sf_filtered, 'coefficient_of_variation')
 
 # Precipitations
 car_sf_filtered$prec_2024_mean = exact_extract(rasters_prec_sum[[36]], car_sf_filtered, 'mean')
@@ -1775,6 +1811,9 @@ plot(for_age_2000)
 for_age_2010 = rasters_forest_age[[22]]
 for_age_2010[for_age_2010 == 0] = NA
 plot(for_age_2010)
+for_age_2020 = rasters_forest_age[[32]]
+for_age_2020[for_age_2020 == 0] = NA
+plot(for_age_2020)
 for_age_2024 = rasters_forest_age[[36]]
 for_age_2024[for_age_2024 == 0] = NA
 plot(for_age_2024)
@@ -1782,17 +1821,8 @@ plot(for_age_2024)
 ## Compute forest age
 car_sf_filtered$for_age_mean_2000 = exact_extract(for_age_2000, car_sf_filtered, 'mean')
 car_sf_filtered$for_age_mean_2010 = exact_extract(for_age_2010, car_sf_filtered, 'mean')
+car_sf_filtered$for_age_mean_2020 = exact_extract(for_age_2020, car_sf_filtered, 'mean')
 car_sf_filtered$for_age_mean_2024 = exact_extract(for_age_2024, car_sf_filtered, 'mean')
-
-## Reclass
-car_sf_filtered = car_sf_filtered %>% 
-  dplyr::mutate(for_age_dynamics = dplyr::case_when(
-    (for_age_mean_2024 > for_age_mean_2010) &
-      (for_age_mean_2010 > for_age_mean_2000) ~ "Consistently_older",
-    (for_age_mean_2024 < for_age_mean_2010) &
-      (for_age_mean_2010 < for_age_mean_2000) ~ "Consistently_younger",
-    TRUE ~ "Mixed"))
-table(car_sf_filtered$for_age_dynamics)
 
 #### 11. North and South of BR-101 ----------
 # Sample regular points along BR-101
