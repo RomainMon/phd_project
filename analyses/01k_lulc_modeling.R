@@ -26,6 +26,7 @@ library(pROC)
 library(lulcc)
 library(rsq)
 library(MASS)
+library(broom)
 
 ### Load datasets
 data_defor_pixel = readRDS(here("outputs", "data", "Mapbiomas", "LULCC_datasets", "data_defor_pixel.rds"))
@@ -198,29 +199,6 @@ hist(data_refor_pixel$dist_urban_m)
 hist(data_refor_pixel$dist_road_m)
 hist(data_refor_pixel$dist_edge_m)
 
-# Log transformation
-data_defor_pixel = data_defor_pixel %>% 
-  dplyr::mutate(dist_river_log = log10(dist_river_m+1),
-                dist_road_log = log10(dist_road_m+1),
-                dist_urban_log = log10(dist_urban_m+1),
-                dist_edge_log = log10(dist_edge_m+1))
-
-data_refor_pixel = data_refor_pixel %>% 
-  dplyr::mutate(dist_river_log = log10(dist_river_m+1),
-                dist_road_log = log10(dist_road_m+1),
-                dist_urban_log = log10(dist_urban_m+1),
-                dist_edge_log = log10(dist_edge_m+1))
-
-hist(data_defor_pixel$dist_river_log)
-hist(data_defor_pixel$dist_urban_log)
-hist(data_defor_pixel$dist_road_log)
-hist(data_defor_pixel$dist_edge_log)
-
-hist(data_refor_pixel$dist_river_log)
-hist(data_refor_pixel$dist_urban_log)
-hist(data_refor_pixel$dist_road_log)
-hist(data_refor_pixel$dist_edge_log)
-
 ##### Slope -------
 data_defor_pixel %>% 
   dplyr::group_by(type) %>% 
@@ -231,15 +209,7 @@ data_refor_pixel %>%
 hist(data_defor_pixel$slope_pct)
 hist(data_refor_pixel$slope_pct)
 
-# Log transformation
-data_defor_pixel = data_defor_pixel %>%
-  dplyr::mutate(slope_pct_log = log10(slope_pct))
-data_refor_pixel = data_refor_pixel %>%
-  dplyr::mutate(slope_pct_log = log10(slope_pct))
-hist(data_defor_pixel$slope_pct_log)
-hist(data_refor_pixel$slope_pct_log)
-
-##### Altitude -------
+##### Elevation -------
 data_defor_pixel %>% 
   dplyr::group_by(type) %>% 
   dplyr::summarise(mean_alt=mean(alt_m))
@@ -248,14 +218,6 @@ data_refor_pixel %>%
   dplyr::summarise(mean_alt=mean(alt_m))
 hist(data_defor_pixel$alt_m)
 hist(data_refor_pixel$alt_m)
-
-# Log transformation
-data_defor_pixel = data_defor_pixel %>%
-  dplyr::mutate(alt_m_log = log10(alt_m))
-data_refor_pixel = data_refor_pixel %>%
-  dplyr::mutate(alt_m_log = log10(abs(alt_m))) # We take the abs() of the altitude because some pixels have negative altitudes
-hist(data_defor_pixel$slope_pct_log)
-hist(data_refor_pixel$slope_pct_log)
 
 ##### Land use -----
 data_defor_pixel %>% 
@@ -314,31 +276,13 @@ hist(data_refor_pixel$prop_r100_class_1)
 hist(data_refor_pixel$prop_r100_class_4)
 hist(data_refor_pixel$prop_r100_class_6)
 
-# Log transformation
-data_defor_pixel = data_defor_pixel %>% 
-  dplyr::mutate(area_m2_r100_class_1_log = log10(area_m2_r100_class_1+1),
-                area_m2_r100_class_4_log = log10(area_m2_r100_class_4+1),
-                area_m2_r100_class_6_log = log10(area_m2_r100_class_6+1))
-data_refor_pixel = data_refor_pixel %>% 
-  dplyr::mutate(area_m2_r100_class_1_log = log10(area_m2_r100_class_1+1),
-                area_m2_r100_class_4_log = log10(area_m2_r100_class_4+1),
-                area_m2_r100_class_6_log = log10(area_m2_r100_class_6+1))
-
-hist(data_defor_pixel$area_m2_r100_class_1_log)
-hist(data_defor_pixel$area_m2_r100_class_4_log)
-hist(data_defor_pixel$area_m2_r100_class_6_log)
-
-hist(data_refor_pixel$area_m2_r100_class_1_log)
-hist(data_refor_pixel$area_m2_r100_class_4_log)
-hist(data_refor_pixel$area_m2_r100_class_6_log)
-
 ##### Forest age -------
 data_defor_pixel %>% 
   dplyr::group_by(type) %>% 
   dplyr::summarise(mean=mean(forest_age),
                    sd=sd(forest_age))
 hist(data_defor_pixel$forest_age)
-plot(data_defor_pixel$year, data_defor_pixel$forest_age)
+# plot(data_defor_pixel$year, data_defor_pixel$forest_age)
 
 ##### Precipitations -------
 data_defor_pixel %>% 
@@ -370,21 +314,85 @@ data_refor_pixel %>%
 hist(data_defor_pixel$tmax_mean)
 hist(data_refor_pixel$tmax_mean)
 
+
+#### Scale and log-transform variables ---------
+# We log-transform some variables
+# Distances
+data_defor_pixel = data_defor_pixel %>% 
+  dplyr::mutate(dist_river_log = log10(dist_river_m+1),
+                dist_road_log = log10(dist_road_m+1),
+                dist_urban_log = log10(dist_urban_m+1),
+                dist_edge_log = log10(dist_edge_m+1))
+hist(data_defor_pixel$dist_river_log)
+hist(data_defor_pixel$dist_urban_log)
+hist(data_defor_pixel$dist_road_log)
+hist(data_defor_pixel$dist_edge_log)
+
+data_refor_pixel = data_refor_pixel %>% 
+  dplyr::mutate(dist_river_log = log10(dist_river_m+1),
+                dist_road_log = log10(dist_road_m+1),
+                dist_urban_log = log10(dist_urban_m+1),
+                dist_edge_log = log10(dist_edge_m+1))
+hist(data_refor_pixel$dist_river_log)
+hist(data_refor_pixel$dist_urban_log)
+hist(data_refor_pixel$dist_road_log)
+hist(data_refor_pixel$dist_edge_log)
+
+# Slope
+data_defor_pixel = data_defor_pixel %>%
+  dplyr::mutate(slope_pct_log = log10(slope_pct))
+hist(data_defor_pixel$slope_pct_log)
+
+data_refor_pixel = data_refor_pixel %>%
+  dplyr::mutate(slope_pct_log = log10(slope_pct))
+hist(data_refor_pixel$slope_pct_log)
+
+# Elevation
+data_defor_pixel = data_defor_pixel %>%
+  dplyr::mutate(alt_m_log = log10(alt_m))
+hist(data_defor_pixel$slope_pct_log)
+
+data_refor_pixel = data_refor_pixel %>%
+  dplyr::mutate(alt_m_log = log10(abs(alt_m))) # We take the abs() of the altitude because some pixels have negative altitudes
+hist(data_refor_pixel$slope_pct_log)
+
+
+# We standardize to compare effect sizes with the function scale()
+# Deforestation dataset
+data_defor_pixel = data_defor_pixel %>%
+  dplyr::mutate(dplyr::across(c(area_m2_r100_class_1, area_m2_r100_class_4, area_m2_r100_class_6, prop_r100_class_1, prop_r100_class_4, prop_r100_class_6,
+                                dist_river_m, dist_urban_m, dist_road_m, dist_edge_m,
+                                alt_m, slope_pct, 
+                                prec_sum, tmin_mean, tmax_mean, 
+                                forest_age),
+                              ~ as.vector(scale(.x)),
+                              .names = "{.col}_sc"))
+# Reforestation dataset
+data_refor_pixel = data_refor_pixel %>%
+  dplyr::mutate(dplyr::across(c(area_m2_r100_class_1, area_m2_r100_class_4, area_m2_r100_class_6,
+                                prop_r100_class_1, prop_r100_class_4, prop_r100_class_6,
+                                dist_river_m, dist_urban_m, dist_road_m, dist_edge_m,
+                                alt_m, slope_pct, 
+                                prec_sum, tmin_mean, tmax_mean),
+                              ~ as.vector(scale(.x)),
+                              .names = "{.col}_sc"))
+
+
 #### Test correlations among variables ---------
 
 ##### Deforestation dataset -----
 ###### Pearson =====
 
 X = data_defor_pixel %>% 
-  dplyr::select(in_apa,
-        area_m2_r100_class_1, area_m2_r100_class_4, area_m2_r100_class_6,
-        prop_r100_class_1, prop_r100_class_4, prop_r100_class_6,
-        dist_river_log, dist_urban_log, dist_road_log, dist_edge_log,
-        slope_pct_log, alt_m_log,
-        prec_sum, tmin_mean, tmax_mean,
-        forest_age, 
-        year,
-        x, y)
+  dplyr::select(in_car, in_pub_res, in_rppn, in_rl, in_apa,
+                area_m2_r100_class_1, area_m2_r100_class_4, area_m2_r100_class_6,
+                prop_r100_class_1, prop_r100_class_4, prop_r100_class_6,
+                dist_river_m, dist_urban_m, dist_road_m, dist_edge_m,
+                slope_pct, alt_m,
+                prec_sum, tmin_mean, tmax_mean,
+                forest_age,
+                year,
+                x, y)
 cor_mat = cor(X, use = "pairwise.complete.obs", method = "pearson")
 cor_mat
 
@@ -399,23 +407,23 @@ high_corr = cor_mat %>%
 high_corr
 # Beware: (i) the area of forest and of agriculture are strongly correlated
 # And (ii) tmin and tmax
-# And (iii) altitude and slope
-# And (iv) forest_age and year
+# And (iii) forest_age and year
+# And (iv) elevation and y
 
 ###### VIF ---------
 X_vif = data_defor_pixel %>% 
   dplyr::select(type, 
-                in_apa,
+                in_car, in_pub_res, in_rppn, in_rl, in_apa,
                 area_m2_r100_class_1, area_m2_r100_class_4, area_m2_r100_class_6,
                 prop_r100_class_1, prop_r100_class_4, prop_r100_class_6,
-                dist_river_log, dist_urban_log, dist_road_log, dist_edge_log,
-                slope_pct_log, alt_m_log,
+                dist_river_m, dist_urban_m, dist_road_m, dist_edge_m,
+                slope_pct, alt_m,
                 prec_sum, tmin_mean, tmax_mean,
                 forest_age,
                 year,
-                x, y) %>% 
+                x, y) %>%
   as.data.frame()
-vif.result = vif(X_vif, y.name="type")
+vif.result = HH::vif(X_vif, y.name="type")
 
 # VIF(i) = 1/(1-Ri²) (where Ri² is the R² gotten from the regression of predictor i regarding other predictors)
 # If Ri² is close to 1, it means that the variable i is well explained by the linear combination of other variables ; hence the variable i is redundant in the model 
@@ -426,47 +434,47 @@ vif.result[vif.result > 2.5]
 # The results confirm strong correlations between: 
 # - the amount of forest and of agriculture 
 # - tmin and tmax
-# - alt_m and slope_pct
 # - year and forest_age
+# - elevation and y
 
 ###### Variable selection ----
 # We select variables based on their correlations with the response variable
 data_defor_pixel %>% 
   dplyr::select(c(type, area_m2_r100_class_1, area_m2_r100_class_4, area_m2_r100_class_6,
                   prop_r100_class_1, prop_r100_class_4, prop_r100_class_6,
-                  slope_pct_log, alt_m_log,
+                  slope_pct, alt_m, y,
                   tmin_mean, tmax_mean)) %>% 
   corrr::correlate() %>% 
   focus(type) 
 # We retain the proportion of agriculture
 # Tmin is more strongly correlated than tmax
-# The altitude is more strongly correlated than the slope
+# We keep slope and y (and remove elevation)
 
 ###### Re-run VIF ------
 X_vif = data_defor_pixel %>% 
   dplyr::select(type, 
-                in_apa,
+                in_car, in_pub_res, in_rppn, in_rl, in_apa,
                 prop_r100_class_4, prop_r100_class_6,
-                dist_river_log, dist_urban_log, dist_road_log, dist_edge_log,
-                alt_m_log,
+                dist_river_m, dist_urban_m, dist_road_m, dist_edge_m,
+                slope_pct,
                 prec_sum, tmin_mean,
                 forest_age,
                 year,
                 x, y) %>% 
   as.data.frame()
-vif.result = vif(X_vif, y.name="type")
+vif.result = HH::vif(X_vif, y.name="type")
 vif.result[vif.result > 2.5]
 # There is still a strong correlation between forest age and year
-# And between the altitude and y
 
 ##### Reforestation dataset -----
 ###### Pearson =====
 X = data_refor_pixel %>% 
-  dplyr::select(in_apa,
+  dplyr::select(type, 
+                in_car, in_pub_res, in_rppn, in_rl, in_apa,
                 area_m2_r100_class_1, area_m2_r100_class_4, area_m2_r100_class_6,
                 prop_r100_class_1, prop_r100_class_4, prop_r100_class_6,
-                dist_river_log, dist_urban_log, dist_road_log, dist_edge_log,
-                slope_pct_log, alt_m_log,
+                dist_river_m, dist_urban_m, dist_road_m, dist_edge_m,
+                slope_pct, alt_m,
                 prec_sum, tmin_mean, tmax_mean,
                 year,
                 x, y)
@@ -490,54 +498,51 @@ high_corr
 ###### VIF ---------
 X_vif = data_refor_pixel %>% 
   dplyr::select(type, 
-                in_apa,
+                in_car, in_pub_res, in_rppn, in_rl, in_apa,
                 area_m2_r100_class_1, area_m2_r100_class_4, area_m2_r100_class_6,
                 prop_r100_class_1, prop_r100_class_4, prop_r100_class_6,
-                dist_river_log, dist_urban_log, dist_road_log, dist_edge_log,
-                slope_pct_log, alt_m_log,
+                dist_river_m, dist_urban_m, dist_road_m, dist_edge_m,
+                slope_pct, alt_m,
                 prec_sum, tmin_mean, tmax_mean,
                 year,
                 x, y) %>% 
   as.data.frame()
-vif.result = vif(X_vif, y.name="type")
+vif.result = HH::vif(X_vif, y.name="type")
 
 # Check VIF > 2.5
 vif.result[vif.result > 2.5]
 # The results confirm strong correlations between: 
 # - the amount of forest and of agriculture
 # - tmin and tmax
-# - distance to edges and forest/agriculture area
-# - slope and altitude
 
 ###### Variable selection ----
 # We select variables based on their correlations with the response variable
 data_refor_pixel %>% 
-  dplyr::select(c(type, area_m2_r100_class_1, area_m2_r100_class_4, area_m2_r100_class_6,
+  dplyr::select(c(type, 
+                  area_m2_r100_class_1, area_m2_r100_class_4, area_m2_r100_class_6,
                   prop_r100_class_1, prop_r100_class_4, prop_r100_class_6,
-                  alt_m_log, slope_pct_log,
+                  alt_m, slope_pct,
                   tmin_mean, tmax_mean,
-                  dist_edge_log)) %>% 
+                  x, y)) %>% 
   corrr::correlate() %>% 
   focus(type) 
 # Proportions are more strongly correlated to the response variable than the amounts
 # We retain the proportion of agriculture
 # We keep tmin to remain consistent
-# We keep the altitude
+# We keep the slope
 
 ###### Re-run VIF ------
 X_vif = data_refor_pixel %>% 
   dplyr::select(type, 
-                in_apa,
+                in_car, in_pub_res, in_rppn, in_rl, in_apa,
                 prop_r100_class_4, prop_r100_class_6,
-                dist_river_log, dist_urban_log, dist_road_log, dist_edge_log,
-                alt_m_log, 
+                dist_river_m, dist_urban_m, dist_road_m, dist_edge_m,
+                slope_pct, 
                 prec_sum, tmin_mean,
                 x, y) %>% 
   as.data.frame()
-vif.result = vif(X_vif, y.name="type")
-vif.result[vif.result > 2.5] 
-# Be careful with distance to edges
-# Altitude is correlated to x
+vif.result = HH::vif(X_vif, y.name="type")
+vif.result[vif.result > 2.5] # All good
 
 
 #### Prepare datasets for GLMM --------
@@ -546,13 +551,21 @@ vif.result[vif.result > 2.5]
 
 # We must transform categorical variables to factors
 data_defor_pixel = data_defor_pixel %>% 
-  dplyr::mutate(in_apa = factor(in_apa, levels = c(0,1), labels = c("Outside","Inside")),
+  dplyr::mutate(in_car = factor(in_car, levels = c(0,1), labels = c("Outside","Inside")),
+                in_pub_res = factor(in_pub_res, levels = c(0,1), labels = c("Outside","Inside")),
+                in_rppn = factor(in_rppn, levels = c(0,1), labels = c("Outside","Inside")),
+                in_rl = factor(in_rl, levels = c(0,1), labels = c("Outside","Inside")),
+                in_apa = factor(in_apa, levels = c(0,1), labels = c("Outside","Inside")),
                 legal_status = factor(legal_status, levels=c("private","unknown","private_within_reserve","public_reserve","rl","rppn")),
                 ns_br101 = factor(ns_br101),
                 year = factor(year),
                 cell_id = factor(cell_id))
 data_refor_pixel = data_refor_pixel %>% 
-  dplyr::mutate(in_apa = factor(in_apa, levels = c(0,1), labels = c("Outside","Inside")),
+  dplyr::mutate(in_car = factor(in_car, levels = c(0,1), labels = c("Outside","Inside")),
+                in_pub_res = factor(in_pub_res, levels = c(0,1), labels = c("Outside","Inside")),
+                in_rppn = factor(in_rppn, levels = c(0,1), labels = c("Outside","Inside")),
+                in_rl = factor(in_rl, levels = c(0,1), labels = c("Outside","Inside")),
+                in_apa = factor(in_apa, levels = c(0,1), labels = c("Outside","Inside")),
                 legal_status = factor(legal_status,levels=c("private","unknown","private_within_reserve","public_reserve","rl","rppn")),
                 ns_br101 = factor(ns_br101),
                 year = factor(year),
@@ -573,19 +586,6 @@ data_refor_pixel = data_refor_pixel %>%
 prop.table(table(data_defor_pixel$type))
 prop.table(table(data_refor_pixel$type))
 
-# # We standardize to compare effect sizes with the function scale()
-# # Deforestation dataset
-# data_defor_pixel = data_defor_pixel %>% 
-#   dplyr::mutate(dplyr::across(c(prop_r100_class_4, prop_r100_class_6,
-#                                 dist_river_log, dist_urban_log, dist_road_log, dist_edge_log,
-#                                 slope_pct_log, prec_sum, tmin_mean, forest_age), 
-#                               ~ as.vector(scale(.x))))
-# # Reforestation dataset
-# data_refor_pixel = data_refor_pixel %>% 
-#   dplyr::mutate(dplyr::across(c(prop_r100_class_4, prop_r100_class_6,
-#                                 dist_river_log, dist_urban_log, dist_road_log, dist_edge_log,
-#                                 slope_pct_log, prec_sum, tmin_mean), 
-#                               ~ as.vector(scale(.x))))
 
 ##### Prepare blocks to account for spatial autocorrelation --------
 # Deforestation dataset
@@ -615,6 +615,7 @@ ggplot(sample, aes(x = x, y = y, color = sp_block)) +
   geom_point(size = 0.3) +
   theme_minimal() +
   guides(color = "none")
+
 
 #### Random Forest --------
 
@@ -756,16 +757,16 @@ str(data_defor_pixel)
 prop.table(table(data_defor_pixel$type))
 
 # Plots
-boxplot(prop_r100_class_4~type, data=data_defor_pixel)
-boxplot(prop_r100_class_6~type, data=data_defor_pixel)
-boxplot(dist_river_log~type, data=data_defor_pixel)
-boxplot(dist_urban_log~type, data=data_defor_pixel)
-boxplot(dist_road_log~type, data=data_defor_pixel)
-boxplot(dist_edge_log~type, data=data_defor_pixel)
-boxplot(alt_m_log~type, data=data_defor_pixel)
-boxplot(prec_sum~type, data=data_defor_pixel)
-boxplot(tmin_mean~type, data=data_defor_pixel)
-boxplot(forest_age~type, data=data_defor_pixel)
+boxplot(prop_r100_class_4_sc~type, data=data_defor_pixel)
+boxplot(prop_r100_class_6_sc~type, data=data_defor_pixel)
+boxplot(dist_river_m_sc~type, data=data_defor_pixel)
+boxplot(dist_urban_m_sc~type, data=data_defor_pixel)
+boxplot(dist_road_m_sc~type, data=data_defor_pixel)
+boxplot(dist_edge_m_sc~type, data=data_defor_pixel)
+boxplot(slope_pct_sc~type, data=data_defor_pixel)
+boxplot(prec_sum_sc~type, data=data_defor_pixel)
+boxplot(tmin_mean_sc~type, data=data_defor_pixel)
+boxplot(forest_age_sc~type, data=data_defor_pixel)
 
 ###### GLMMs -------
 
@@ -796,10 +797,10 @@ test_data %>%
 # We use the logit function to predict values between 0 and 1
 # Binomial model
 # Crossed random effects (block and year) : (1|block)+(1|year), i.e., every block appears multiple times in every year of the dataset
-mod_glmm = glmmTMB(formula = type ~ legal_status + ns_br101 + in_apa +
-               prop_r100_class_4 + prop_r100_class_6 + 
-               dist_river_log + dist_road_log + dist_urban_log + dist_edge_log + 
-               alt_m_log + prec_sum + tmin_mean + (1|year) + (1|sp_block), 
+mod_glmm = glmmTMB(formula = type ~ in_car + in_pub_res + in_rppn + in_rl + in_apa + ns_br101 +
+               prop_r100_class_4_sc + prop_r100_class_6_sc + 
+               dist_river_m_sc + dist_road_m_sc + dist_urban_m_sc + dist_edge_m_sc + 
+               slope_pct_sc + prec_sum_sc + tmin_mean_sc + (1|year) + (1|sp_block), 
                REML=T, family=binomial, data=train_data)
 summary(mod_glmm)
 
@@ -824,11 +825,11 @@ check_convergence(mod_glmm)
 
 # We will use a smaller model because DHARMa struggles with very large models
 # GLMM model
-mod_glmm_sample = glmmTMB(type ~ legal_status + ns_br101 + in_apa +
-                        prop_r100_class_4 + prop_r100_class_6 + 
-                        dist_river_log + dist_road_log + dist_urban_log + dist_edge_log + 
-                        alt_m_log + prec_sum + tmin_mean + (1|year) + (1|sp_block),
-                      REML=T, family=binomial, data=test_data)
+mod_glmm_sample = glmmTMB(type ~ in_car + in_pub_res + in_rppn + in_rl + in_apa + ns_br101 +
+                            prop_r100_class_4_sc + prop_r100_class_6_sc + 
+                            dist_river_m_sc + dist_road_m_sc + dist_urban_m_sc + dist_edge_m_sc + 
+                            slope_pct_sc + prec_sum_sc + tmin_mean_sc + (1|year) + (1|sp_block),
+                          REML=T, family=binomial, data=test_data)
 summary(mod_glmm_sample)
 
 # Calculate the residuals, using the simulateResiduals() function (randomized quantile residuals)
@@ -850,19 +851,21 @@ testDispersion(simulationOutput)
 
 # A second test that is typically run for LMs, but not for GL(M)Ms is to plot residuals against the predictors in the model (or potentially predictors that were not in the model) to detect possible misspecifications
 # If you plot the residuals against predictors, space or time, the resulting plots should not only show no systematic dependency of those residuals on the covariates, but they should also again be flat for each fixed situation
-plotResiduals(simulationOutput, test_data$legal_status)
-plotResiduals(simulationOutput, test_data$ns_br101)
+plotResiduals(simulationOutput, test_data$in_car)
+plotResiduals(simulationOutput, test_data$in_pub_res)
+plotResiduals(simulationOutput, test_data$in_rppn)
+plotResiduals(simulationOutput, test_data$in_rl)
 plotResiduals(simulationOutput, test_data$in_apa)
-plotResiduals(simulationOutput, test_data$prop_r100_class_4)
-plotResiduals(simulationOutput, test_data$prop_r100_class_6)
-plotResiduals(simulationOutput, test_data$dist_river_log)
-plotResiduals(simulationOutput, test_data$dist_road_log)
-plotResiduals(simulationOutput, test_data$dist_urban_log)
-plotResiduals(simulationOutput, test_data$dist_edge_log)
-plotResiduals(simulationOutput, test_data$alt_m_log)
-plotResiduals(simulationOutput, test_data$prec_sum)
-plotResiduals(simulationOutput, test_data$tmin_mean)
-plotResiduals(simulationOutput, test_data$forest_age)
+plotResiduals(simulationOutput, test_data$ns_br101)
+plotResiduals(simulationOutput, test_data$prop_r100_class_4_sc)
+plotResiduals(simulationOutput, test_data$prop_r100_class_6_sc)
+plotResiduals(simulationOutput, test_data$dist_river_m_sc)
+plotResiduals(simulationOutput, test_data$dist_road_m_sc)
+plotResiduals(simulationOutput, test_data$dist_urban_m_sc)
+plotResiduals(simulationOutput, test_data$dist_edge_m_sc)
+plotResiduals(simulationOutput, test_data$slope_pct_sc)
+plotResiduals(simulationOutput, test_data$prec_sum_sc)
+plotResiduals(simulationOutput, test_data$tmin_mean_sc)
 plotResiduals(simulationOutput, test_data$year)
 plotResiduals(simulationOutput, test_data$sp_block)
 
@@ -971,8 +974,7 @@ lines(correlog.sp$dist, correlog.sp$Null.lcl,col = "red")
 lines(correlog.sp$dist, correlog.sp$Null.ucl,col = "red")
 
 # There is spatial autocorrelation until 20000 m (model without spatial block as random effect)
-# We must take into account this spatial structure
-# When accounting for the spatial structure, the spatial autocorrelation is gone !
+# When accounting for the spatial structure (spatial blocks as random factors), the spatial autocorrelation is gone !
 
 ###### Simple cross-validation -----------
 # ROC is used to measure the performance of models predicting the presence or absence of a phenomenon
@@ -986,9 +988,7 @@ auc_train = auc(roc_train)
 cat("Train AUC:", auc_train, "\n")
 
 # Testing
-pred_test = predict(mod_glmm, newdata=test_data,
-                     type="response",
-                     re.form = NA)
+pred_test = predict(mod_glmm, newdata=test_data, type="response", re.form = NA)
 roc_test = roc(test_data$type, pred_test)
 auc_test = auc(roc_test)
 cat("Test AUC:", auc_test, "\n")
@@ -1026,14 +1026,15 @@ summary(mod_glmm)
 # The ICC can help determine whether a mixed model is even necessary: an ICC of zero (or very close to zero) means the observations within clusters are no more similar than observations from different clusters, and setting it as a random factor might not be necessary
 # In simple cases, the ICC corresponds to the difference between the conditional R2 and the marginal R2
 performance::icc(mod_glmm, by_group=TRUE)
-# 0.03 (i.e., 3%) of variance explained by inter-annual differences
-# 0.07 (i.e., 7%) of variance explained by between-block variation
+# 0.02 (i.e., 2%) of variance explained by inter-annual differences
+# 0.06 (i.e., 6%) of variance explained by between-block variation
 # This suggests that most variance was explained by predictors (fixed effects) rather than hierarchical grouping structure
 
 ###### R² ----------
 # Marginal R2 = variance explained by only the fixed effects
 # Conditional R2 = variance explained by both fixed and random effects i.e., the variance explained by the whole model
 r2_nakagawa(mod_glmm)
+
 
 ##### Deforestation (GLM) ----
 # As variance is not strongly explained by random effects, we run GLMs
@@ -1058,12 +1059,11 @@ test_data %>%
 ## GLM with binomial distribution
 # We use the logit function to predict values between 0 and 1
 # Binomial model
-mod_glm = glm(formula = type ~ legal_status + ns_br101 + in_apa +
-                     prop_r100_class_4 + prop_r100_class_6 + 
-                     dist_river_log + dist_road_log + dist_urban_log + dist_edge_log + 
-                     alt_m_log + prec_sum + tmin_mean +
-                      x + y + I(x^2) + I(y^2),
-              family=binomial, data=train_data)
+mod_glm = glm(formula = type ~ in_car + in_pub_res + in_rppn + in_rl + in_apa + ns_br101 +
+                prop_r100_class_4_sc + prop_r100_class_6_sc + 
+                dist_river_m_sc + dist_road_m_sc + dist_urban_m_sc + dist_edge_m_sc + 
+                slope_pct_sc + prec_sum_sc + tmin_mean_sc +
+                x + y + I(x^2) + I(y^2), family=binomial, data=train_data)
 summary(mod_glm)
 
 ###### Stepwise regression -------
@@ -1092,8 +1092,7 @@ check_convergence(step.model)
 # We will use a smaller model because DHARMa struggles with very large models
 # GLM model
 formula = step.model$formula
-mod_glm_sample = glm(formula, 
-                     family=binomial, data=test_data)
+mod_glm_sample = glm(formula, family=binomial, data=test_data)
 summary(mod_glm_sample)
 
 # Calculate the residuals, using the simulateResiduals() function (randomized quantile residuals)
@@ -1115,19 +1114,21 @@ testDispersion(simulationOutput)
 
 # A second test that is typically run for LMs, but not for GL(M)Ms is to plot residuals against the predictors in the model (or potentially predictors that were not in the model) to detect possible misspecifications
 # If you plot the residuals against predictors, space or time, the resulting plots should not only show no systematic dependency of those residuals on the covariates, but they should also again be flat for each fixed situation
-plotResiduals(simulationOutput, test_data$legal_status)
-plotResiduals(simulationOutput, test_data$ns_br101)
+plotResiduals(simulationOutput, test_data$in_car)
+plotResiduals(simulationOutput, test_data$in_pub_res)
+plotResiduals(simulationOutput, test_data$in_rppn)
+plotResiduals(simulationOutput, test_data$in_rl)
 plotResiduals(simulationOutput, test_data$in_apa)
-plotResiduals(simulationOutput, test_data$prop_r100_class_4)
-plotResiduals(simulationOutput, test_data$prop_r100_class_6)
-plotResiduals(simulationOutput, test_data$dist_river_log)
-plotResiduals(simulationOutput, test_data$dist_road_log)
-plotResiduals(simulationOutput, test_data$dist_urban_log)
-plotResiduals(simulationOutput, test_data$dist_edge_log)
-plotResiduals(simulationOutput, test_data$alt_m_log)
-plotResiduals(simulationOutput, test_data$prec_sum)
-plotResiduals(simulationOutput, test_data$tmin_mean)
-plotResiduals(simulationOutput, test_data$sp_block)
+plotResiduals(simulationOutput, test_data$ns_br101)
+plotResiduals(simulationOutput, test_data$prop_r100_class_4_sc)
+plotResiduals(simulationOutput, test_data$prop_r100_class_6_sc)
+plotResiduals(simulationOutput, test_data$dist_river_m_sc)
+plotResiduals(simulationOutput, test_data$dist_road_m_sc)
+plotResiduals(simulationOutput, test_data$dist_urban_m_sc)
+plotResiduals(simulationOutput, test_data$dist_edge_m_sc)
+plotResiduals(simulationOutput, test_data$slope_pct_sc)
+plotResiduals(simulationOutput, test_data$prec_sum_sc)
+plotResiduals(simulationOutput, test_data$tmin_mean_sc)
 
 ## Autocorrelation
 # Spatial
@@ -1163,24 +1164,53 @@ cat("Intercept (log-odds when all predictors = 0):", round(coef(step.model)["(In
 
 # Predictor interpretation
 # The model predicts:
+# - That the probability of deforestation increases in private lands (p<0.05)
+# - That the probability of deforestation decreases in public reserves (p<0.05)
+# - That the probability of deforestation decreases in RPPNs (p<0.05)
+# - That the probability of deforestation decreases in Legal Reserves (p<0.05)
+# - That the probability of deforestation decreases inside APA (p<0.05)
+# - That the probability of deforestation decreases in the South of BR-1010 (p<0.05) compared to the North
 # - A positive effect of the proportion of agriculture on the logit of the probability of deforestation (p<0.05)
 # - A positive effect of the proportion of urban area on the logit of the probability of deforestation (p<0.05)
-# - A negative effect of the log-transformed distance to rivers on the logit of the probability of deforestation (p<0.05)
-# - A positive effect of the log-transformed distance to roads on the logit of the probability of deforestation (p<0.05)
-# - A positive effect of the log-transformed distance to forest edges on the logit of the probability of deforestation (p<0.05)
-# - A negative effect of the log-transformed altitude on the logit of the probability of deforestation (p<0.05)
+# - A positive effect of the distance to rivers on the logit of the probability of deforestation (p<0.05)
+# - A positive effect of the distance to roads on the logit of the probability of deforestation (p<0.05)
+# - A positive effect of the distance to urban centers on the logit of the probability of deforestation (p<0.05)
+# - A negative effect of the distance to forest edges on the logit of the probability of deforestation (p<0.05)
+# - A negative effect of the slope on the logit of the probability of deforestation (p<0.05)
 # - A positive effect of precipitations on the logit of the probability of deforestation (p<0.05)
 # - A positive effect of min temperature on the logit of the probability of deforestation (p<0.05)
-# - That the probability of deforestation decreases in private lands inside reserves (p<0.05) compared to private lands
-# - That the probability of deforestation decreases in public reserves (p<0.05) compared to private lands
-# - That the probability of deforestation decreases in Legal Reserves (p<0.05) compared to private lands
-# - That the probability of deforestation decreases in RPPNs (p<0.05) compared to private lands
-# - That the probability of deforestation decreases in the South of BR-1010 (p<0.05) compared to the North
-# - That the probability of deforestation decreases inside APA (p<0.05) compared to outside APA
 # - That latitude and longitude significantly influence the probability of deforestation (p<0.05)
 
 ###### R² -------
 rsq(step.model)
+
+###### Plot effects -------
+# Tidy summarizes information about the components of a model
+coef_defor = broom::tidy(step.model, conf.int = TRUE, conf.level = 0.95) %>%
+  dplyr::filter(term != "(Intercept)")
+head(coef_defor)
+# Forest plot of log-odds effect
+ggplot(coef_defor, aes(x = estimate, y = reorder(term, estimate))) +
+  geom_point(size = 3) +
+  geom_errorbarh(aes(xmin = conf.low, xmax = conf.high), width = 0.2) +
+  geom_vline(xintercept = 0, linetype = "dashed") +
+  theme_classic() +
+  labs(x = "Standardized log-odds effect on deforestation probability",
+       y = NULL)
+
+# Compute odds ratios (OR)
+coef_defor = coef_defor %>%
+  dplyr::mutate(OR = exp(estimate),
+                OR_low = exp(conf.low),
+                OR_high = exp(conf.high))
+# Forest plot
+ggplot(coef_defor, aes(x = OR, y = reorder(term, OR))) +
+  geom_point(size = 3) +
+  geom_errorbarh(aes(xmin = OR_low, xmax = OR_high), width = 0.2) +
+  geom_vline(xintercept = 1, linetype = "dashed") +
+  theme_classic() +
+  labs(x = "Standardized odds ratio on deforestation probability",
+       y = NULL)
 
 
 ##### Reforestation (GLMM) ----
@@ -1191,15 +1221,15 @@ str(data_refor_pixel)
 prop.table(table(data_refor_pixel$type))
 
 # Plots
-boxplot(prop_r100_class_4~type, data=data_refor_pixel)
-boxplot(prop_r100_class_6~type, data=data_refor_pixel)
-boxplot(dist_river_log~type, data=data_refor_pixel)
-boxplot(dist_urban_log~type, data=data_refor_pixel)
-boxplot(dist_road_log~type, data=data_refor_pixel)
-boxplot(dist_edge_log~type, data=data_refor_pixel)
-boxplot(alt_m_log~type, data=data_refor_pixel)
-boxplot(prec_sum~type, data=data_refor_pixel)
-boxplot(tmin_mean~type, data=data_refor_pixel)
+boxplot(prop_r100_class_4_sc~type, data=data_refor_pixel)
+boxplot(prop_r100_class_6_sc~type, data=data_refor_pixel)
+boxplot(dist_river_m_sc~type, data=data_refor_pixel)
+boxplot(dist_urban_m_sc~type, data=data_refor_pixel)
+boxplot(dist_road_m_sc~type, data=data_refor_pixel)
+boxplot(dist_edge_m_sc~type, data=data_refor_pixel)
+boxplot(slope_pct_sc~type, data=data_refor_pixel)
+boxplot(prec_sum_sc~type, data=data_refor_pixel)
+boxplot(tmin_mean_sc~type, data=data_refor_pixel)
 
 ###### GLMMs -------
 
@@ -1230,10 +1260,10 @@ test_data %>%
 # We use the logit function to predict values between 0 and 1
 # Binomial model
 # Crossed random effects (block and year) : (1|block)+(1|year), i.e., every block appears multiple times in every year of the dataset
-mod_glmm = glmmTMB(formula = type ~ legal_status + ns_br101 + in_apa +
-                     prop_r100_class_4 + prop_r100_class_6 + 
-                     dist_river_log + dist_road_log + dist_urban_log + dist_edge_log + 
-                     alt_m_log + prec_sum + tmin_mean + (1|year) + (1|sp_block), 
+mod_glmm = glmmTMB(formula = type ~ in_car + in_pub_res + in_rppn + in_rl + in_apa + ns_br101 +
+                     prop_r100_class_4_sc + prop_r100_class_6_sc + 
+                     dist_river_m_sc + dist_road_m_sc + dist_urban_m_sc + dist_edge_m_sc + 
+                     slope_pct_sc + prec_sum_sc + tmin_mean_sc + (1|year) + (1|sp_block), 
                    REML=T, family=binomial, data=train_data)
 summary(mod_glmm)
 
@@ -1258,10 +1288,10 @@ check_convergence(mod_glmm)
 
 # We will use a smaller model because DHARMa struggles with very large models
 # GLMM model
-mod_glmm_sample = glmmTMB(type ~ legal_status + ns_br101 + in_apa +
-                            prop_r100_class_4 + prop_r100_class_6 + 
-                            dist_river_log + dist_road_log + dist_urban_log + dist_edge_log + 
-                            alt_m_log + prec_sum + tmin_mean + (1|year) + (1|sp_block),
+mod_glmm_sample = glmmTMB(type ~ in_car + in_pub_res + in_rppn + in_rl + in_apa + ns_br101 +
+                            prop_r100_class_4_sc + prop_r100_class_6_sc + 
+                            dist_river_m_sc + dist_road_m_sc + dist_urban_m_sc + dist_edge_m_sc + 
+                            slope_pct_sc + prec_sum_sc + tmin_mean_sc + (1|year) + (1|sp_block),
                           REML=T, family=binomial, data=test_data)
 summary(mod_glmm_sample)
 
@@ -1284,18 +1314,21 @@ testDispersion(simulationOutput)
 
 # A second test that is typically run for LMs, but not for GL(M)Ms is to plot residuals against the predictors in the model (or potentially predictors that were not in the model) to detect possible misspecifications
 # If you plot the residuals against predictors, space or time, the resulting plots should not only show no systematic dependency of those residuals on the covariates, but they should also again be flat for each fixed situation
-plotResiduals(simulationOutput, test_data$legal_status)
-plotResiduals(simulationOutput, test_data$ns_br101)
+plotResiduals(simulationOutput, test_data$in_car)
+plotResiduals(simulationOutput, test_data$in_pub_res)
+plotResiduals(simulationOutput, test_data$in_rppn)
+plotResiduals(simulationOutput, test_data$in_rl)
 plotResiduals(simulationOutput, test_data$in_apa)
-plotResiduals(simulationOutput, test_data$prop_r100_class_4)
-plotResiduals(simulationOutput, test_data$prop_r100_class_6)
-plotResiduals(simulationOutput, test_data$dist_river_log)
-plotResiduals(simulationOutput, test_data$dist_road_log)
-plotResiduals(simulationOutput, test_data$dist_urban_log)
-plotResiduals(simulationOutput, test_data$dist_edge_log)
-plotResiduals(simulationOutput, test_data$alt_m_log)
-plotResiduals(simulationOutput, test_data$prec_sum)
-plotResiduals(simulationOutput, test_data$tmin_mean)
+plotResiduals(simulationOutput, test_data$ns_br101)
+plotResiduals(simulationOutput, test_data$prop_r100_class_4_sc)
+plotResiduals(simulationOutput, test_data$prop_r100_class_6_sc)
+plotResiduals(simulationOutput, test_data$dist_river_m_sc)
+plotResiduals(simulationOutput, test_data$dist_road_m_sc)
+plotResiduals(simulationOutput, test_data$dist_urban_m_sc)
+plotResiduals(simulationOutput, test_data$dist_edge_m_sc)
+plotResiduals(simulationOutput, test_data$slope_pct_sc)
+plotResiduals(simulationOutput, test_data$prec_sum_sc)
+plotResiduals(simulationOutput, test_data$tmin_mean_sc)
 plotResiduals(simulationOutput, test_data$year)
 plotResiduals(simulationOutput, test_data$sp_block)
 
@@ -1405,7 +1438,7 @@ lines(correlog.sp$dist, correlog.sp$Null.lcl,col = "red")
 lines(correlog.sp$dist, correlog.sp$Null.ucl,col = "red")
 
 # There is spatial autocorrelation until 30000 m 
-# Adding spatial blocks do not overrun the spatial autocorrelation within residuals
+# Adding spatial blocks only partly corrects for spatial autocorrelation (see cor)
 
 ###### Simple cross-validation -----------
 # ROC is used to measure the performance of models predicting the presence or absence of a phenomenon
@@ -1456,7 +1489,7 @@ summary(mod_glmm)
 # ICC is the proportion of variation that can be attributed to between-group variation (Nakagawa & Schielzeth 2010)
 performance::icc(mod_glmm, by_group=TRUE)
 # 0.006 (i.e., <1%) of variance explained by inter-annual differences
-# 0.04 (i.e., 4%) of variance explained by between-block variation
+# 0.05 (i.e., 5%) of variance explained by between-block variation
 # This suggests that most variance was explained by predictors (fixed effects) rather than hierarchical grouping structure
 
 ###### R² ----------
@@ -1487,10 +1520,10 @@ test_data %>%
 ## GLM with binomial distribution
 # We use the logit function to predict values between 0 and 1
 # Binomial model
-mod_glm = glm(formula = type ~ legal_status + ns_br101 + in_apa +
-                prop_r100_class_4 + prop_r100_class_6 + 
-                dist_river_log + dist_road_log + dist_urban_log + dist_edge_log + 
-                alt_m_log + prec_sum + tmin_mean +
+mod_glm = glm(formula = type ~ in_car + in_pub_res + in_rppn + in_rl + in_apa + ns_br101 +
+                prop_r100_class_4_sc + prop_r100_class_6_sc + 
+                dist_river_m_sc + dist_road_m_sc + dist_urban_m_sc + dist_edge_m_sc + 
+                slope_pct_sc + prec_sum_sc + tmin_mean_sc +
                 x + y + I(x^2) + I(y^2),
               family=binomial, data=train_data)
 summary(mod_glm)
@@ -1543,18 +1576,21 @@ testDispersion(simulationOutput)
 
 # A second test that is typically run for LMs, but not for GL(M)Ms is to plot residuals against the predictors in the model (or potentially predictors that were not in the model) to detect possible misspecifications
 # If you plot the residuals against predictors, space or time, the resulting plots should not only show no systematic dependency of those residuals on the covariates, but they should also again be flat for each fixed situation
-plotResiduals(simulationOutput, test_data$legal_status)
-plotResiduals(simulationOutput, test_data$ns_br101)
+plotResiduals(simulationOutput, test_data$in_car)
+plotResiduals(simulationOutput, test_data$in_pub_res)
+plotResiduals(simulationOutput, test_data$in_rppn)
+plotResiduals(simulationOutput, test_data$in_rl)
 plotResiduals(simulationOutput, test_data$in_apa)
-plotResiduals(simulationOutput, test_data$prop_r100_class_4)
-plotResiduals(simulationOutput, test_data$prop_r100_class_6)
-plotResiduals(simulationOutput, test_data$dist_river_log)
-plotResiduals(simulationOutput, test_data$dist_road_log)
-plotResiduals(simulationOutput, test_data$dist_urban_log)
-plotResiduals(simulationOutput, test_data$dist_edge_log)
-plotResiduals(simulationOutput, test_data$alt_m_log)
-plotResiduals(simulationOutput, test_data$prec_sum)
-plotResiduals(simulationOutput, test_data$tmin_mean)
+plotResiduals(simulationOutput, test_data$ns_br101)
+plotResiduals(simulationOutput, test_data$prop_r100_class_4_sc)
+plotResiduals(simulationOutput, test_data$prop_r100_class_6_sc)
+plotResiduals(simulationOutput, test_data$dist_river_m_sc)
+plotResiduals(simulationOutput, test_data$dist_road_m_sc)
+plotResiduals(simulationOutput, test_data$dist_urban_m_sc)
+plotResiduals(simulationOutput, test_data$dist_edge_m_sc)
+plotResiduals(simulationOutput, test_data$slope_pct_sc)
+plotResiduals(simulationOutput, test_data$prec_sum_sc)
+plotResiduals(simulationOutput, test_data$tmin_mean_sc)
 plotResiduals(simulationOutput, test_data$sp_block)
 
 ## Autocorrelation
@@ -1591,158 +1627,49 @@ cat("Intercept (log-odds when all predictors = 0):", round(coef(step.model)["(In
 
 # Predictor interpretation
 # The model predicts:
+# - That the probability of reforestation decreases in private properties (p<0.05)
+# - That the probability of reforestation increases in RPPNs (p<0.05)
+# - That the probability of reforestation increases in Legal Reserves (p<0.05)
+# - That the probability of reforestation decreases inside APA (p<0.05)
+# - That the probability of reforestation increases in the South of BR-101 (p<0.05)
 # - A negative effect of the proportion of agriculture on the logit of the probability of reforestation (p<0.05)
 # - A negative effect of the proportion of urban area on the logit of the probability of reforestation (p<0.05)
-# - A negative effect of the log-transformed distance to roads on the logit of the probability of reforestation (p<0.05)
-# - A negative effect of the log-transformed distance to urban centers on the logit of the probability of reforestation (p<0.05)
-# - A positive effect of the log-transformed distance to forest edges on the logit of the probability of reforestation (p<0.05)
-# - A positive effect of the log-transformed altitude on the logit of the probability of reforestation (p<0.05)
+# - A positive effect of the distance to rivers on the logit of the probability of reforestation (p<0.05)
+# - A negative effect of the distance to roads on the logit of the probability of reforestation (p<0.05)
+# - A negative effect of the distance to urban centers on the logit of the probability of reforestation (p<0.05)
+# - A negative effect of the distance to forest edges on the logit of the probability of reforestation (p<0.05)
+# - A negative effect of the slope on the logit of the probability of reforestation (p<0.05)
 # - A negative effect of precipitations on the logit of the probability of reforestation (p<0.05)
 # - A negative effect of min temperature on the logit of the probability of reforestation (p<0.05)
-# - That the probability of reforestation decreases in private lands inside reserves (p<0.05) compared to private lands
-# - That the probability of reforestation increases in public reserves (p<0.05) compared to private lands
-# - That the probability of reforestation increases in Legal Reserves (p<0.05) compared to private lands
-# - That the probability of reforestation increases in RPPNs (p<0.05) compared to private lands
-# - That the probability of reforestation increases in the South of BR-1010 (p<0.05) compared to the North
-# - That the probability of reforestation decreases inside APA (p<0.05) compared to outside APA
 # - That the latitude and longitude influence the probability of reforestation (p<0.05)
 
 ###### R² -------
 rsq(step.model)
 
-
-#### Effect size -------
-# We estimate the effect sizes by computing Fisher's r-to-z transformed correlation coefficient (for quantitative variables), point-biserial correlation (for one quantitative explanatory variable and one dichotomous response variable)
-
-##### Deforestation ------------
-# List of drivers (quantitative)
-drivers = c("prop_r100_class_4","prop_r100_class_6", "dist_river_log",
-            "dist_road_log", "dist_urban_log", "dist_edge_log",
-              "alt_m_log", "prec_sum", "tmin_mean")
-
-# Compute mean and sd for each predictor
-es_defor = data_defor_pixel %>%
-  dplyr::group_by(type) %>%
-  dplyr::summarise(
-    n = dplyr::n(),
-    across(
-      .cols = all_of(drivers),
-      .fns = list(mean, sd),
-      .names = "{.col}_{.fn}"
-    )
-  )
-
-
-
-
-
-
-# Loop through each response variable
-for (response_var in y_quali) {
-  # Calculate mean, standard deviation, and count for each level of the response variable
-  summary_stats <- pit.capt %>%
-    group_by(!!sym(response_var)) %>%
-    dplyr::summarise(
-      mean_hab_loss = mean(hab_loss, na.rm = TRUE),
-      sd_hab_loss = sd(hab_loss, na.rm = TRUE),
-      n = dplyr::n()
-    )
-  
-  # Extract values for group 0
-  mean_0 <- summary_stats %>% filter(!!sym(response_var) == 0) %>% dplyr::pull(mean_hab_loss)
-  sd_0 <- summary_stats %>% filter(!!sym(response_var) == 0) %>% dplyr::pull(sd_hab_loss)
-  n_0 <- summary_stats %>% filter(!!sym(response_var) == 0) %>% dplyr::pull(n)
-  
-  # Extract values for group 1
-  mean_1 <- summary_stats %>% filter(!!sym(response_var) == 1) %>% dplyr::pull(mean_hab_loss)
-  sd_1 <- summary_stats %>% filter(!!sym(response_var) == 1) %>% dplyr::pull(sd_hab_loss)
-  n_1 <- summary_stats %>% filter(!!sym(response_var) == 1) %>% dplyr::pull(n)
-  
-  # Handle cases where a group may not exist in the data
-  if(length(mean_0) == 0) mean_0 <- NA
-  if(length(sd_0) == 0) sd_0 <- NA
-  if(length(n_0) == 0) n_0 <- NA
-  if(length(mean_1) == 0) mean_1 <- NA
-  if(length(sd_1) == 0) sd_1 <- NA
-  if(length(n_1) == 0) n_1 <- NA
-  
-  # Append the results to the data frame
-  results_df <- rbind(results_df, data.frame(
-    y = response_var,
-    mean_0 = mean_0,
-    mean_1 = mean_1,
-    sd_0 = sd_0,
-    sd_1 = sd_1,
-    n_0 = n_0,
-    n_1 = n_1,
-    stringsAsFactors = FALSE
-  ))
-}
-## Calculate effect sizes and corresponding sampling variances
-pit.effect_size_quali = metafor::escalc(measure="RPB", m1i=mean_1, m2i=mean_0, sd1i=sd_1, sd2i=sd_0, n1i=n_1, n2i=n_0, data=results_df) #ri = correlation coefficient, ni = sample size
-# yi = effect size
-# vi = sampling variance
-# WARNING : the order of the groups are important (they condition the sense of the effect size : positive or negative)
-
-
-## Combine datasets
-pit.effect_size_quali = pit.effect_size_quali %>% 
-  dplyr::mutate(ni = n_0+n_1) %>% 
-  dplyr::select(c(ni, y, yi, vi))
-pit.effect_size_quanti = pit.effect_size_quanti %>% 
-  dplyr::select(-ri)
-pit.effect_size_both = dplyr::bind_rows(pit.effect_size_quanti, pit.effect_size_quali)
-pit.effect_size_both = pit.effect_size_both %>% 
-  dplyr::mutate(year="All years")
-
-#### Forest plot
-# Manually
-effect_size$lower.ci <- effect_size$yi - 1.96 * sqrt(effect_size$vi)  # Lower bound
-effect_size$upper.ci <- effect_size$yi + 1.96 * sqrt(effect_size$vi)  # Upper bound
-effect_size = effect_size %>% 
-  mutate(y = dplyr::case_when(
-    y == "capt_all" ~ "Number of arthropod captures",
-    y == "hill_q0_all" ~ "Family richness",
-    y == "hill_q1_all" ~ "Shannon entropy",
-    y == "hill_q2_all" ~ "Simpson diversity",
-    y == "capt_iso" ~ "Number of woodlouse captures",
-    y == "capt_spi" ~ "Number of spider captures",
-    y == "PA_capt_opil" ~ "Harvestman probability of occurrence",
-    y == "PA_capt_zyg" ~ "Silverfish probability of occurrence",
-    y == "PA_capt_coleo" ~ "Beetle probability of occurrence",
-    y == "PA_capt_lyco" ~ "Wolf spider probability of occurrence",
-    y == "PA_capt_gnapho" ~ "Ground spider probability of occurrence",
-    y == "PA_capt_As"~ "Asida sericea probability of occurrence",
-    TRUE ~ y  # Keep the original value if none of the conditions are met
-  ))
-effect_size$y = factor(effect_size$y, levels=c("Asida sericea probability of occurrence", 
-                                               "Ground spider probability of occurrence", 
-                                               "Wolf spider probability of occurrence", 
-                                               "Beetle probability of occurrence", 
-                                               "Silverfish probability of occurrence",
-                                               "Harvestman probability of occurrence",
-                                               "Number of spider captures", 
-                                               "Number of woodlouse captures", 
-                                               "Simpson diversity",
-                                               "Shannon entropy", 
-                                               "Family richness", 
-                                               "Number of arthropod captures"))
-
-# With metafor
-metafor::forest(effect_size$yi, ci.lb = effect_size$lower.ci, ci.ub = effect_size$upper.ci, 
-                slab = paste(effect_size$y, effect_size$year, sep = ", "))
-# With ggplot
-forest = ggplot(effect_size, aes(x = yi, y = y, color = as.factor(year))) +
-  geom_point(size = 3, position = position_dodge(width = 0.5)) +
-  geom_errorbarh(aes(xmin = lower.ci, xmax = upper.ci), height = 0.3, position = position_dodge(width = 0.5)) +
-  geom_vline(xintercept = 0, linetype = "dashed", color = "black", linewidth = 0.5) +  # Add vertical line at x=0
-  labs(x = "Effect size of local habitat amount", y = NULL, color = "Year") +
-  scale_color_manual(values = c("#5D3A9B","#E66100","#009e73","black")) +  # Set custom colors for the legend
+###### Plot effects -------
+# Tidy summarizes information about the components of a model
+coef_refor = broom::tidy(step.model, conf.int = TRUE, conf.level = 0.95) %>%
+  dplyr::filter(term != "(Intercept)")
+head(coef_refor)
+# Forest plot of log-odds effect
+ggplot(coef_refor, aes(x = estimate, y = reorder(term, estimate))) +
+  geom_point(size = 3) +
+  geom_errorbarh(aes(xmin = conf.low, xmax = conf.high), width = 0.2) +
+  geom_vline(xintercept = 0, linetype = "dashed") +
   theme_classic() +
-  theme(panel.spacing.x = unit(2, "lines"),  # Adjust horizontal space between panels
-        panel.grid.major.y = element_line(linetype = "dashed", color = "gray", size = 0.5),
-        axis.text.y = element_text(size = 14),
-        axis.title.x = element_text(size = 14),
-        strip.text = element_text(size = 14),
-        legend.title = element_text(size = 14),
-        legend.text = element_text(size = 14))  # Add dashed lines for y-axis
+  labs(x = "Standardized log-odds effect on reforestation probability",
+       y = NULL)
+
+# Compute odds ratios (OR)
+coef_refor = coef_refor %>%
+  dplyr::mutate(OR = exp(estimate),
+                OR_low = exp(conf.low),
+                OR_high = exp(conf.high))
+# Forest plot
+ggplot(coef_refor, aes(x = OR, y = reorder(term, OR))) +
+  geom_point(size = 3) +
+  geom_errorbarh(aes(xmin = OR_low, xmax = OR_high), width = 0.2) +
+  geom_vline(xintercept = 1, linetype = "dashed") +
+  theme_classic() +
+  labs(x = "Standardized odds ratio on reforestation probability",
+       y = NULL)

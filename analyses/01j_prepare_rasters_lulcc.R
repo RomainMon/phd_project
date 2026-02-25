@@ -74,24 +74,6 @@ for (i in seq_along(rasters_forest_age)) {
 }
 plot(rasters_forest_age[[36]])
 
-## Forest status
-base_path = here("outputs", "data", "MapBiomas", "Rasters_reclass_forest_cat")
-raster_files = list.files(base_path, pattern = "\\.tif$", full.names = TRUE)
-
-# Extract years
-years_for_cat = stringr::str_extract(basename(raster_files), "(?<!\\d)\\d{4}(?!\\d)")
-# Create a dataframe to link files and years
-raster_df = data.frame(file = raster_files, years_for_cat = as.numeric(years_for_cat)) %>%
-  dplyr::arrange(years_for_cat)
-# Load rasters in chronological order
-rasters_forest_status = lapply(raster_df$file, terra::rast)
-years_for_cat = raster_df$years_for_cat
-# Check
-for (i in seq_along(rasters_forest_status)) {
-  cat("Year", years_for_cat[i], " → raster name:", basename(raster_df$file[i]), "\n")
-}
-plot(rasters_forest_status[[36]])
-
 ## Slope
 slope_r = terra::rast(here("data", "geo", "TOPODATA", "work", "slope_bbox.tif"))
 plot(slope_r)
