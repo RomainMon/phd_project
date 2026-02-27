@@ -1,6 +1,6 @@
 #------------------------------------------------#
 # Author: Romain Monassier
-# Objective: LULC simulation
+# Objective: LULC data preparation for simulation
 #------------------------------------------------#
 
 ### Load packages ------
@@ -31,25 +31,6 @@ for (i in seq_along(rasters_reclass)) {
   cat("Year", years_lulc[i], " → raster name:", basename(raster_df$file[i]), "\n")
 }
 plot(rasters_reclass[[35]], col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e"))
-
-
-## Cumulative rasters
-base_path = here("outputs", "data", "MapBiomas", "Rasters_cumulative_tm")
-raster_files = list.files(base_path, pattern = "\\.tif$", full.names = TRUE)
-
-# Extract years
-years_tm = stringr::str_extract(basename(raster_files), "(?<!\\d)\\d{4}(?!\\d)")
-# Create a dataframe to link files and years
-raster_df = data.frame(file = raster_files, years_tm = as.numeric(years_tm)) %>%
-  dplyr::arrange(years_tm)
-# Load rasters in chronological order
-rasters_tm = lapply(raster_df$file, terra::rast)
-years_tm = raster_df$years_tm
-# Check
-for (i in seq_along(rasters_tm)) {
-  cat("Year", years_tm[i], " → raster name:", basename(raster_df$file[i]), "\n")
-}
-plot(rasters_tm[[35]], col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e", "chartreuse", "pink"))
 
 
 ## Slope
@@ -445,224 +426,205 @@ ns_raster[] = raster_df$ns
 # Plot
 plot(ns_raster, main = "Nord (0) / Sud (1) de la BR-101", col = c("blue", "red"))
 
-
-
-#### Transform to RasterLayer objects -----
-# We must transform each terra Raster to a raster Raster
-# lulcc works with raster objects (RasterLayer)
-
-##### Static rasters -------
-slope_r = raster::raster(slope_r)
-topo_r = raster::raster(topo_r)
-apa_r = raster::raster(apa_r)
-rl_r = raster::raster(rl_r)
-car_r = raster::raster(car_r)
-rppn_r = raster::raster(rppn_r)
-pub_res_r = raster::raster(pub_res_r)
-dist_urban_r = raster::raster(dist_urban_r)
-dist_rivers_r = raster::raster(dist_rivers_r)
-ns_raster = raster::raster(ns_raster)
-
-##### Dynamic rasters -compareRaster()##### Dynamic rasters ------
-
-# Precipitations
-prec_list = list()
-# Loop
-for (i in seq_along(rasters_prec_sum)) { # Change "rasters_prec_sum" by the list of terra rasters
-  # Extract SpatRaster (terra object)
-  spat_raster = rasters_prec_sum[[i]]
+##### Water (constrained) -------
+# Here, we create a constraint on land development
+# See PLUS documentation: "Users should prepare a binary image of restricted area that only contains value of 0 or 1. The value 0 means no conversion while the value 1 means convertible"
+water_list = list()
+# Loop over years
+for (yr in years_lulc) {
+  # LULC raster for a given year
+  r_year = rasters_reclass[[as.character(yr)]]
   
-  # ... to RasterLayer (raster object)
-  raster_layer = raster::raster(spat_raster)
+  # Create a binary mask (water = 5, the rest = 1)
+  water_mask = r_year
+  water_mask[water_mask != 5] = 1
+  water_mask[water_mask == 5] = 0 # Transform 5 to 0
   
-  # Name raster with the corresponding year
-  year = years_lulc[i]  # Replace "years_lulc" by the vector of years
-  raster_name = paste0("prec_", year) # Replace by what we name the raster
-  
-  # Store the raster
-  prec_list[[raster_name]] = raster_layer
+  # Store the raster into a list
+  water_list[[as.character(yr)]] = water_mask
 }
-# Check
-plot(prec_list$prec_1989)
-head(freq(prec_list$prec_1989))
-head(freq(rasters_prec_sum[[1]]))
-head(freq(prec_list$prec_2024))
-head(freq(rasters_prec_sum[[36]]))
+plot(water_list$`2024`, col=c("blue","grey"))
 
-# Tmin
-tmin_list = list()
-# Loop
-for (i in seq_along(rasters_tmin_mean)) {
-  # Extract SpatRaster (terra object)
-  spat_raster = rasters_tmin_mean[[i]]
+### Export rasters for PLUS ------
+
+#### Reproject -------
+
+# Template raster
+template_rast = rasters_reclass[[1]]
+crs(template_rast)
+template_wgs84 = terra::project(template_rast, "EPSG:4326", method = "near")
+crs(template_wgs84)
+
+## Reproject
+# LULC
+rasters_reclass_wgs84 = lapply(rasters_reclass, terra::project, template_wgs84, method = "near")
+
+# Slope
+slope_r = terra::project(slope_r, template_wgs84, method="bilinear")
+
+# Elevation
+topo_r = terra::project(topo_r, template_wgs84, method="bilinear")
+
+# Distances
+dist_rivers_r = terra::project(dist_rivers_r, template_wgs84, method="bilinear")
+dist_urban_r = terra::project(dist_urban_r, template_wgs84, method="bilinear")
+dist_edges_list = lapply(dist_edges_list, terra::project, template_wgs84, method = "near")
+dist_roads_list = lapply(dist_roads_list, terra::project, template_wgs84, method = "near")
+
+# Proportions
+prop_agri100m_list = lapply(prop_agri100m_list, terra::project, template_wgs84, method = "near")
+prop_urban100m_list = lapply(prop_urban100m_list, terra::project, template_wgs84, method = "near")
+
+# Binary rasters
+apa_r = terra::project(apa_r, template_wgs84, method="near")
+car_r = terra::project(car_r, template_wgs84, method="near")
+rl_r = terra::project(rl_r, template_wgs84, method="near")
+rppn_r = terra::project(rppn_r, template_wgs84, method="near")
+pub_res_r = terra::project(pub_res_r, template_wgs84, method="near")
+ns_raster = terra::project(ns_raster, template_wgs84, method="near")
+water_list = lapply(water_list, terra::project, template_wgs84, method = "near")
+
+#### Export --------
+# Define output folder
+output_dir = here("outputs", "data", "PLUS", "lulc")
+
+##### LULC -------
+for (i in seq_along(rasters_reclass_wgs84)) {
+  year_i = years_lulc[i]
+  output_path = file.path(output_dir,
+                          paste0("raster_reclass_wgs84_", year_i, ".tif"))
   
-  # ... to RasterLayer (raster object)
-  raster_layer = raster::raster(spat_raster)
+  message("  - Writing raster for year ", year_i)
   
-  # Name raster with the corresponding year
-  year = years_lulc[i]  # Replace "years_lulc" by the vector of years
-  raster_name = paste0("tmin_", year) # Replace by what we name the raster
-  
-  # Store the raster
-  tmin_list[[raster_name]] = raster_layer
+  terra::writeRaster(
+    rasters_reclass_wgs84[[i]],
+    filename = output_path,
+    overwrite = TRUE,
+    wopt = list(datatype = "INT1U", gdal = c("COMPRESS=LZW"))
+  )
 }
 
-# Tmax
-tmax_list = list()
-# Loop
-for (i in seq_along(rasters_tmax_mean)) {
-  # Extract SpatRaster (terra object)
-  spat_raster = rasters_tmax_mean[[i]]
-  
-  # ... to RasterLayer (raster object)
-  raster_layer = raster::raster(spat_raster)
-  
-  # Name raster with the corresponding year
-  year = years_lulc[i]  # Replace "years_lulc" by the vector of years
-  raster_name = paste0("tmax_", year) # Replace by what we name the raster
-  
-  # Store the raster
-  tmax_list[[raster_name]] = raster_layer
-}
+##### Distances -------
+output_dir = here("outputs", "data", "PLUS", "drivers")
+
+# Distances to edges
+terra::writeRaster(dist_edges_list[['2024']], 
+                   filename = file.path(output_dir, "dist_edges2024.tif"), 
+                   overwrite = TRUE, 
+                   datatype = "FLT4S")
 
 # Distances to roads
-dist_roads_list_v2 = list()
-# Loop
-for (i in seq_along(dist_roads_list)) {
-  # Extract SpatRaster (terra object)
-  spat_raster = dist_roads_list[[i]]
-  
-  # ... to RasterLayer (raster object)
-  raster_layer = raster::raster(spat_raster)
-  
-  # Name raster with the corresponding year
-  year = years_lulc[i]  # Replace "years_lulc" by the vector of years
-  raster_name = paste0("dist_road_", year) # Replace by what we name the raster
-  
-  # Store the raster
-  dist_roads_list_v2[[raster_name]] = raster_layer
-}
+terra::writeRaster(dist_roads_list[['2024']], 
+                   filename = file.path(output_dir, "dist_roads2024.tif"), 
+                   overwrite = TRUE, 
+                   datatype = "FLT4S")
 
-# Distances to forest edges
-dist_edges_list_v2 = list()
-# Loop
-for (i in seq_along(dist_edges_list)) {
-  # Extract SpatRaster (terra object)
-  spat_raster = dist_edges_list[[i]]
-  
-  # ... to RasterLayer (raster object)
-  raster_layer = raster::raster(spat_raster)
-  
-  # Name raster with the corresponding year
-  year = years_lulc[i]  # Replace "years_lulc" by the vector of years
-  raster_name = paste0("dist_edge_", year) # Replace by what we name the raster
-  
-  # Store the raster
-  dist_edges_list_v2[[raster_name]] = raster_layer
-}
-# Check
-plot(dist_edges_list_v2$dist_edge_2024)
-head(freq(dist_edges_list$`2024`))
-head(freq(dist_edges_list_v2$dist_edge_2024))
+# Distance to urban centers
+terra::writeRaster(dist_urban_r, 
+                   filename = file.path(output_dir, "dist_urban.tif"), 
+                   overwrite = TRUE, 
+                   datatype = "FLT4S")
 
-# LULC in buffers
-# Forest
-prop_forest100m_list_v2 = list()
-# Loop
-for (i in seq_along(prop_forest100m_list)) {
-  # Extract SpatRaster (terra object)
-  spat_raster = prop_forest100m_list[[i]]
-  
-  # ... to RasterLayer (raster object)
-  raster_layer = raster::raster(spat_raster)
-  
-  # Name raster with the corresponding year
-  year = years_lulc[i]  # Replace "years_lulc" by the vector of years
-  raster_name = paste0("prop_forest_", year) # Replace by what we name the raster
-  
-  # Store the raster
-  prop_forest100m_list_v2[[raster_name]] = raster_layer
-}
+# Distance to rivers
+terra::writeRaster(dist_rivers_r, 
+                   filename = file.path(output_dir, "dist_rivers.tif"), 
+                   overwrite = TRUE, 
+                   datatype = "FLT4S")
 
+##### Legal status -------
+terra::writeRaster(apa_r, 
+                   filename = file.path(output_dir, "apa.tif"), 
+                   overwrite = TRUE, 
+                   datatype = "INT1U")
+terra::writeRaster(rl_r, 
+                   filename = file.path(output_dir, "rl.tif"), 
+                   overwrite = TRUE, 
+                   datatype = "INT1U")
+terra::writeRaster(rppn_r, 
+                   filename = file.path(output_dir, "rppn.tif"), 
+                   overwrite = TRUE, 
+                   datatype = "INT1U")
+terra::writeRaster(pub_res_r, 
+                   filename = file.path(output_dir, "pub_res.tif"), 
+                   overwrite = TRUE, 
+                   datatype = "INT1U")
+terra::writeRaster(car_r, 
+                   filename = file.path(output_dir, "car.tif"), 
+                   overwrite = TRUE, 
+                   datatype = "INT1U")
+
+##### North/South BR-101 -------
+terra::writeRaster(ns_raster, 
+                   filename = file.path(output_dir, "ns_br101.tif"), 
+                   overwrite = TRUE, 
+                   datatype = "INT1U")
+
+##### Climate ------
+# Precipitations
+terra::writeRaster(rasters_prec_sum[[36]], 
+                   filename = file.path(output_dir, "prec2024.tif"), 
+                   overwrite = TRUE, 
+                   datatype = "FLT4S")
+
+# Tmin
+terra::writeRaster(rasters_tmin_mean[[36]], 
+                   filename = file.path(output_dir, "tmin2024.tif"), 
+                   overwrite = TRUE, 
+                   datatype = "FLT4S")
+
+##### Topography ------
+# Slope
+terra::writeRaster(slope_r, 
+                   filename = file.path(output_dir, "slope.tif"), 
+                   overwrite = TRUE, 
+                   datatype = "FLT4S")
+
+
+##### Proportions of land uses ------
 # Agriculture
-prop_agri100m_list_v2 = list()
-# Loop
-for (i in seq_along(prop_agri100m_list)) {
-  # Extract SpatRaster (terra object)
-  spat_raster = prop_agri100m_list[[i]]
-  
-  # ... to RasterLayer (raster object)
-  raster_layer = raster::raster(spat_raster)
-  
-  # Name raster with the corresponding year
-  year = years_lulc[i]  # Replace "years_lulc" by the vector of years
-  raster_name = paste0("prop_agri_", year) # Replace by what we name the raster
-  
-  # Store the raster
-  prop_agri100m_list_v2[[raster_name]] = raster_layer
-}
-
+terra::writeRaster(prop_agri100m_list[[36]], 
+                   filename = file.path(output_dir, "prop_agri100m_2024.tif"), 
+                   overwrite = TRUE, 
+                   datatype = "FLT4S")
 # Urban
-prop_urban100m_list_v2 = list()
-# Loop
-for (i in seq_along(prop_urban100m_list)) {
-  # Extract SpatRaster (terra object)
-  spat_raster = prop_urban100m_list[[i]]
-  
-  # ... to RasterLayer (raster object)
-  raster_layer = raster::raster(spat_raster)
-  
-  # Name raster with the corresponding year
-  year = years_lulc[i]  # Replace "years_lulc" by the vector of years
-  raster_name = paste0("prop_urban_", year) # Replace by what we name the raster
-  
-  # Store the raster
-  prop_urban100m_list_v2[[raster_name]] = raster_layer
-}
+terra::writeRaster(prop_urban100m_list[[36]], 
+                   filename = file.path(output_dir, "prop_urban100m_2024.tif"), 
+                   overwrite = TRUE, 
+                   datatype = "FLT4S")
 
+##### Other constraints ------
+output_dir = here("outputs", "data", "PLUS", "constraint")
+# Open water
+terra::writeRaster(water_list[['2024']], 
+                   filename = file.path(output_dir, "water2024.tif"), 
+                   overwrite = TRUE, 
+                   datatype = "INT1U")
 
-#### Compile predictors -----
-# Maps of different explanatory variables should have the same coordinate reference system but do not have to have the same extent and resolution as long as the minimum extent is that of the study region defined by an ObsLulcRasterStack object. 
-# However, maps for different timesteps of the same dynamic variable should have the same extent and resolution because these are stored as RasterStack objects.
+#### PLUS parameters --------
+## Land use demand
+freq(rasters_reclass_wgs84[[1]]) # Frequency of each land use
+freq(rasters_reclass_wgs84[[36]]) # Land use demand
 
-## Static predictors
-# First, we compile predictors
-ef = list(
-  ef_001 = apa_r,
-  ef_002 = rl_r,
-  ef_003 = car_r,
-  ef_004 = rppn_r,
-  ef_005 = pub_res_r,
-  ef_006 = dist_urban_r,
-  ef_007 = dist_rivers_r,
-  ef_008 = ns_raster,
-  ef_009 = topo_r,
-  ef_010 = slope_r)
+## Transition matrix
+# Compute transition matrix
+tm = terra::crosstab(c(rasters_reclass_wgs84[[1]], rasters_reclass_wgs84[[36]]))
+# 0 if < 500, 1 otherwise
+tm_binary = ifelse(tm < 500, 0, 1)
+print(tm_binary)
 
-# Then, we create an ExpVarRasterList object
-ef_stack = lulcc::ExpVarRasterList(x = ef, pattern = "ef")
+## Neighborhood weights
+# Based on PLUS documentation, we can determine the neighborhood weight of each land-use type by calculating the ratio of the expansion areas of a land-use type accounting for the total land expansion
+# Import land use changes (1989-2024)
+lulc_19892024 = terra::rast(here("outputs", "data", "PLUS", "lulc_expansion", "lulc_expansion_19892024_landuse_1to2.tif"))
+plot(lulc_19892024)
+# Frequency table
+freq_lulc19892024 = freq(lulc_19892024)
+# Filter lines where value != 0
+freq_filtered = freq_lulc19892024[freq_lulc19892024$value != 0, ]
+# Sum of LULC changes
+tot = sum(freq_filtered$count)
+# Proportion of each change
+freq_filtered$proportion = freq_filtered$count / tot
+# Print result
+print(freq_filtered[, c("value", "count", "proportion")])
 
-
-### Create LULC Raster List ------
-
-# lulcc needs RasterLayer objects (raster package) and not SpatRaster (terra)
-
-
-# Name each land use raster
-names(rasters_reclass) = paste0("lu_", years_lulc) # Ex: "lu_1989", "lu_1990", etc.
-rasters_reclass = rasters_reclass[order(years_lulc)]
-
-# Define categories and labels
-categories = c(1, 2, 3, 4, 5, 6)
-labels = c("Forest", "Nonforest", "Wetlands", "Agriculture", "Water", "Urban")
-obs = lulcc::ObsLulcRasterStack(x=rasters_reclass, 
-                                pattern = "lu_",
-                                categories=categories, 
-                                labels=labels,
-                                t=c(0,1,2,3,4,5,6,7,8,9,10,
-                                    11,12,13,14,15,16,17,18,19,20,
-                                    21,22,23,24,25,26,27,28,29,30,
-                                    31,32,33,34,35))
-
-### Transition matrix -------
-lulcc::crossTabulate(x=obs, times=c(0,35))
