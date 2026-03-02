@@ -394,7 +394,6 @@ plot(
   r_step1,
   main = "Step 1 – Cumulative trajectory code",
   col = c("#32a65e",
-          "#ad975a",
           "#FFFFB2",
           "#d4271e",
           "#EE662E",
@@ -410,7 +409,6 @@ plot(
   main = "Step 2 – Re/deforestation classification",
   col = c(
     "#32a65e",
-    "#ad975a",
     "#519799",
     "#FFFFB2",
     "#d4271e",

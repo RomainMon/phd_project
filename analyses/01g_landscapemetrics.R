@@ -87,7 +87,7 @@ years = raster_df$year
 for (i in seq_along(rasters_mspa)) {
   cat("Year", years[i], " → raster name:", basename(raster_df$file[i]), "\n")
 }
-plot(rasters_mspa[[36]], col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e", "yellow"))
+plot(rasters_mspa[[36]], col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e", "orange"))
 
 
 #### Cumulative rasters (de/reforestation) -------
