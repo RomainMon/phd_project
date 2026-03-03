@@ -36,6 +36,7 @@ plot(rasters[[36]], col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF",
 #### Spatial trajectories (rasters) -------
 
 ##### 1. CUMULATIVE TRANSITIONS -------
+# This section answers: "What is the entire land-use trajectory of this pixel up to year t?"
 # Create a set of transition rasters where each cell encodes its land-use change from the previous year
 # These rasters show all annual land-use transitions.
 # IMPORTANT: Transitions are cumulative, i.e., the cell value appends each time the cell land use changes.
@@ -146,6 +147,12 @@ par(mfrow=c(1,1))
 # Reforested cells → all cells that are currently forest (1) but were non-forest (2–6) at least once in the past.
 # Stable cells (1 or other) → all other cells keep their current value.
 # Otherwise: Keep current land-cover value at year
+# At year t, we classify a pixel as: 
+# 7 (reforested) if it is forest now AND was non-forest at least once before
+# 8 (deforested) if it is non-forest now AND was forest at least once before
+# Important : If forest occurred at ANY time in the past, classify as deforested when currently non-forest.
+# Which means : A pixel that was forest in 1990, cleared in 1991, remained agriculture until 2020, will be labeled as “deforested” in 2020
+# Therefore, At each year t, it produces 4 conceptual categories: Stable forest ; Stable non-forest ; Forest with past non-forest history (secondary forest) ; Non-forest with past forest history (formerly forest land)
 
 # Reclassify cumulative transitions into reforestation (7) and deforestation (8)
 ## Example
@@ -340,6 +347,58 @@ plot(age_rasters_cat[[36]])
 freq(age_rasters_cat[[36]])
 freq(rasters_forest_bin[[36]])
 
+##### 5. NON-CUMULATIVE TRANSITIONS ------
+# Same logic as section 1, but without appending changes over time
+# i.e., produces rasters which display the changes that occurred that given year, not before
+
+compute_non_cumulative_transitions = function(rasters, years) {
+  
+  if (length(rasters) != length(years))
+    stop("Length of 'rasters' and 'years' must be the same.")
+  
+  out = vector("list", length(rasters) - 1)
+  
+  for (i in 2:length(rasters)) {
+    
+    message("Computing transitions: ",
+            years[i - 1], " → ", years[i])
+    
+    prev_vals = values(rasters[[i - 1]])
+    curr_vals = values(rasters[[i]])
+    
+    # Initialize output as NA
+    newvals = rep(NA_integer_, length(curr_vals))
+    
+    ok = !is.na(prev_vals) & !is.na(curr_vals)
+    
+    # Default: keep current land-cover class
+    newvals[ok] = curr_vals[ok]
+    
+    # Reforestation
+    reforest = ok & prev_vals %in% 2:6 & curr_vals == 1
+    
+    # Deforestation
+    deforest = ok & prev_vals == 1 & curr_vals %in% 2:6
+    
+    newvals[reforest] = 7L
+    newvals[deforest] = 8L
+    
+    r_out = setValues(rasters[[i]], newvals)
+    names(r_out) = years[i]
+    
+    out[[i - 1]] = r_out
+  }
+  
+  names(out) = years[-1]
+  out
+}
+
+# Apply
+non_cumul_trans = compute_non_cumulative_transitions(rasters, years)
+plot(non_cumul_trans[[35]], col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e", "chartreuse", "pink"))
+sum(values(non_cumul_trans[["2024"]]) %in% c(7,8))
+
+
 ##### Visual demo of all steps ---------
 
 # Central coordinates
@@ -464,6 +523,26 @@ for (i in seq_along(reclass_cumul_trans)) {
   
   terra::writeRaster(
     reclass_cumul_trans[[i]],
+    filename = output_path,
+    overwrite = TRUE,
+    wopt = list(datatype = "INT1U", gdal = c("COMPRESS=LZW"))
+  )
+}
+
+# Export non_cumul_trans (starts from year 2)
+# Define output folder
+output_dir = here("outputs", "data", "MapBiomas", "Rasters_non_cumul_tm")
+
+message("Exporting non_cumul_trans rasters (re/deforestation classes)...")
+
+for (i in seq_along(non_cumul_trans)) {
+  year_i = years[i + 1]  # because element 1 = transition from years[1]→years[2]
+  output_path = file.path(output_dir, paste0("raster_reclass_non_cumul_tm_", year_i, ".tif"))
+  
+  message("  - Writing non cumul raster for year ", year_i)
+  
+  terra::writeRaster(
+    non_cumul_trans[[i]],
     filename = output_path,
     overwrite = TRUE,
     wopt = list(datatype = "INT1U", gdal = c("COMPRESS=LZW"))

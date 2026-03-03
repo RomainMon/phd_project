@@ -223,6 +223,7 @@ ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
 
 ## Compute means
 df_long %>%
+  dplyr::filter(City_name != "Araruama (RJ)" & City_name != "Saquarema (RJ)") %>% 
   dplyr::group_by(Category) %>%
   dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
   dplyr::mutate(
@@ -607,6 +608,7 @@ ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
 
 ## Compute means
 df_long %>%
+  dplyr::filter(City_name != "Araruama (RJ)" & City_name != "Saquarema (RJ)") %>% 
   dplyr::group_by(Category) %>%
   dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
   dplyr::mutate(
@@ -653,6 +655,7 @@ ggplot(df_long_prop, aes(y = City_name, x = Proportion, fill = Category)) +
 
 ## Compute means
 df_long %>%
+  dplyr::filter(City_name != "Araruama (RJ)" & City_name != "Saquarema (RJ)") %>% 
   dplyr::group_by(Category) %>%
   dplyr::summarise(N_cat = sum(N, na.rm = TRUE), .groups = "drop") %>%
   dplyr::mutate(

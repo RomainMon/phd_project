@@ -14,7 +14,7 @@ library(tibble)
 library(scales)
 library(ggrepel)
 # remotes::install_github("davidsjoberg/ggstream")
-library(ggstream)
+# library(ggstream)
 library(ggtern)
 library(extrafont)
 

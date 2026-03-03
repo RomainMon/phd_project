@@ -47,14 +47,31 @@ years_tm = stringr::str_extract(basename(raster_files), "(?<!\\d)\\d{4}(?!\\d)")
 raster_df = data.frame(file = raster_files, years_tm = as.numeric(years_tm)) %>%
   dplyr::arrange(years_tm)
 # Load rasters in chronological order
-rasters_tm = lapply(raster_df$file, terra::rast)
+rasters_cumul_tm = lapply(raster_df$file, terra::rast)
 years_tm = raster_df$years_tm
 # Check
-for (i in seq_along(rasters_tm)) {
+for (i in seq_along(rasters_cumul_tm)) {
   cat("Year", years_tm[i], " → raster name:", basename(raster_df$file[i]), "\n")
 }
-plot(rasters_tm[[35]], col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e", "chartreuse", "pink"))
+plot(rasters_cumul_tm[[35]], col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e", "chartreuse", "pink"))
 
+## NON cumulative rasters
+base_path = here("outputs", "data", "MapBiomas", "Rasters_non_cumul_tm")
+raster_files = list.files(base_path, pattern = "\\.tif$", full.names = TRUE)
+
+# Extract years
+years_tm = stringr::str_extract(basename(raster_files), "(?<!\\d)\\d{4}(?!\\d)")
+# Create a dataframe to link files and years
+raster_df = data.frame(file = raster_files, years_tm = as.numeric(years_tm)) %>%
+  dplyr::arrange(years_tm)
+# Load rasters in chronological order
+rasters_non_cumul_tm = lapply(raster_df$file, terra::rast)
+years_tm = raster_df$years_tm
+# Check
+for (i in seq_along(rasters_non_cumul_tm)) {
+  cat("Year", years_tm[i], " → raster name:", basename(raster_df$file[i]), "\n")
+}
+plot(rasters_non_cumul_tm[[35]], col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e", "chartreuse", "pink"))
 
 ## Forest age
 base_path = here("outputs", "data", "MapBiomas", "Rasters_forest_age")
@@ -115,13 +132,13 @@ raster_df = data.frame(file = raster_files, years_climate = as.numeric(years_cli
   dplyr::arrange(years_climate)
 
 # Load rasters in chronological order
-rasters_tmin_mean = lapply(raster_df$file, terra::rast)
+rasters_cumul_tmin_mean = lapply(raster_df$file, terra::rast)
 years_climate = raster_df$years_climate
 # Check
-for (i in seq_along(rasters_tmin_mean)) {
+for (i in seq_along(rasters_cumul_tmin_mean)) {
   cat("Year", years_climate[i], " → raster name:", basename(raster_df$file[i]), "\n")
 }
-plot(rasters_tmin_mean[[36]])
+plot(rasters_cumul_tmin_mean[[36]])
 
 ## Tmin (max)
 base_path = here("outputs", "data", "WorldClim", "tmax")
@@ -135,13 +152,13 @@ raster_df = data.frame(file = raster_files, years_climate = as.numeric(years_cli
   dplyr::arrange(years_climate)
 
 # Load rasters in chronological order
-rasters_tmax_mean = lapply(raster_df$file, terra::rast)
+rasters_cumul_tmax_mean = lapply(raster_df$file, terra::rast)
 years_climate = raster_df$years_climate
 # Check
-for (i in seq_along(rasters_tmax_mean)) {
+for (i in seq_along(rasters_cumul_tmax_mean)) {
   cat("Year", years_climate[i], " → raster name:", basename(raster_df$file[i]), "\n")
 }
-plot(rasters_tmax_mean[[36]])
+plot(rasters_cumul_tmax_mean[[36]])
 
 
 ### Import vectors -----
@@ -229,6 +246,7 @@ template_rast = rasters_reclass[[36]]
 
 #### 1. Build table of all change events --------
 # We create a table with: the cell id, the coordinates, the type of change (deforestation, reforestation), the previous land use, the following land use, the year of change
+# Detects transitions between consecutive rasters (t-1 → t)
 cat("\nSECTION 1: Build event table\n")
 
 ## Example
@@ -267,10 +285,10 @@ zoom_ext = ext(
 )
 
 # Crop the raster to the zoom window
-cumul_crop = crop(rasters_tm[[1]], zoom_ext)
+cumul_crop = crop(rasters_cumul_tm[[1]], zoom_ext)
 
 # Plot the cropped raster
-plot(cumul_crop, main = "Cumulative Raster 1990 (Zoomed)", col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#d4271e", "chartreuse", "pink"))
+plot(cumul_crop, main = "Cumulative Raster 1990 (Zoomed)", col=c("#32a65e", "#519799", "#FFFFB2", "#d4271e", "chartreuse", "pink"))
 
 # Add deforestation points within the same window
 # Filter points inside the zoom window
@@ -350,9 +368,10 @@ changes[["year"]] == 1990 # To check that changes between baseline (1989) and th
 
 # Results
 cat("Changed cells:", length(changes$cell_id), "\n")
-cat("Unique changed cells:", length(unique(changes$cell_id)), "\n")
-f = terra::freq(rasters_tm[[35]])
-cat("... Now check that it equals the total number of cells that have underwent reforestation or deforestation in cumulative rasters, being:", sum(f$count[f$value %in% c(7,8)]))
+cat("Unique changed cells:", length(unique(changes$cell_id)), "\n") # Number of cells that ever experienced at least one transition over the period
+f = terra::freq(rasters_cumul_tm[[35]])
+cat("... Now check that it equals the total number of cells that have underwent reforestation or deforestation in cumulative rasters, being:", 
+    sum(f$count[f$value %in% c(7,8)]))
 
 # Some statistics
 # Types of reforestation
@@ -394,7 +413,8 @@ changes %>%
   dplyr::count(cell_id, name = "n_changes") %>%
   dplyr::count(n_changes, name = "n_cells") %>%
   dplyr::arrange(n_changes) %>% 
-  dplyr::mutate(cum_n = cumsum(n_cells))
+  dplyr::mutate(cum_n = cumsum(n_cells)) %>% 
+  dplyr::mutate(prop = n_cells * 100 / sum(n_cells))
 
 
 #### 2. Select controls ---------
@@ -450,7 +470,7 @@ head(defor_events_per_year)
 
 # Step 3: Select intact controls for reforestation
 # Select the last cumulative raster (where intact cells are displayed)
-last_rast = rasters_tm[[length(rasters_tm)]]
+last_rast = rasters_cumul_tm[[length(rasters_cumul_tm)]]
 
 # Binary mask: intact agriculture only
 agri_mask = last_rast == 4
@@ -506,14 +526,14 @@ controls_2024 = controls_agri_df %>%
   dplyr::filter(year == 2024)
 controls_2023 = controls_agri_df %>%
   dplyr::filter(year == 2023)
-plot(rasters_tm[[35]], col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e", "chartreuse", "pink"))
+plot(rasters_cumul_tm[[35]], col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e", "chartreuse", "pink"))
 points(controls_2024$x, controls_2024$y, pch = 20, col = "magenta", cex = 0.4)
 points(controls_2023$x, controls_2023$y, pch = 20, col = "darkslategray1", cex = 0.4)
-terra::extract(rasters_tm[[35]], controls_2024[, c("x", "y")]) # Check the value
+terra::extract(rasters_cumul_tm[[35]], controls_2024[, c("x", "y")]) # Check the value
 
 # Step 4: Select intact controls for deforestation
 # Select the last cumulative raster (where intact cells are displayed)
-last_rast = rasters_tm[[length(rasters_tm)]]
+last_rast = rasters_cumul_tm[[length(rasters_cumul_tm)]]
 
 # Binary mask: intact forest only
 forest_mask = last_rast == 1
@@ -566,17 +586,15 @@ controls_2024 = controls_forest_df %>%
   dplyr::filter(year == 2024)
 controls_2023 = controls_forest_df %>%
   dplyr::filter(year == 2023)
-plot(rasters_tm[[35]], col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e", "chartreuse", "pink"))
+plot(rasters_cumul_tm[[35]], col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e", "chartreuse", "pink"))
 points(controls_2024$x, controls_2024$y, pch = 20, col = "magenta", cex = 0.4)
 points(controls_2023$x, controls_2023$y, pch = 20, col = "darkslategray1", cex = 0.4) # Check that controls differ each year
-terra::extract(rasters_tm[[35]], controls_2024[, c("x", "y")]) # Check the value
+terra::extract(rasters_cumul_tm[[35]], controls_2024[, c("x", "y")]) # Check the value
 
 
 # Summary
-# Check consistency
 cat("Controls (deforestation):", nrow(controls_forest_df), "\n")
 cat("Controls (reforestation):", nrow(controls_agri_df), "\n")
-
 
 #### 3. Build final datasets for modelling -------
 
@@ -628,8 +646,28 @@ intersect(changes_defor_subset %>% dplyr::pull(cell_id),
 data_defor %>% dplyr::group_by(type, year) %>% dplyr::count() %>% dplyr::arrange(year)
 data_refor %>% dplyr::group_by(type, year) %>% dplyr::count() %>% dplyr::arrange(year)
 
+# Intersection between both datasets (cells that were deforested AND reforested)
+intersect(
+  data_refor$cell_id[data_refor$type == 7],
+  data_defor$cell_id[data_defor$type == 8]
+)
+
+## Compare pixels in modeling datasets with cumulative rasters
+# Unique event pixels in modelling datasets
+event_pixels_model = union(data_refor$cell_id[data_refor$type == 7], data_defor$cell_id[data_defor$type == 8])
+length(event_pixels_model)
+# Event pixels in cumulative raster
+f = terra::freq(rasters_cumul_tm[[35]])
+sum(f$count[f$value %in% c(7,8)])
+# Conclusion : minor differences (around 4000 pixels in the cumulative raster are lacking in the modeling dataset) 
+# This difference is normal because rasters_cumul_tm includes all transitions (ex: 1→6, 5→1) while modeling datasets is focused on 1-4 and 4-1
+
+# Are pixels in the modeling dataset all comprised in the cumulative raster ?
+pixels_cumul = which(values(rasters_cumul_tm[[35]]) %in% c(7,8))
+all(event_pixels_model %in% pixels_cumul) # Should be true, i.e., all pixels used for modeling are comprised in the cumulative raster
+
 # Plot datasets
-plot(rasters_tm[[35]], col = c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e", "chartreuse", "pink"))
+plot(rasters_cumul_tm[[35]], col = c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e", "chartreuse", "pink"))
 points(data_refor$x[data_refor$type == 4 & data_refor$year == 2024],
        data_refor$y[data_refor$type == 4 & data_refor$year == 2024],
        col = "magenta", pch = 20, cex = 0.5)
@@ -637,7 +675,7 @@ points(data_refor$x[data_refor$type == 7 & data_refor$year == 2024],
        data_refor$y[data_refor$type == 7 & data_refor$year == 2024],
        col = "darkslategray1", pch = 20, cex = 0.5)
 
-plot(rasters_tm[[35]], col = c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e", "chartreuse", "pink"))
+plot(rasters_cumul_tm[[35]], col = c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e", "chartreuse", "pink"))
 points(data_defor$x[data_defor$type == 1 & data_defor$year == 2024],
        data_defor$y[data_defor$type == 1 & data_defor$year == 2024],
        col = "magenta", pch = 20, cex = 0.5)
@@ -670,6 +708,19 @@ plot(rppn_r)
 rl_r = terra::rasterize(rl, template_rast, field = 1, background = 0)
 plot(rl_r)
 
+## Area covered by public reserves
+# Get spatial resolution
+resolution = res(pub_res_r)[1] 
+pixel_area_ha = (resolution^2) / 10000  # Resolution in ha
+# Surface covered by public reserves
+freq_table = freq(pub_res_r)
+freq_table$surface_ha = freq_table$count * pixel_area_ha
+# Compute proportion
+total_pixels = sum(freq_table$count)
+freq_table$percentage = (freq_table$count / total_pixels) * 100
+
+# Afficher le résultat
+print(freq_table[, c("value", "count", "surface_ha", "percentage")])
 ## Extract for deforestation dataset
 # NB: ID = FALSE returns only the extracted values
 # Using [,1] extracts the values as a simple vector instead of a one-column data frame
@@ -935,6 +986,9 @@ cat(" Distances computed.\n")
 # The extraction returns some NAs so we fix that by extracting closest values.
 cat("SECTION 7: extracting topo values\n")
 
+## Summary of elevation in the landscape
+summary(topo_r, size=10000000, warn=TRUE)
+        
 compute_topo = function(dt, raster, var_name) {
   
   cat("\n--- Extracting", var_name, "---\n")
@@ -985,146 +1039,157 @@ data_refor %>% dplyr::group_by(type) %>% dplyr::summarise(mean_alt = mean(alt_m,
 cat("Slope & altitude extraction completed\n")
 
 
-#### 8. Land use area ----------
-# We extract land-use areas within a buffer around each point, year by year, for specified land-use classes
-# Numerous options: sample_lsm (landscapemetrics), packahe multilandr, exact_extractr... but all these options are slow
-# Instead, we can use a moving window approach (faster with numerous points)
-
-cat("\nSECTION 8: Land use area extraction around buffers\n")
-
-## On an example
-# Pick one class
-cl = 1
-# Pick one raster
-r = rasters_reclass[[2]]
-# Pick one point
-pt = data_defor %>%
-  dplyr::filter(year == 1990) %>%
-  dplyr::slice(1) %>%
-  dplyr::select(x, y)
-pt_vect = terra::vect(pt, geom = c("x", "y"), crs = crs(r))
-# Zoom window
-zoom_radius = 250  # meters around point
-ext_zoom = ext(
-  pt$x - zoom_radius, pt$x + zoom_radius,
-  pt$y - zoom_radius, pt$y + zoom_radius
-)
-# Binary raster
-r_bin = r == cl
-plot(r_bin,
-     main = paste("Binary raster: class", cl),
-     col = c("lightgrey", "darkgreen"))
-# Moving window
-radius = 100 # meters
-w = terra::focalMat(r_bin, type = "circle", d = radius)
-image(w, main = "Focal window")
-focal_count = terra::focal(r_bin, w = w, fun = "sum", na.rm = TRUE)
-plot(focal_count, main = "Forest pixel count")
-# Valid landscape (for proportion)
-r_valid = !is.na(r)
-focal_valid = terra::focal(r_valid, w = w, fun = "sum", na.rm = TRUE)
-plot(focal_valid, main = "Valid pixel count")
-# Convert pixel count to area
-pixel_area = prod(res(r)) # m²
-focal_area_m2 = focal_count * pixel_area
-valid_area_m2 = focal_valid * pixel_area
-plot(focal_area_m2, main = "Forest area (m²)")
-plot(valid_area_m2, main = "Valid area (m²)")
-# Extract value
-area_at_point = terra::extract(focal_area_m2, pt_vect)[, 2]
-valid_at_point = terra::extract(valid_area_m2, pt_vect)[, 2]
-area_at_point
-area_at_point/valid_at_point
-# Plot everything zoomed around point
-par(mfrow = c(2, 2))
-plot(r_bin, main = paste("Binary raster: class", cl), col = c("lightgrey", "darkgreen"), ext = ext_zoom)
-points(pt$x, pt$y, pch = 20, col = "red")
-
-plot(focal_count, main = "Forest pixel count", ext = ext_zoom)
-points(pt$x, pt$y, pch = 20, col = "red")
-
-plot(focal_area_m2, main = "Forest area (m²)", ext = ext_zoom)
-points(pt$x, pt$y, pch = 20, col = "red")
-
-plot(valid_area_m2, main = "Valid area (m²)", ext = ext_zoom)
-points(pt$x, pt$y, pch = 20, col = "red")
-par(mfrow = c(1, 1))
-
-
-## Function
-names(rasters_reclass) = years_lulc
-compute_landuse_buffer = function(dt, rasters, classes, radii) {
-  
-  cat("\n--- Starting land use area extraction ---\n")
-  
-  # Pixel area
-  pixel_area = prod(terra::res(rasters[[1]]))
-  cat("Pixel area:", pixel_area, "m²\n")
-  
-  # list of unique years present in this dataset
-  years = sort(unique(dt$year))
-  
-  for (radius in radii) {
-    
-    cat("\n### Buffer radius:", radius, "m ###\n")
-  
-    # circular weight matrix
-    w = terra::focalMat(rasters[[1]], type = "circle", d = radius, fillNA = TRUE)
-    
-    # loop over years
-    for (yr in years) {
-      cat("\nProcessing YEAR:", yr, "\n")
-      
-      # select raster for this year
-      r_year = rasters[[as.character(yr)]]
-      
-      # extract the coordinates for this year
-      pts_year = dt %>%
-        dplyr::filter(year == yr) %>%
-        dplyr::select(x, y)
-      pts_vect = terra::vect(pts_year, geom = c("x", "y"), crs = crs(r_year))
-      
-      # Extract what cells are "valid" (NOT NA)
-      r_valid = !is.na(r_year)
-      # Here, we compute the "valid area" to compute the proportion of LULC classes within each moving window
-      # This way, we account for cells at the border of the landscape
-      focal_valid = terra::focal(r_valid, w = w, fun = "sum", na.rm = TRUE)
-      valid_area_m2 = focal_valid * pixel_area
-      
-      # loop over classes
-      for (cl in classes) {
-        cat("   → Class", cl, "...\n")
-        # binary raster for that class
-        r_bin = r_year == cl
-        # moving window sum
-        focal_count = terra::focal(r_bin, w = w, fun = "sum", na.rm = TRUE) # NA values are ignored in the sum
-        # convert pixel count to area
-        focal_area_m2 = focal_count * pixel_area
-        # extract values for the points
-        area_values = terra::extract(focal_area_m2, pts_vect)[, 2]
-        valid_vals = terra::extract(valid_area_m2, pts_vect)[, 2]
-        # assign values back into the dataframe
-        col_area_name = paste0("area_m2_r", radius, "_class_", cl)
-        dt[[col_area_name]][dt$year == yr] = area_values
-        
-        col_prop_name = paste0("prop_r", radius, "_class_", cl)
-        dt[[col_prop_name]][dt$year == yr] = area_values / valid_vals
-      }
-    }
-  }
-  
-  cat("\n--- Extraction finished successfully ---\n")
-  return(dt)
-}
-
-data_defor = compute_landuse_buffer(dt = data_defor, rasters = rasters_reclass, classes = c(1,4,6), radii = c(100,250,500))
-data_refor = compute_landuse_buffer(dt = data_refor, rasters = rasters_reclass, classes = c(1,4,6), radii = c(100,250,500))
-
-# Summary statistics
-data_defor %>% dplyr::group_by(type) %>% dplyr::summarise_at(vars(starts_with("area")), mean, na.rm = TRUE)
-data_refor %>% dplyr::group_by(type) %>% dplyr::summarise_at(vars(starts_with("area")), mean, na.rm = TRUE)
-
-cat("Land use area computation complete.\n")
+# #### 8. Land use area ----------
+# # We extract land-use areas within a buffer around each point, year by year, for specified land-use classes
+# # Numerous options: sample_lsm (landscapemetrics), packahe multilandr, exact_extractr... but all these options are slow
+# # Instead, we can use a moving window approach (faster with numerous points)
+# 
+# cat("\nSECTION 8: Land use area extraction around buffers\n")
+# 
+# ## On an example
+# # Pick one class
+# cl = 1
+# # Pick one raster
+# r = rasters_reclass[[2]]
+# # Pick one point
+# pt = data_defor %>%
+#   dplyr::filter(year == 1990) %>%
+#   dplyr::slice(1) %>%
+#   dplyr::select(x, y)
+# pt_vect = terra::vect(pt, geom = c("x", "y"), crs = crs(r))
+# # Zoom window
+# zoom_radius = 250  # meters around point
+# ext_zoom = ext(
+#   pt$x - zoom_radius, pt$x + zoom_radius,
+#   pt$y - zoom_radius, pt$y + zoom_radius
+# )
+# # Binary raster
+# r_bin = r == cl
+# plot(r_bin,
+#      main = paste("Binary raster: class", cl),
+#      col = c("lightgrey", "darkgreen"))
+# # Moving window
+# radius = 100 # meters
+# w = terra::focalMat(r_bin, type = "circle", d = radius)
+# image(w, main = "Focal window")
+# focal_count = terra::focal(r_bin, w = w, fun = "sum", na.rm = TRUE)
+# plot(focal_count, main = "Forest pixel count")
+# # Valid landscape (for proportion)
+# r_valid = !is.na(r)
+# focal_valid = terra::focal(r_valid, w = w, fun = "sum", na.rm = TRUE)
+# plot(focal_valid, main = "Valid pixel count")
+# # Convert pixel count to area
+# pixel_area = prod(res(r)) # m²
+# focal_area_m2 = focal_count * pixel_area
+# valid_area_m2 = focal_valid * pixel_area
+# plot(focal_area_m2, main = "Forest area (m²)")
+# plot(valid_area_m2, main = "Valid area (m²)")
+# # Extract value
+# area_at_point = terra::extract(focal_area_m2, pt_vect)[, 2]
+# valid_at_point = terra::extract(valid_area_m2, pt_vect)[, 2]
+# area_at_point
+# area_at_point/valid_at_point
+# # Plot everything zoomed around point
+# par(mfrow = c(2, 2))
+# plot(r_bin, main = paste("Binary raster: class", cl), col = c("lightgrey", "darkgreen"), ext = ext_zoom)
+# points(pt$x, pt$y, pch = 20, col = "red")
+# 
+# plot(focal_count, main = "Forest pixel count", ext = ext_zoom)
+# points(pt$x, pt$y, pch = 20, col = "red")
+# 
+# plot(focal_area_m2, main = "Forest area (m²)", ext = ext_zoom)
+# points(pt$x, pt$y, pch = 20, col = "red")
+# 
+# plot(valid_area_m2, main = "Valid area (m²)", ext = ext_zoom)
+# points(pt$x, pt$y, pch = 20, col = "red")
+# par(mfrow = c(1, 1))
+# 
+# 
+# ## Function
+# # First, we name rasters by year
+# names(rasters_reclass) = years_lulc
+# names(rasters_non_cumul_tm) = years_tm
+# 
+# # Function to compute land use area in given radii and append the result into a data frame
+# compute_landuse_buffer = function(dt, rasters, classes, radii) {
+#   
+#   cat("\n--- Starting land use area extraction ---\n")
+#   
+#   # Pixel area
+#   pixel_area = prod(terra::res(rasters[[1]]))
+#   cat("Pixel area:", pixel_area, "m²\n")
+#   
+#   # list of unique years present in this dataset
+#   years = sort(unique(dt$year))
+#   
+#   for (radius in radii) {
+#     
+#     cat("\n### Buffer radius:", radius, "m ###\n")
+#   
+#     # circular weight matrix
+#     w = terra::focalMat(rasters[[1]], type = "circle", d = radius, fillNA = TRUE)
+#     
+#     # loop over years
+#     for (yr in years) {
+#       cat("\nProcessing YEAR:", yr, "\n")
+#       
+#       # select raster for this year
+#       r_year = rasters[[as.character(yr)]]
+#       
+#       # extract the coordinates for this year
+#       pts_year = dt %>%
+#         dplyr::filter(year == yr) %>%
+#         dplyr::select(x, y)
+#       pts_vect = terra::vect(pts_year, geom = c("x", "y"), crs = crs(r_year))
+#       
+#       # Extract what cells are "valid" (NOT NA)
+#       r_valid = !is.na(r_year)
+#       # Here, we compute the "valid area" to compute the proportion of LULC classes within each moving window
+#       # This way, we account for cells at the border of the landscape
+#       focal_valid = terra::focal(r_valid, w = w, fun = "sum", na.rm = TRUE)
+#       valid_area_m2 = focal_valid * pixel_area
+#       
+#       # loop over classes
+#       for (cl in classes) {
+#         cat("   → Class", cl, "...\n")
+#         # binary raster for that class
+#         r_bin = r_year == cl
+#         # moving window sum
+#         focal_count = terra::focal(r_bin, w = w, fun = "sum", na.rm = TRUE) # NA values are ignored in the sum
+#         # convert pixel count to area
+#         focal_area_m2 = focal_count * pixel_area
+#         # extract values for the points
+#         area_values = terra::extract(focal_area_m2, pts_vect)[, 2]
+#         valid_vals = terra::extract(valid_area_m2, pts_vect)[, 2]
+#         # assign values back into the dataframe
+#         col_area_name = paste0("area_m2_r", radius, "_class_", cl)
+#         dt[[col_area_name]][dt$year == yr] = area_values
+#         
+#         col_prop_name = paste0("prop_r", radius, "_class_", cl)
+#         dt[[col_prop_name]][dt$year == yr] = area_values / valid_vals
+#       }
+#     }
+#   }
+#   
+#   cat("\n--- Extraction finished successfully ---\n")
+#   return(dt)
+# }
+# 
+# # Area of agriculture, built-up and forest, using LULCC rasters
+# data_defor = compute_landuse_buffer(dt = data_defor, rasters = rasters_reclass, classes = c(1,4,6), radii = c(100,500,1000))
+# data_refor = compute_landuse_buffer(dt = data_refor, rasters = rasters_reclass, classes = c(1,4,6), radii = c(100,500,1000))
+# 
+# # Area of deforested and reforested pixels, using NON cumulative rasters (transition matrix)
+# # Here, we use the same function to compute the area covered by deforested/reforested cells around a given cell
+# # We use NON cumulative rasters (i.e., rasters showing what cells were deforested or reforested between t-1 and t)
+# data_defor = compute_landuse_buffer(dt = data_defor, rasters = rasters_non_cumul_tm, classes = 8, radii = c(100,500,1000))
+# data_refor = compute_landuse_buffer(dt = data_refor, rasters = rasters_non_cumul_tm, classes = 7, radii = c(100,500,1000))
+# 
+# # Summary statistics
+# data_defor %>% dplyr::group_by(type) %>% dplyr::summarise_at(vars(starts_with("area")), mean, na.rm = TRUE)
+# data_refor %>% dplyr::group_by(type) %>% dplyr::summarise_at(vars(starts_with("area")), mean, na.rm = TRUE)
+# 
+# cat("Land use area computation complete.\n")
 
 #### 9. Forest age ----------
 # We extract the forest age for deforested/intact cells only
@@ -1164,13 +1229,16 @@ cat("Forest age extraction completed.\n")
 # Climatic values are extracted for each event location.
 cat("Extracting climate variables (precipitations and temperatures).\n")
 
+## Summary of precipitations in the landscape
+summary(rasters_prec_sum[[36]], size=10000000, warn=TRUE)
+
 # Function
 # Inputs = dataframe, climate rasters, name of the output variable (var_name) (e.g., prec_mean)
 # We extract the value at point location
 # Some points may not have a value (rasters do not overlay all locations); therefore, the nearest value is taken
 names(rasters_prec_sum) = years_climate
-names(rasters_tmax_mean) = years_climate
-names(rasters_tmin_mean) = years_climate
+names(rasters_cumul_tmax_mean) = years_climate
+names(rasters_cumul_tmin_mean) = years_climate
 
 compute_climate = function(dt, rasters, var_name) {
   
@@ -1215,13 +1283,13 @@ compute_climate = function(dt, rasters, var_name) {
 
 # Extract for deforestation 
 data_defor = compute_climate(data_defor, rasters_prec_sum, "prec_sum")
-data_defor = compute_climate(data_defor, rasters_tmin_mean, "tmin_mean")
-data_defor = compute_climate(data_defor, rasters_tmax_mean, "tmax_mean")
+data_defor = compute_climate(data_defor, rasters_cumul_tmin_mean, "tmin_mean")
+data_defor = compute_climate(data_defor, rasters_cumul_tmax_mean, "tmax_mean")
 
 # Extract for reforestation
 data_refor = compute_climate(data_refor, rasters_prec_sum, "prec_sum")
-data_refor = compute_climate(data_refor, rasters_tmin_mean, "tmin_mean")
-data_refor = compute_climate(data_refor, rasters_tmax_mean, "tmax_mean")
+data_refor = compute_climate(data_refor, rasters_cumul_tmin_mean, "tmin_mean")
+data_refor = compute_climate(data_refor, rasters_cumul_tmax_mean, "tmax_mean")
 
 # Presence of NAs
 sum(is.na(data_refor$prec_sum))
@@ -1419,7 +1487,7 @@ car_sf_filtered = car_sf %>%
 
 ## Remove too small properties
 # Pixel area
-r = rasters_tm[[35]]
+r = rasters_cumul_tm[[35]]
 px_area_m2 = prod(terra::res(r))
 px_area_ha = px_area_m2 / 10000
 px_area_ha
@@ -1441,13 +1509,13 @@ car_sf_filtered %>%
 
 ## Deforestation map
 # Use the last transition map
-tm_defor = rasters_tm[[length(rasters_tm)]]
+tm_defor = rasters_cumul_tm[[length(rasters_cumul_tm)]]
 tm_defor[tm_defor != 8] = NA
 plot(tm_defor, col="pink")
 
 ## Reforestation map
 # Use the last transition map
-tm_refor = rasters_tm[[length(rasters_tm)]]
+tm_refor = rasters_cumul_tm[[length(rasters_cumul_tm)]]
 tm_refor[tm_refor != 7] = NA
 plot(tm_refor, col="chartreuse")
 
@@ -1665,44 +1733,8 @@ cor(car_sf_filtered$area_reforest_ha, car_sf_filtered$dist_to_road_m)
 cor(car_sf_filtered$area_deforest_ha, car_sf_filtered$dist_to_river_m)
 cor(car_sf_filtered$area_reforest_ha, car_sf_filtered$dist_to_river_m)
 
-#### 6. Forest edges --------
-# We compute the mean distance of all pixels in the property to the nearest forest edge
 
-# Helper function
-compute_edge = function(rast, poly) {
-  
-  # Forest mask: 1 = forest, NA otherwise
-  forest_mask = rast == 1
-  forest_mask[forest_mask != 1] = NA
-  
-  # Compute forest boundaries (edge pixels)
-  edge_list = landscapemetrics::get_boundaries(forest_mask, as_NA = TRUE)
-  edge_rast = edge_list[[1]]
-  
-  # If no boundaries → return NA
-  if (all(is.na(terra::values(edge_rast)))) {
-    return(rep(NA_real_, nrow(poly)))
-  }
-  
-  # Edge distance
-  dist_r = terra::distance(edge_rast)
-  
-  # Extract
-  d = exact_extract(dist_r, poly, 'mean')
-  return(as.numeric(d))
-}
-
-
-### Compute first raster
-lu1989 = rasters_reclass[[1]]
-car_sf_filtered$for_edge_mean_dist_1989 = compute_edge(lu1989, car_sf_filtered)
-
-### Compute last raster
-lu2024 = rasters_reclass[[length(rasters_reclass)]]
-car_sf_filtered$for_edge_mean_dist_2024 = compute_edge(lu2024, car_sf_filtered)
-
-
-#### 7. Intersections --------
+#### 6. Intersections --------
 # 1. Rivers
 car_sf_filtered$intersects_river =
   as.integer(lengths(sf::st_intersects(car_sf_filtered, rivers_sf)) > 0)
@@ -1724,7 +1756,7 @@ car_sf_filtered$intersects_rl =
   as.integer(lengths(sf::st_intersects(car_sf_filtered, sf::st_as_sf(rl))) > 0)
 
 
-#### 8. Coverage --------
+#### 7. Coverage --------
 ## Prepare rasters
 apa_mld_r = terra::rasterize(apa_mld, template_rast, field = 1, background = NA)
 pub_res_r = terra::rasterize(pub_res_sf, template_rast, field = 1, background = NA)
@@ -1759,7 +1791,7 @@ car_sf_filtered = car_sf_filtered %>%
                 rppn_cover_prop = round(rppn_cover_ha * 100 / car_area_ha, 2),
                 rl_cover_prop = round(rl_cover_ha * 100 / car_area_ha, 2))
 
-#### 9. Slope, altitude and climatic variables --------
+#### 8. Slope, altitude and climatic variables --------
 # Slope
 car_sf_filtered$slope_mean = exact_extract(slope_r, car_sf_filtered, 'mean')
 car_sf_filtered$slope_sd = exact_extract(slope_r, car_sf_filtered, 'stdev')
@@ -1776,16 +1808,16 @@ car_sf_filtered$prec_2024_sd = exact_extract(rasters_prec_sum[[36]], car_sf_filt
 car_sf_filtered$prec_2024_cv = exact_extract(rasters_prec_sum[[36]], car_sf_filtered, 'coefficient_of_variation')
 
 # Tmin
-car_sf_filtered$tmin_2024_mean = exact_extract(rasters_tmin_mean[[36]], car_sf_filtered, 'mean')
-car_sf_filtered$tmin_2024_sd = exact_extract(rasters_tmin_mean[[36]], car_sf_filtered, 'stdev')
-car_sf_filtered$tmin_2024_cv = exact_extract(rasters_tmin_mean[[36]], car_sf_filtered, 'coefficient_of_variation')
+car_sf_filtered$tmin_2024_mean = exact_extract(rasters_cumul_tmin_mean[[36]], car_sf_filtered, 'mean')
+car_sf_filtered$tmin_2024_sd = exact_extract(rasters_cumul_tmin_mean[[36]], car_sf_filtered, 'stdev')
+car_sf_filtered$tmin_2024_cv = exact_extract(rasters_cumul_tmin_mean[[36]], car_sf_filtered, 'coefficient_of_variation')
 
 # Tmax
-car_sf_filtered$tmax_2024_mean = exact_extract(rasters_tmax_mean[[36]], car_sf_filtered, 'mean')
-car_sf_filtered$tmax_2024_sd = exact_extract(rasters_tmax_mean[[36]], car_sf_filtered, 'stdev')
-car_sf_filtered$tmax_2024_cv = exact_extract(rasters_tmax_mean[[36]], car_sf_filtered, 'coefficient_of_variation')
+car_sf_filtered$tmax_2024_mean = exact_extract(rasters_cumul_tmax_mean[[36]], car_sf_filtered, 'mean')
+car_sf_filtered$tmax_2024_sd = exact_extract(rasters_cumul_tmax_mean[[36]], car_sf_filtered, 'stdev')
+car_sf_filtered$tmax_2024_cv = exact_extract(rasters_cumul_tmax_mean[[36]], car_sf_filtered, 'coefficient_of_variation')
 
-#### 10. Forest age --------
+#### 9. Forest age --------
 ## Rasters
 for_age_2000 = rasters_forest_age[[12]]
 for_age_2000[for_age_2000 == 0] = NA
@@ -1806,7 +1838,7 @@ car_sf_filtered$for_age_mean_2010 = exact_extract(for_age_2010, car_sf_filtered,
 car_sf_filtered$for_age_mean_2020 = exact_extract(for_age_2020, car_sf_filtered, 'mean')
 car_sf_filtered$for_age_mean_2024 = exact_extract(for_age_2024, car_sf_filtered, 'mean')
 
-#### 11. North and South of BR-101 ----------
+#### 10. North and South of BR-101 ----------
 # Sample regular points along BR-101
 br101_sp = as_Spatial(br101)
 pts_br101 = sp::spsample(br101_sp, n = 1000, type = "regular")
