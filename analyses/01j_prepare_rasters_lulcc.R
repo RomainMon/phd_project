@@ -1039,157 +1039,150 @@ data_refor %>% dplyr::group_by(type) %>% dplyr::summarise(mean_alt = mean(alt_m,
 cat("Slope & altitude extraction completed\n")
 
 
-# #### 8. Land use area ----------
-# # We extract land-use areas within a buffer around each point, year by year, for specified land-use classes
-# # Numerous options: sample_lsm (landscapemetrics), packahe multilandr, exact_extractr... but all these options are slow
-# # Instead, we can use a moving window approach (faster with numerous points)
-# 
-# cat("\nSECTION 8: Land use area extraction around buffers\n")
-# 
-# ## On an example
-# # Pick one class
-# cl = 1
-# # Pick one raster
-# r = rasters_reclass[[2]]
-# # Pick one point
-# pt = data_defor %>%
-#   dplyr::filter(year == 1990) %>%
-#   dplyr::slice(1) %>%
-#   dplyr::select(x, y)
-# pt_vect = terra::vect(pt, geom = c("x", "y"), crs = crs(r))
-# # Zoom window
-# zoom_radius = 250  # meters around point
-# ext_zoom = ext(
-#   pt$x - zoom_radius, pt$x + zoom_radius,
-#   pt$y - zoom_radius, pt$y + zoom_radius
-# )
-# # Binary raster
-# r_bin = r == cl
-# plot(r_bin,
-#      main = paste("Binary raster: class", cl),
-#      col = c("lightgrey", "darkgreen"))
-# # Moving window
-# radius = 100 # meters
-# w = terra::focalMat(r_bin, type = "circle", d = radius)
-# image(w, main = "Focal window")
-# focal_count = terra::focal(r_bin, w = w, fun = "sum", na.rm = TRUE)
-# plot(focal_count, main = "Forest pixel count")
-# # Valid landscape (for proportion)
-# r_valid = !is.na(r)
-# focal_valid = terra::focal(r_valid, w = w, fun = "sum", na.rm = TRUE)
-# plot(focal_valid, main = "Valid pixel count")
-# # Convert pixel count to area
-# pixel_area = prod(res(r)) # m²
-# focal_area_m2 = focal_count * pixel_area
-# valid_area_m2 = focal_valid * pixel_area
-# plot(focal_area_m2, main = "Forest area (m²)")
-# plot(valid_area_m2, main = "Valid area (m²)")
-# # Extract value
-# area_at_point = terra::extract(focal_area_m2, pt_vect)[, 2]
-# valid_at_point = terra::extract(valid_area_m2, pt_vect)[, 2]
-# area_at_point
-# area_at_point/valid_at_point
-# # Plot everything zoomed around point
-# par(mfrow = c(2, 2))
-# plot(r_bin, main = paste("Binary raster: class", cl), col = c("lightgrey", "darkgreen"), ext = ext_zoom)
-# points(pt$x, pt$y, pch = 20, col = "red")
-# 
-# plot(focal_count, main = "Forest pixel count", ext = ext_zoom)
-# points(pt$x, pt$y, pch = 20, col = "red")
-# 
-# plot(focal_area_m2, main = "Forest area (m²)", ext = ext_zoom)
-# points(pt$x, pt$y, pch = 20, col = "red")
-# 
-# plot(valid_area_m2, main = "Valid area (m²)", ext = ext_zoom)
-# points(pt$x, pt$y, pch = 20, col = "red")
-# par(mfrow = c(1, 1))
-# 
-# 
-# ## Function
-# # First, we name rasters by year
-# names(rasters_reclass) = years_lulc
-# names(rasters_non_cumul_tm) = years_tm
-# 
-# # Function to compute land use area in given radii and append the result into a data frame
-# compute_landuse_buffer = function(dt, rasters, classes, radii) {
-#   
-#   cat("\n--- Starting land use area extraction ---\n")
-#   
-#   # Pixel area
-#   pixel_area = prod(terra::res(rasters[[1]]))
-#   cat("Pixel area:", pixel_area, "m²\n")
-#   
-#   # list of unique years present in this dataset
-#   years = sort(unique(dt$year))
-#   
-#   for (radius in radii) {
-#     
-#     cat("\n### Buffer radius:", radius, "m ###\n")
-#   
-#     # circular weight matrix
-#     w = terra::focalMat(rasters[[1]], type = "circle", d = radius, fillNA = TRUE)
-#     
-#     # loop over years
-#     for (yr in years) {
-#       cat("\nProcessing YEAR:", yr, "\n")
-#       
-#       # select raster for this year
-#       r_year = rasters[[as.character(yr)]]
-#       
-#       # extract the coordinates for this year
-#       pts_year = dt %>%
-#         dplyr::filter(year == yr) %>%
-#         dplyr::select(x, y)
-#       pts_vect = terra::vect(pts_year, geom = c("x", "y"), crs = crs(r_year))
-#       
-#       # Extract what cells are "valid" (NOT NA)
-#       r_valid = !is.na(r_year)
-#       # Here, we compute the "valid area" to compute the proportion of LULC classes within each moving window
-#       # This way, we account for cells at the border of the landscape
-#       focal_valid = terra::focal(r_valid, w = w, fun = "sum", na.rm = TRUE)
-#       valid_area_m2 = focal_valid * pixel_area
-#       
-#       # loop over classes
-#       for (cl in classes) {
-#         cat("   → Class", cl, "...\n")
-#         # binary raster for that class
-#         r_bin = r_year == cl
-#         # moving window sum
-#         focal_count = terra::focal(r_bin, w = w, fun = "sum", na.rm = TRUE) # NA values are ignored in the sum
-#         # convert pixel count to area
-#         focal_area_m2 = focal_count * pixel_area
-#         # extract values for the points
-#         area_values = terra::extract(focal_area_m2, pts_vect)[, 2]
-#         valid_vals = terra::extract(valid_area_m2, pts_vect)[, 2]
-#         # assign values back into the dataframe
-#         col_area_name = paste0("area_m2_r", radius, "_class_", cl)
-#         dt[[col_area_name]][dt$year == yr] = area_values
-#         
-#         col_prop_name = paste0("prop_r", radius, "_class_", cl)
-#         dt[[col_prop_name]][dt$year == yr] = area_values / valid_vals
-#       }
-#     }
-#   }
-#   
-#   cat("\n--- Extraction finished successfully ---\n")
-#   return(dt)
-# }
-# 
-# # Area of agriculture, built-up and forest, using LULCC rasters
-# data_defor = compute_landuse_buffer(dt = data_defor, rasters = rasters_reclass, classes = c(1,4,6), radii = c(100,500,1000))
-# data_refor = compute_landuse_buffer(dt = data_refor, rasters = rasters_reclass, classes = c(1,4,6), radii = c(100,500,1000))
-# 
-# # Area of deforested and reforested pixels, using NON cumulative rasters (transition matrix)
-# # Here, we use the same function to compute the area covered by deforested/reforested cells around a given cell
-# # We use NON cumulative rasters (i.e., rasters showing what cells were deforested or reforested between t-1 and t)
-# data_defor = compute_landuse_buffer(dt = data_defor, rasters = rasters_non_cumul_tm, classes = 8, radii = c(100,500,1000))
-# data_refor = compute_landuse_buffer(dt = data_refor, rasters = rasters_non_cumul_tm, classes = 7, radii = c(100,500,1000))
-# 
-# # Summary statistics
-# data_defor %>% dplyr::group_by(type) %>% dplyr::summarise_at(vars(starts_with("area")), mean, na.rm = TRUE)
-# data_refor %>% dplyr::group_by(type) %>% dplyr::summarise_at(vars(starts_with("area")), mean, na.rm = TRUE)
-# 
-# cat("Land use area computation complete.\n")
+#### 8. Land use area ----------
+# We extract land-use areas within a buffer around each point, year by year, for specified land-use classes
+# Numerous options: sample_lsm (landscapemetrics), package multilandr, exact_extractr... but all these options are slow
+# Instead, we can use a moving window approach (faster with numerous points)
+# We create a binary raster for the class
+# Compute moving window counts
+# Compute valid area to correct borders
+# Calculate proportion
+# Extracts values per year for the point
+
+cat("\nSECTION 8: Land use area extraction around buffers\n")
+
+## Example
+# Select raster
+r = rasters_reclass[[2]]
+# Select class
+class_id = 1
+r_class = ifel(r == class_id, 1, 0)
+plot(r_class)
+# Moving window
+radius_m = 500
+cellsize = res(r)[1]
+radius_cells = ceiling(radius_m / cellsize) # Number of cells for the radius
+size = 2 * radius_cells + 1 # MW size
+w = matrix(1, size, size)
+sum(w) # Max cells
+# Count class pixels
+mw_class = focal(r_class, w = w, fun = sum, na.rm = TRUE)
+max(mw_class) # Check the max : must be <= sum(w)
+# Count valid pixels
+r_valid = !is.na(r)
+mw_valid = focal(r_valid, w = w, fun = sum, na.rm = TRUE)
+plot(mw_valid)
+# Proportion
+class_prop = mw_class / mw_valid
+plot(class_prop)
+
+
+# Function to return a raster of proportion according to a given radius
+compute_mw_prop = function(r, class_id, radius_m){
+  
+  r_class = ifel(r == class_id, 1, 0)
+  
+  cellsize = res(r)[1]
+  radius_cells = ceiling(radius_m / cellsize)
+  
+  size = 2 * radius_cells + 1
+  w = matrix(1, size, size)
+  
+  mw_class = focal(r_class, w = w, fun = sum, na.rm = TRUE)
+  
+  r_valid = !is.na(r)
+  mw_valid = focal(r_valid, w = w, fun = sum, na.rm = TRUE)
+  
+  prop = mw_class / mw_valid
+  
+  return(prop)
+}
+
+# Extract into datasets
+mw_lulc = function(rasters, years, data, class_id, radius_m, varname){
+  
+  results = vector("list", length(rasters))
+  
+  for(i in seq_along(rasters)){
+    
+    message("Computing MW for year ", years[i])
+    
+    r = rasters[[i]]
+    
+    mw = compute_mw_prop(
+      r = r,
+      class_id = class_id,
+      radius_m = radius_m
+    )
+    
+    df_year = data[data$year == years[i],]
+    
+    if(nrow(df_year) > 0){
+      
+      vals = terra::extract(
+        mw,
+        df_year[,c("x","y")]
+      )
+      
+      df_year[[varname]] = vals[,2]
+      
+      results[[i]] = df_year
+    }
+    
+  }
+  
+  dplyr::bind_rows(results)
+}
+
+# Apply function
+# On deforestation datasets
+# forest
+data_defor = mw_lulc(rasters = rasters_reclass, years = years_lulc, data = data_defor, class_id = 1, radius_m = 100, varname = "prop_forest_100m")
+data_defor = mw_lulc(rasters = rasters_reclass, years = years_lulc, data = data_defor, class_id = 1, radius_m = 500, varname = "prop_forest_500m")
+data_defor = mw_lulc(rasters = rasters_reclass, years = years_lulc, data = data_defor, class_id = 1, radius_m = 1000, varname = "prop_forest_1000m")
+# agriculture
+data_defor = mw_lulc(rasters = rasters_reclass, years = years_lulc, data = data_defor, class_id = 4, radius_m = 100, varname = "prop_agri_100m")
+data_defor = mw_lulc(rasters = rasters_reclass, years = years_lulc, data = data_defor, class_id = 4, radius_m = 500, varname = "prop_agri_500m")
+data_defor = mw_lulc(rasters = rasters_reclass, years = years_lulc, data = data_defor, class_id = 4, radius_m = 1000, varname = "prop_agri_1000m")
+# built-up areas
+data_defor = mw_lulc(rasters = rasters_reclass, years = years_lulc, data = data_defor, class_id = 6, radius_m = 100, varname = "prop_urb_100m")
+data_defor = mw_lulc(rasters = rasters_reclass, years = years_lulc, data = data_defor, class_id = 6, radius_m = 500, varname = "prop_urb_500m")
+data_defor = mw_lulc(rasters = rasters_reclass, years = years_lulc, data = data_defor, class_id = 6, radius_m = 1000, varname = "prop_urb_1000m")
+# deforestation
+data_defor = mw_lulc(rasters = rasters_non_cumul_tm, years = years_tm, data = data_defor, class_id = 8, radius_m = 100, varname = "prop_defor_100m")
+data_defor = mw_lulc(rasters = rasters_non_cumul_tm, years = years_tm, data = data_defor, class_id = 8, radius_m = 500, varname = "prop_defor_500m")
+data_defor = mw_lulc(rasters = rasters_non_cumul_tm, years = years_tm, data = data_defor, class_id = 8, radius_m = 1000, varname = "prop_defor_1000m")
+
+# On reforestation datasets
+# forest
+data_refor = mw_lulc(rasters = rasters_reclass, years = years_lulc, data = data_refor, class_id = 1, radius_m = 100, varname = "prop_forest_100m")
+data_refor = mw_lulc(rasters = rasters_reclass, years = years_lulc, data = data_refor, class_id = 1, radius_m = 500, varname = "prop_forest_500m")
+data_refor = mw_lulc(rasters = rasters_reclass, years = years_lulc, data = data_refor, class_id = 1, radius_m = 1000, varname = "prop_forest_1000m")
+# agriculture
+data_refor = mw_lulc(rasters = rasters_reclass, years = years_lulc, data = data_refor, class_id = 4, radius_m = 100, varname = "prop_agri_100m")
+data_refor = mw_lulc(rasters = rasters_reclass, years = years_lulc, data = data_refor, class_id = 4, radius_m = 500, varname = "prop_agri_500m")
+data_refor = mw_lulc(rasters = rasters_reclass, years = years_lulc, data = data_refor, class_id = 4, radius_m = 1000, varname = "prop_agri_1000m")
+# built-up areas
+data_refor = mw_lulc(rasters = rasters_reclass, years = years_lulc, data = data_refor, class_id = 6, radius_m = 100, varname = "prop_urb_100m")
+data_refor = mw_lulc(rasters = rasters_reclass, years = years_lulc, data = data_refor, class_id = 6, radius_m = 500, varname = "prop_urb_500m")
+data_refor = mw_lulc(rasters = rasters_reclass, years = years_lulc, data = data_refor, class_id = 6, radius_m = 1000, varname = "prop_urb_1000m")
+# reforestation
+data_refor = mw_lulc(rasters = rasters_non_cumul_tm, years = years_tm, data = data_refor, class_id = 7, radius_m = 100, varname = "prop_refor_100m")
+data_refor = mw_lulc(rasters = rasters_non_cumul_tm, years = years_tm, data = data_refor, class_id = 7, radius_m = 500, varname = "prop_refor_500m")
+data_refor = mw_lulc(rasters = rasters_non_cumul_tm, years = years_tm, data = data_refor, class_id = 7, radius_m = 1000, varname = "prop_refor_1000m")
+
+# Test
+test = data_defor[1,]
+terra::extract(class_prop, test[,c("x","y")]) # Value with our manual function
+data_defor[1,19] # Value extracted with automatic extraction
+# Check that both values match!
+
+# Summary statistics
+data_defor %>% dplyr::group_by(type) %>% dplyr::summarise_at(vars(starts_with("prop")), mean, na.rm = TRUE)
+data_refor %>% dplyr::group_by(type) %>% dplyr::summarise_at(vars(starts_with("prop")), mean, na.rm = TRUE)
+
+cat("Land use area computation complete.\n")
+
 
 #### 9. Forest age ----------
 # We extract the forest age for deforested/intact cells only
@@ -1375,103 +1368,6 @@ saveRDS(data_defor,
 saveRDS(data_refor,
         here("outputs", "data", "Mapbiomas", "LULCC_datasets", "data_refor_pixel.rds"))
 
-
-#### Illustration ----------
-### Select one point
-set.seed(123)
-
-pt_defor = data_defor %>% dplyr::slice_sample(n = 1)
-
-cat("Selected defor point:", pt_defor$cell_id, "year:", pt_defor$year, "\n")
-
-### Function to make map for 1 point
-make_point_plot = function(pt, rasters_reclass, years_lulc,
-                            roads_sf, rivers_sf, car_sf, rl_sf, pub_res_sf, apa_mld_sf,
-                            radius) {
-  
-  year = pt$year
-  r_year = rasters_reclass[[which(years_lulc == year)]]
-  
-  # convert point → sf
-  pt_sf = sf::st_as_sf(pt, coords = c("x","y"), crs = crs(r_year))
-  
-  # buffer
-  buf = sf::st_buffer(pt_sf, dist = radius)
-  
-  # crop raster to 1 km window
-  r_crop = terra::crop(r_year, vect(st_buffer(pt_sf, 1000)))
-  
-  # convert raster to dataframe for ggplot
-  r_df = as.data.frame(r_crop, xy = TRUE)
-  colnames(r_df)[3] <- "lulc"
-  
-  # crop vectors
-  roads_c = st_intersection(roads_sf, st_buffer(pt_sf, 1000))
-  rivers_c = st_intersection(rivers_sf, st_buffer(pt_sf, 1000))
-  car_c = st_intersection(car_sf, st_buffer(pt_sf, 1000))
-  rl_c = st_intersection(rl_sf, st_buffer(pt_sf, 1000))
-  pub_c = st_intersection(pub_res_sf, st_buffer(pt_sf, 1000))
-  apa_c = st_intersection(apa_mld_sf, st_buffer(pt_sf, 1000))
-  
-  # LULCC colors
-  lut = c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e")
-  names(lut) = as.character(sort(unique(r_df$lulc)))
-  
-  # Make ggplot
-  p = ggplot() +
-    geom_raster(data = r_df, aes(x, y, fill = factor(lulc))) +
-    scale_fill_manual(values = lut, name = "LULC") +
-    geom_sf(data = roads_c,  color = "black", size = 0.4) +
-    geom_sf(data = rivers_c, color = "blue", size = 0.5) +
-    geom_sf(data = car_c, fill = NA, color = "brown", linetype = 3) +
-    geom_sf(data = rl_c, fill = NA, color = "green3", linetype = 2) +
-    geom_sf(data = pub_c, fill = NA, color = "red", size = 0.7) +
-    geom_sf(data = apa_c, fill = NA, color = "orange", linetype = 2) +
-    geom_sf(data = buf, fill = NA, color = "yellow", linetype = 2, size = 1) +
-    geom_sf(data = pt_sf, shape = 21, fill = "red", size = 3) +
-    coord_sf() +
-    theme_minimal()
-  
-  ### Covariate text box
-  txt = paste0(
-    "type = ", pt$type, "\n",
-    "legal = ", pt$legal_status, "\n",
-    "dist_water_m = ", round(pt$dist_river_m), "\n",
-    "dist_urban_m = ", round(pt$dist_urban_m), "\n",
-    "dist_road_m = ", round(pt$dist_road_m), "\n",
-    "dist_edge_m = ", round(pt$dist_edge_m), "\n",
-    "area_forests_100m = ", round(pt$area_m2_r100_class_1), "\n",
-    "area_agri_100m = ", round(pt$area_m2_r100_class_4), "\n",
-    "area_urb_100m = ", round(pt$area_m2_r100_class_6), "\n",
-    "slope_pct = ", round(pt$slope_pct, 1), "\n",
-    "alt_m = ", round(pt$alt_m, 1), "\n",
-    "forest_age = ", round(pt$forest_age), "\n",
-    "prec_sum = ", round(pt$prec_sum), "\n",
-    "tmin_mean = ", round(pt$tmin_mean), "\n",
-    "tmax_mean = ", round(pt$tmax_mean), "\n",
-    "ns_br101 = ", pt$ns_br101
-  )
-  
-  p_label = ggdraw() + draw_label(txt, x = 0, y = 1, hjust = 0, vjust = 1, size = 11)
-  
-  return(plot_grid(p, p_label, ncol = 2, rel_widths = c(1.3, 0.9)))
-}
-
-
-### Generate both plots
-final_plot = make_point_plot(pt_defor, rasters_reclass, years_lulc,
-                           roads_sf, rivers_sf, car_sf, rl_sf, pub_res_sf, apa_mld_sf,
-                radius=100)
-
-# Export PNG (high resolution)
-ggsave(
-  filename = here("outputs", "plot", "01j_defor_dataset_demo.png"),
-  plot = final_plot,
-  width = 8,
-  height = 5,
-  dpi = 300,
-  bg="white"
-)
 
 
 ## Prepare the property-based dataset ----------

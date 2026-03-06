@@ -27,6 +27,8 @@ library(lulcc)
 library(rsq)
 library(MASS)
 library(broom)
+library(GeoThinneR)
+library(broom.mixed)
 
 ### Load datasets
 data_defor_pixel = readRDS(here("outputs", "data", "Mapbiomas", "LULCC_datasets", "data_defor_pixel.rds"))
@@ -222,59 +224,47 @@ hist(data_refor_pixel$alt_m)
 ##### Land use -----
 data_defor_pixel %>% 
   dplyr::group_by(type) %>% 
-  dplyr::summarise(across(starts_with("area"), list(mean = mean)))
+  dplyr::summarise(across(starts_with("prop"), list(mean = mean)))
 data_refor_pixel %>% 
   dplyr::group_by(type) %>% 
-  dplyr::summarise(across(starts_with("area"), list(mean = mean)))
+  dplyr::summarise(across(starts_with("prop"), list(mean = mean)))
 
 ###### Best radius ------
 # We select the radius at which variables are most correlated to type
 
 ## Deforestation dataset
 data_defor_pixel %>% 
-  dplyr::select(c(type, dplyr::starts_with("area"))) %>% 
-  corrr::correlate() %>% 
-  focus(type) 
-# The most correlated variables are within 100 m
-data_defor_pixel %>% 
   dplyr::select(c(type, dplyr::starts_with("prop"))) %>% 
   corrr::correlate() %>% 
   focus(type) 
-# Same result with prop !
-
-# Summary
-data_defor_pixel %>% 
-  tbl_summary(by = type, include = c(area_m2_r100_class_1, area_m2_r100_class_4, area_m2_r100_class_6),
-              statistic = list(all_continuous() ~ "{mean} ({sd})"))
-data_refor_pixel %>% 
-  tbl_summary(by = type, include = c(area_m2_r100_class_1, area_m2_r100_class_4, area_m2_r100_class_6),
-              statistic = list(all_continuous() ~ "{mean} ({sd})"))
+# The most correlated variables are within 100 m
 
 ## Reforestation dataset
 data_refor_pixel %>% 
-  dplyr::select(c(type, dplyr::starts_with("area"))) %>% 
-  corrr::correlate() %>% 
-  focus(type) 
-# The most correlated variables are within 100 m
-data_refor_pixel %>% 
   dplyr::select(c(type, dplyr::starts_with("prop"))) %>% 
   corrr::correlate() %>% 
   focus(type) 
-# Same result with prop !
+# The most correlated variables are within 100 m
 
-hist(data_defor_pixel$area_m2_r100_class_1)
-hist(data_defor_pixel$area_m2_r100_class_4)
-hist(data_defor_pixel$area_m2_r100_class_6)
-hist(data_defor_pixel$prop_r100_class_1)
-hist(data_defor_pixel$prop_r100_class_4)
-hist(data_defor_pixel$prop_r100_class_6)
+# Summary
+data_defor_pixel %>% 
+  tbl_summary(by = type, include = c(prop_forest_100m, prop_agri_100m, prop_urb_100m, prop_defor_100m),
+              statistic = list(all_continuous() ~ "{mean} ({sd})"))
+data_refor_pixel %>% 
+  tbl_summary(by = type, include = c(prop_forest_100m, prop_agri_100m, prop_urb_100m, prop_refor_100m),
+              statistic = list(all_continuous() ~ "{mean} ({sd})"))
 
-hist(data_refor_pixel$area_m2_r100_class_1)
-hist(data_refor_pixel$area_m2_r100_class_4)
-hist(data_refor_pixel$area_m2_r100_class_6)
-hist(data_refor_pixel$prop_r100_class_1)
-hist(data_refor_pixel$prop_r100_class_4)
-hist(data_refor_pixel$prop_r100_class_6)
+
+
+hist(data_defor_pixel$prop_forest_100m)
+hist(data_defor_pixel$prop_agri_100m)
+hist(data_defor_pixel$prop_urb_100m)
+hist(data_defor_pixel$prop_defor_100m)
+
+hist(data_refor_pixel$prop_forest_100m)
+hist(data_refor_pixel$prop_agri_100m)
+hist(data_refor_pixel$prop_urb_100m)
+hist(data_refor_pixel$prop_refor_100m)
 
 ##### Forest age -------
 data_defor_pixel %>% 
@@ -315,52 +305,276 @@ hist(data_defor_pixel$tmax_mean)
 hist(data_refor_pixel$tmax_mean)
 
 
-#### Scale and log-transform variables ---------
-# We log-transform some variables
-# Distances
-data_defor_pixel = data_defor_pixel %>% 
-  dplyr::mutate(dist_river_log = log10(dist_river_m+1),
-                dist_road_log = log10(dist_road_m+1),
-                dist_urban_log = log10(dist_urban_m+1),
-                dist_edge_log = log10(dist_edge_m+1))
-hist(data_defor_pixel$dist_river_log)
-hist(data_defor_pixel$dist_urban_log)
-hist(data_defor_pixel$dist_road_log)
-hist(data_defor_pixel$dist_edge_log)
+#### Prepare datasets for GLMM --------
 
-data_refor_pixel = data_refor_pixel %>% 
-  dplyr::mutate(dist_river_log = log10(dist_river_m+1),
-                dist_road_log = log10(dist_road_m+1),
-                dist_urban_log = log10(dist_urban_m+1),
-                dist_edge_log = log10(dist_edge_m+1))
-hist(data_refor_pixel$dist_river_log)
-hist(data_refor_pixel$dist_urban_log)
-hist(data_refor_pixel$dist_road_log)
-hist(data_refor_pixel$dist_edge_log)
+##### Spatial autocorrelation --------
+###### Method 1: Spatial filtering (thinning) --------
 
-# Slope
-data_defor_pixel = data_defor_pixel %>%
-  dplyr::mutate(slope_pct_log = log10(slope_pct))
-hist(data_defor_pixel$slope_pct_log)
+###### Deforestation dataset ----------
+# 1) Thinning event cells
+data_defor_8 = data_defor_pixel %>% 
+  dplyr::filter(type == 8)
+# convert to sf
+pts = sf::st_as_sf(
+  data_defor_8,
+  coords = c("x","y"),
+  crs = 31983
+)
+# transform to WGS84
+pts_4326 = sf::st_transform(pts, 4326)
+# extract lon lat
+coords = sf::st_coordinates(pts_4326)
+# Mutate long/lat coordinates (4326)
+data_defor_8 = pts_4326 %>%
+  dplyr::mutate(
+    lon = coords[,1],
+    lat = coords[,2]
+  ) %>%
+  sf::st_drop_geometry()
+# Thinning
+data_defor_8_thin = GeoThinneR::thin_points(
+  data = data_defor_8,  # Dataframe with coordinates
+  group_col = "year",
+  lon_col = "lon", # Longitude column name
+  lat_col = "lat",  # Latitude column name
+  method = "distance", # Method for thinning
+  thin_dist = 0.2, # Thinning distance in km,
+  trials = 3, # Number of trials
+  all_trials = FALSE,  # Return all trials
+  seed = 123 # Seed for reproducibility
+)
+# Summary
+summary(data_defor_8_thin)
+sapply(data_defor_8_thin$retained, sum) # Number of kept points in each trial
+data_defor_8_thin_select = as_sf(data_defor_8_thin) # Convert to sf
 
-data_refor_pixel = data_refor_pixel %>%
-  dplyr::mutate(slope_pct_log = log10(slope_pct))
-hist(data_refor_pixel$slope_pct_log)
+# 2) Thinning control cells
+data_defor_1 = data_defor_pixel %>% 
+  dplyr::filter(type == 1)
+# convert to sf
+pts = sf::st_as_sf(
+  data_defor_1,
+  coords = c("x","y"),
+  crs = 31983
+)
+# transform to WGS84
+pts_4326 = sf::st_transform(pts, 4326)
+# extract lon lat
+coords = sf::st_coordinates(pts_4326)
+# Mutate long/lat coordinates (4326)
+data_defor_1 = pts_4326 %>%
+  dplyr::mutate(
+    lon = coords[,1],
+    lat = coords[,2]
+  ) %>%
+  sf::st_drop_geometry()
+# Thinning
+data_defor_1_thin = GeoThinneR::thin_points(
+  data = data_defor_1,  # Dataframe with coordinates
+  group_col = "year",
+  lon_col = "lon", # Longitude column name
+  lat_col = "lat",  # Latitude column name
+  method = "distance", # Method for thinning
+  thin_dist = 0.2, # Thinning distance in km,
+  trials = 2, # Number of trials
+  all_trials = FALSE,  # Return all trials
+  seed = 123 # Seed for reproducibility
+)
+# Summary
+summary(data_defor_1_thin)
+sapply(data_defor_1_thin$retained, sum) # Number of kept points in each trial
+data_defor_1_thin_select = as_sf(data_defor_1_thin) # Convert to sf
 
-# Elevation
-data_defor_pixel = data_defor_pixel %>%
-  dplyr::mutate(alt_m_log = log10(alt_m))
-hist(data_defor_pixel$slope_pct_log)
+# 3) Bind datasets
+data_defor_thin = dplyr::bind_rows(data_defor_8_thin_select,
+                                   data_defor_1_thin_select)
+data_defor_thin = as.data.frame(data_defor_thin)
 
-data_refor_pixel = data_refor_pixel %>%
-  dplyr::mutate(alt_m_log = log10(abs(alt_m))) # We take the abs() of the altitude because some pixels have negative altitudes
-hist(data_refor_pixel$slope_pct_log)
+# 4) Select a balanced number of controls per year
+n_events_year = data_defor_thin %>%
+  dplyr::filter(type == 8) %>%
+  dplyr::count(year, name = "n_events")
+# Selection
+controls_balanced = data_defor_thin %>%
+  dplyr::filter(type == 1) %>%
+  dplyr::left_join(n_events_year, by = "year") %>%
+  dplyr::group_by(year) %>%
+  dplyr::group_modify(~{
+    
+    n_events = .x$n_events[1]
+    # sample controls for that year
+    dplyr::slice_sample(.x, n = min(n_events, nrow(.x)))
+    
+  }) %>%
+  dplyr::ungroup() %>%
+  dplyr::select(-n_events)
+# Events
+events = data_defor_thin %>%
+  dplyr::filter(type == 8)
+# Final dataset
+data_defor_final = dplyr::bind_rows(events, controls_balanced)
+# Check
+data_defor_final %>%
+  dplyr::count(year, type)
+# Add x and y columns
+coords = sf::st_as_sf(data_defor_final, sf_column_name = "geometry")
+coords = sf::st_coordinates(coords)
+data_defor_final = data_defor_final %>% 
+  dplyr::mutate(
+    x = coords[,1],
+    y = coords[,2]
+  )
 
+###### Reforestation dataset ----------
+# 1) Thinning event cells
+data_refor_7 = data_refor_pixel %>% 
+  dplyr::filter(type == 7)
+# convert to sf
+pts = sf::st_as_sf(
+  data_refor_7,
+  coords = c("x","y"),
+  crs = 31983
+)
+# transform to WGS84
+pts_4326 = sf::st_transform(pts, 4326)
+# extract lon lat
+coords = sf::st_coordinates(pts_4326)
+# Mutate long/lat coordinates (4326)
+data_refor_7 = pts_4326 %>%
+  dplyr::mutate(
+    lon = coords[,1],
+    lat = coords[,2]
+  ) %>%
+  sf::st_drop_geometry()
+# Thinning
+data_refor_7_thin = GeoThinneR::thin_points(
+  data = data_refor_7,  # Dataframe with coordinates
+  group_col = "year",
+  lon_col = "lon", # Longitude column name
+  lat_col = "lat",  # Latitude column name
+  method = "distance", # Method for thinning
+  thin_dist = 0.2, # Thinning distance in km,
+  trials = 3, # Number of trials
+  all_trials = FALSE,  # Return all trials
+  seed = 123 # Seed for reproducibility
+)
+# Summary
+summary(data_refor_7_thin)
+sapply(data_refor_7_thin$retained, sum) # Number of kept points in each trial
+data_refor_7_thin_select = as_sf(data_refor_7_thin) # Convert to sf
 
+# 2) Thinning control cells
+data_refor_4 = data_refor_pixel %>% 
+  dplyr::filter(type == 4)
+# convert to sf
+pts = sf::st_as_sf(
+  data_refor_4,
+  coords = c("x","y"),
+  crs = 31983
+)
+# transform to WGS84
+pts_4326 = sf::st_transform(pts, 4326)
+# extract lon lat
+coords = sf::st_coordinates(pts_4326)
+# Mutate long/lat coordinates (4326)
+data_refor_4 = pts_4326 %>%
+  dplyr::mutate(
+    lon = coords[,1],
+    lat = coords[,2]
+  ) %>%
+  sf::st_drop_geometry()
+# Thinning
+data_refor_4_thin = GeoThinneR::thin_points(
+  data = data_refor_4,  # Dataframe with coordinates
+  group_col = "year",
+  lon_col = "lon", # Longitude column name
+  lat_col = "lat",  # Latitude column name
+  method = "distance", # Method for thinning
+  thin_dist = 0.2, # Thinning distance in km,
+  trials = 2, # Number of trials
+  all_trials = FALSE,  # Return all trials
+  seed = 123 # Seed for reproducibility
+)
+# Summary
+summary(data_refor_4_thin)
+sapply(data_refor_4_thin$retained, sum) # Number of kept points in each trial
+data_refor_4_thin_select = as_sf(data_refor_4_thin) # Convert to sf
+
+# 3) Bind datasets
+data_refor_thin = dplyr::bind_rows(data_refor_7_thin_select,
+                                   data_refor_4_thin_select)
+data_refor_thin = as.data.frame(data_refor_thin)
+
+# 4) Select a balanced number of controls per year
+n_events_year = data_refor_thin %>%
+  dplyr::filter(type == 7) %>%
+  dplyr::count(year, name = "n_events")
+# Selection
+controls_balanced = data_refor_thin %>%
+  dplyr::filter(type == 4) %>%
+  dplyr::left_join(n_events_year, by = "year") %>%
+  dplyr::group_by(year) %>%
+  dplyr::group_modify(~{
+    
+    n_events = .x$n_events[1]
+    # sample controls for that year
+    dplyr::slice_sample(.x, n = min(n_events, nrow(.x)))
+    
+  }) %>%
+  dplyr::ungroup() %>%
+  dplyr::select(-n_events)
+# Events
+events = data_refor_thin %>%
+  dplyr::filter(type == 7)
+# Final dataset
+data_refor_final = dplyr::bind_rows(events, controls_balanced)
+# Check
+data_refor_final %>%
+  dplyr::count(year, type)
+str(data_refor_final)
+# Add x and y columns
+coords = sf::st_as_sf(data_refor_final, sf_column_name = "geometry")
+coords = sf::st_coordinates(coords)
+data_refor_final = data_refor_final %>% 
+  dplyr::mutate(
+    x = coords[,1],
+    y = coords[,2]
+  )
+
+###### Method 2: Spatial blocking --------
+# # Deforestation dataset
+# data_defor_pixel$block_x = floor(data_defor_pixel$x / 20000) # Distance in meters
+# data_defor_pixel$block_y = floor(data_defor_pixel$y / 20000) # Distance in meters
+# data_defor_pixel = data_defor_pixel %>% 
+#   dplyr::mutate(sp_block = paste0(block_x, "_", block_y))
+# data_defor_pixel$sp_block = factor(data_defor_pixel$sp_block)
+# sample = data_defor_pixel %>% dplyr::sample_frac(0.1)
+# ggplot(sample, aes(x = x, y = y, color = sp_block)) +
+#   geom_point(size = 0.3) +
+#   theme_minimal() +
+#   guides(color = "none")
+# ggplot(sample %>% dplyr::filter(year==2024), aes(x = x, y = y, color = sp_block)) +
+#   geom_point(size = 0.3) +
+#   theme_minimal() +
+#   guides(color = "none")
+# 
+# # Reforestation dataset
+# data_refor_pixel$block_x = floor(data_refor_pixel$x / 20000) # Distance in meters
+# data_refor_pixel$block_y = floor(data_refor_pixel$y / 20000) # Distance in meters
+# data_refor_pixel = data_refor_pixel %>% 
+#   dplyr::mutate(sp_block = paste0(block_x, "_", block_y))
+# data_refor_pixel$sp_block = factor(data_refor_pixel$sp_block)
+# sample = data_refor_pixel %>% dplyr::sample_frac(0.1)
+# ggplot(sample, aes(x = x, y = y, color = sp_block)) +
+#   geom_point(size = 0.3) +
+#   theme_minimal() +
+#   guides(color = "none")
+
+##### Scale drivers --------
 # We standardize to compare effect sizes with the function scale()
 # Deforestation dataset
-data_defor_pixel = data_defor_pixel %>%
-  dplyr::mutate(dplyr::across(c(area_m2_r100_class_1, area_m2_r100_class_4, area_m2_r100_class_6, prop_r100_class_1, prop_r100_class_4, prop_r100_class_6,
+data_defor_final = data_defor_final %>%
+  dplyr::mutate(dplyr::across(c(prop_forest_100m, prop_agri_100m, prop_urb_100m, prop_defor_100m,
                                 dist_river_m, dist_urban_m, dist_road_m, dist_edge_m,
                                 alt_m, slope_pct, 
                                 prec_sum, tmin_mean, tmax_mean, 
@@ -368,31 +582,27 @@ data_defor_pixel = data_defor_pixel %>%
                               ~ as.vector(scale(.x)),
                               .names = "{.col}_sc"))
 # Reforestation dataset
-data_refor_pixel = data_refor_pixel %>%
-  dplyr::mutate(dplyr::across(c(area_m2_r100_class_1, area_m2_r100_class_4, area_m2_r100_class_6,
-                                prop_r100_class_1, prop_r100_class_4, prop_r100_class_6,
+data_refor_final = data_refor_final %>%
+  dplyr::mutate(dplyr::across(c(prop_forest_100m, prop_agri_100m, prop_urb_100m, prop_refor_100m,
                                 dist_river_m, dist_urban_m, dist_road_m, dist_edge_m,
                                 alt_m, slope_pct, 
                                 prec_sum, tmin_mean, tmax_mean),
                               ~ as.vector(scale(.x)),
                               .names = "{.col}_sc"))
 
-
-#### Test correlations among variables ---------
+#### Correlation and VIF ---------
 
 ##### Deforestation dataset -----
 ###### Pearson =====
 
-X = data_defor_pixel %>% 
+X = data_defor_final %>% 
   dplyr::select(in_car, in_pub_res, in_rppn, in_rl, in_apa,
-                area_m2_r100_class_1, area_m2_r100_class_4, area_m2_r100_class_6,
-                prop_r100_class_1, prop_r100_class_4, prop_r100_class_6,
+                prop_forest_100m, prop_agri_100m, prop_urb_100m, prop_defor_100m,
                 dist_river_m, dist_urban_m, dist_road_m, dist_edge_m,
                 slope_pct, alt_m,
                 prec_sum, tmin_mean, tmax_mean,
                 forest_age,
-                year,
-                x, y)
+                year)
 cor_mat = cor(X, use = "pairwise.complete.obs", method = "pearson")
 cor_mat
 
@@ -408,20 +618,19 @@ high_corr
 # Beware: (i) the area of forest and of agriculture are strongly correlated
 # And (ii) tmin and tmax
 # And (iii) forest_age and year
-# And (iv) elevation and y
+# And (iv) proportion of agriculture and of deforested area
+# And (v) proportion of forest and deforested area
 
 ###### VIF ---------
-X_vif = data_defor_pixel %>% 
+X_vif = data_defor_final %>% 
   dplyr::select(type, 
                 in_car, in_pub_res, in_rppn, in_rl, in_apa,
-                area_m2_r100_class_1, area_m2_r100_class_4, area_m2_r100_class_6,
-                prop_r100_class_1, prop_r100_class_4, prop_r100_class_6,
+                prop_forest_100m, prop_agri_100m, prop_urb_100m, prop_defor_100m,
                 dist_river_m, dist_urban_m, dist_road_m, dist_edge_m,
                 slope_pct, alt_m,
                 prec_sum, tmin_mean, tmax_mean,
                 forest_age,
-                year,
-                x, y) %>%
+                year) %>%
   as.data.frame()
 vif.result = HH::vif(X_vif, y.name="type")
 
@@ -435,32 +644,28 @@ vif.result[vif.result > 2.5]
 # - the amount of forest and of agriculture 
 # - tmin and tmax
 # - year and forest_age
-# - elevation and y
 
 ###### Variable selection ----
 # We select variables based on their correlations with the response variable
-data_defor_pixel %>% 
-  dplyr::select(c(type, area_m2_r100_class_1, area_m2_r100_class_4, area_m2_r100_class_6,
-                  prop_r100_class_1, prop_r100_class_4, prop_r100_class_6,
-                  slope_pct, alt_m, y,
+data_defor_final %>% 
+  dplyr::select(c(type, 
+                  prop_forest_100m, prop_agri_100m, prop_defor_100m,
                   tmin_mean, tmax_mean)) %>% 
   corrr::correlate() %>% 
   focus(type) 
-# We retain the proportion of agriculture
+# We retain the proportion of forest area
 # Tmin is more strongly correlated than tmax
-# We keep slope and y (and remove elevation)
 
 ###### Re-run VIF ------
-X_vif = data_defor_pixel %>% 
+X_vif = data_defor_final %>% 
   dplyr::select(type, 
                 in_car, in_pub_res, in_rppn, in_rl, in_apa,
-                prop_r100_class_4, prop_r100_class_6,
+                prop_forest_100m,
                 dist_river_m, dist_urban_m, dist_road_m, dist_edge_m,
-                slope_pct,
+                slope_pct, alt_m,
                 prec_sum, tmin_mean,
                 forest_age,
-                year,
-                x, y) %>% 
+                year) %>% 
   as.data.frame()
 vif.result = HH::vif(X_vif, y.name="type")
 vif.result[vif.result > 2.5]
@@ -468,16 +673,13 @@ vif.result[vif.result > 2.5]
 
 ##### Reforestation dataset -----
 ###### Pearson =====
-X = data_refor_pixel %>% 
-  dplyr::select(type, 
-                in_car, in_pub_res, in_rppn, in_rl, in_apa,
-                area_m2_r100_class_1, area_m2_r100_class_4, area_m2_r100_class_6,
-                prop_r100_class_1, prop_r100_class_4, prop_r100_class_6,
+X = data_refor_final %>% 
+  dplyr::select(in_car, in_pub_res, in_rppn, in_rl, in_apa,
+                prop_forest_100m, prop_agri_100m, prop_urb_100m, prop_refor_100m,
                 dist_river_m, dist_urban_m, dist_road_m, dist_edge_m,
                 slope_pct, alt_m,
                 prec_sum, tmin_mean, tmax_mean,
-                year,
-                x, y)
+                year)
 cor_mat = cor(X, use = "pairwise.complete.obs", method = "pearson")
 cor_mat
 
@@ -492,20 +694,18 @@ high_corr = cor_mat %>%
 high_corr
 # (i) the area of forest and of agriculture are strongly correlated
 # (ii) tmin and tmax are strongly correlated
-# (iii) the amount of forest habitat is strongly correlated to distance to edge
-# (iv) the slope is strongly correlated to the altitude
+# (iii) the amount of forest habitat is strongly correlated to reforested area
+# (iv) the area reforested and of agriculture are strongly correlated
 
 ###### VIF ---------
-X_vif = data_refor_pixel %>% 
+X_vif = data_refor_final %>% 
   dplyr::select(type, 
                 in_car, in_pub_res, in_rppn, in_rl, in_apa,
-                area_m2_r100_class_1, area_m2_r100_class_4, area_m2_r100_class_6,
-                prop_r100_class_1, prop_r100_class_4, prop_r100_class_6,
+                prop_forest_100m, prop_agri_100m, prop_urb_100m, prop_refor_100m,
                 dist_river_m, dist_urban_m, dist_road_m, dist_edge_m,
                 slope_pct, alt_m,
                 prec_sum, tmin_mean, tmax_mean,
-                year,
-                x, y) %>% 
+                year) %>% 
   as.data.frame()
 vif.result = HH::vif(X_vif, y.name="type")
 
@@ -517,40 +717,31 @@ vif.result[vif.result > 2.5]
 
 ###### Variable selection ----
 # We select variables based on their correlations with the response variable
-data_refor_pixel %>% 
+data_refor_final %>% 
   dplyr::select(c(type, 
-                  area_m2_r100_class_1, area_m2_r100_class_4, area_m2_r100_class_6,
-                  prop_r100_class_1, prop_r100_class_4, prop_r100_class_6,
-                  alt_m, slope_pct,
-                  tmin_mean, tmax_mean,
-                  x, y)) %>% 
+                  prop_forest_100m, prop_agri_100m, prop_refor_100m,
+                  tmin_mean, tmax_mean)) %>% 
   corrr::correlate() %>% 
   focus(type) 
-# Proportions are more strongly correlated to the response variable than the amounts
-# We retain the proportion of agriculture
+# We retain the proportion of forest
 # We keep tmin to remain consistent
-# We keep the slope
 
 ###### Re-run VIF ------
-X_vif = data_refor_pixel %>% 
+X_vif = data_refor_final %>% 
   dplyr::select(type, 
                 in_car, in_pub_res, in_rppn, in_rl, in_apa,
-                prop_r100_class_4, prop_r100_class_6,
+                prop_forest_100m, prop_urb_100m,
                 dist_river_m, dist_urban_m, dist_road_m, dist_edge_m,
-                slope_pct, 
-                prec_sum, tmin_mean,
-                x, y) %>% 
+                slope_pct, alt_m, 
+                prec_sum, tmin_mean) %>% 
   as.data.frame()
 vif.result = HH::vif(X_vif, y.name="type")
 vif.result[vif.result > 2.5] # All good
 
-
-#### Prepare datasets for GLMM --------
-
-##### Transform variables --------
+#### To factor --------
 
 # We must transform categorical variables to factors
-data_defor_pixel = data_defor_pixel %>% 
+data_defor_final = data_defor_final %>% 
   dplyr::mutate(in_car = factor(in_car, levels = c(0,1), labels = c("Outside","Inside")),
                 in_pub_res = factor(in_pub_res, levels = c(0,1), labels = c("Outside","Inside")),
                 in_rppn = factor(in_rppn, levels = c(0,1), labels = c("Outside","Inside")),
@@ -560,7 +751,7 @@ data_defor_pixel = data_defor_pixel %>%
                 ns_br101 = factor(ns_br101),
                 year = factor(year),
                 cell_id = factor(cell_id))
-data_refor_pixel = data_refor_pixel %>% 
+data_refor_final = data_refor_final %>% 
   dplyr::mutate(in_car = factor(in_car, levels = c(0,1), labels = c("Outside","Inside")),
                 in_pub_res = factor(in_pub_res, levels = c(0,1), labels = c("Outside","Inside")),
                 in_rppn = factor(in_rppn, levels = c(0,1), labels = c("Outside","Inside")),
@@ -572,49 +763,19 @@ data_refor_pixel = data_refor_pixel %>%
                 cell_id = factor(cell_id))
 
 # The response variable must be 0 (control) VS 1 (deforestation/reforestation)
-data_defor_pixel = data_defor_pixel %>% 
+data_defor_final = data_defor_final %>% 
   dplyr::mutate(type = dplyr::case_when(type == 1 ~ 0,
                                         type == 8 ~ 1,
                                         TRUE ~ NA))
 
-data_refor_pixel = data_refor_pixel %>% 
+data_refor_final = data_refor_final %>% 
   dplyr::mutate(type = dplyr::case_when(type == 4 ~ 0,
                                         type == 7 ~ 1,
                                         TRUE ~ NA))
 
 # Quick checks
-prop.table(table(data_defor_pixel$type))
-prop.table(table(data_refor_pixel$type))
-
-
-##### Prepare blocks to account for spatial autocorrelation --------
-# Deforestation dataset
-data_defor_pixel$block_x = floor(data_defor_pixel$x / 20000) # Distance in meters
-data_defor_pixel$block_y = floor(data_defor_pixel$y / 20000) # Distance in meters
-data_defor_pixel = data_defor_pixel %>% 
-  dplyr::mutate(sp_block = paste0(block_x, "_", block_y))
-data_defor_pixel$sp_block = factor(data_defor_pixel$sp_block)
-sample = data_defor_pixel %>% dplyr::sample_frac(0.1)
-ggplot(sample, aes(x = x, y = y, color = sp_block)) +
-  geom_point(size = 0.3) +
-  theme_minimal() +
-  guides(color = "none")
-ggplot(sample %>% dplyr::filter(year==2024), aes(x = x, y = y, color = sp_block)) +
-  geom_point(size = 0.3) +
-  theme_minimal() +
-  guides(color = "none")
-
-# Reforestation dataset
-data_refor_pixel$block_x = floor(data_refor_pixel$x / 20000) # Distance in meters
-data_refor_pixel$block_y = floor(data_refor_pixel$y / 20000) # Distance in meters
-data_refor_pixel = data_refor_pixel %>% 
-  dplyr::mutate(sp_block = paste0(block_x, "_", block_y))
-data_refor_pixel$sp_block = factor(data_refor_pixel$sp_block)
-sample = data_refor_pixel %>% dplyr::sample_frac(0.1)
-ggplot(sample, aes(x = x, y = y, color = sp_block)) +
-  geom_point(size = 0.3) +
-  theme_minimal() +
-  guides(color = "none")
+prop.table(table(data_defor_final$type))
+prop.table(table(data_refor_final$type))
 
 
 #### Random Forest --------
@@ -750,33 +911,33 @@ attStats(Boruta.defor) # creates a data frame containing each attribute’s Z sc
 #### Modeling -------
 
 ##### Deforestation (GLMM) ----
-str(data_defor_pixel)
+str(data_defor_final)
 
 ###### Quick checks -----
 # We check whether the probability is close to 0.5 (we cannot model probability variance under 0.1 and above 0.9)
-prop.table(table(data_defor_pixel$type))
+prop.table(table(data_defor_final$type))
 
 # Plots
-boxplot(prop_r100_class_4_sc~type, data=data_defor_pixel)
-boxplot(prop_r100_class_6_sc~type, data=data_defor_pixel)
-boxplot(dist_river_m_sc~type, data=data_defor_pixel)
-boxplot(dist_urban_m_sc~type, data=data_defor_pixel)
-boxplot(dist_road_m_sc~type, data=data_defor_pixel)
-boxplot(dist_edge_m_sc~type, data=data_defor_pixel)
-boxplot(slope_pct_sc~type, data=data_defor_pixel)
-boxplot(prec_sum_sc~type, data=data_defor_pixel)
-boxplot(tmin_mean_sc~type, data=data_defor_pixel)
-boxplot(forest_age_sc~type, data=data_defor_pixel)
+boxplot(prop_r100_class_4_sc~type, data=data_defor_final)
+boxplot(prop_r100_class_6_sc~type, data=data_defor_final)
+boxplot(dist_river_m_sc~type, data=data_defor_final)
+boxplot(dist_urban_m_sc~type, data=data_defor_final)
+boxplot(dist_road_m_sc~type, data=data_defor_final)
+boxplot(dist_edge_m_sc~type, data=data_defor_final)
+boxplot(slope_pct_sc~type, data=data_defor_final)
+boxplot(prec_sum_sc~type, data=data_defor_final)
+boxplot(tmin_mean_sc~type, data=data_defor_final)
+boxplot(forest_age_sc~type, data=data_defor_final)
 
 ###### GLMMs -------
 
 ###### Sub-sample  ----
 # We sub-sample the dataset for cross-validation
-data_defor_pixel = data_defor_pixel %>%
+data_defor_final = data_defor_final %>%
   dplyr::mutate(group = interaction(type, year))
 # Stratified sub-sample
 split = rsample::initial_split(
-  data_defor_pixel,
+  data_defor_final,
   prop = 0.8,  # 80% training model
   strata = "group"  # Stratification
 )
@@ -796,12 +957,15 @@ test_data %>%
 ## GLMM with binomial distribution
 # We use the logit function to predict values between 0 and 1
 # Binomial model
-# Crossed random effects (block and year) : (1|block)+(1|year), i.e., every block appears multiple times in every year of the dataset
-mod_glmm = glmmTMB(formula = type ~ in_car + in_pub_res + in_rppn + in_rl + in_apa + ns_br101 +
-               prop_r100_class_4_sc + prop_r100_class_6_sc + 
-               dist_river_m_sc + dist_road_m_sc + dist_urban_m_sc + dist_edge_m_sc + 
-               slope_pct_sc + prec_sum_sc + tmin_mean_sc + (1|year) + (1|sp_block), 
-               REML=T, family=binomial, data=train_data)
+# IF crossed random effects (block and year) : (1|block)+(1|year), that means that every block appears multiple times in every year of the dataset
+mod_glmm = glmmTMB(formula = 
+                     type ~ 
+                     in_car + in_pub_res + in_rppn + in_rl + in_apa + ns_br101 +
+                     prop_forest_100m_sc + prop_urb_100m_sc + 
+                     dist_river_m_sc + dist_road_m_sc + dist_urban_m_sc + dist_edge_m_sc + 
+                     slope_pct_sc + prec_sum_sc + tmin_mean_sc + 
+                     (1|year),
+                   REML=T, family=binomial, data=train_data)
 summary(mod_glmm)
 
 
@@ -823,17 +987,8 @@ check_convergence(mod_glmm)
 # NB: If you have a lot of data points, residual diagnostics will nearly inevitably become significant, because having a perfectly fitting model is very unlikely.
 # DHARMa only flags a difference between the observed and expected data - the user has to decide whether this difference is actually a problem for the analysis!
 
-# We will use a smaller model because DHARMa struggles with very large models
-# GLMM model
-mod_glmm_sample = glmmTMB(type ~ in_car + in_pub_res + in_rppn + in_rl + in_apa + ns_br101 +
-                            prop_r100_class_4_sc + prop_r100_class_6_sc + 
-                            dist_river_m_sc + dist_road_m_sc + dist_urban_m_sc + dist_edge_m_sc + 
-                            slope_pct_sc + prec_sum_sc + tmin_mean_sc + (1|year) + (1|sp_block),
-                          REML=T, family=binomial, data=test_data)
-summary(mod_glmm_sample)
-
 # Calculate the residuals, using the simulateResiduals() function (randomized quantile residuals)
-simulationOutput = simulateResiduals(fittedModel = mod_glmm_sample, plot = F)
+simulationOutput = simulateResiduals(fittedModel = mod_glmm, plot = F)
 # Access to residuals
 plot(simulationOutput)
 # Left panel: qq-plot to detect overall deviations from the expected distribution, by default with added tests for correct distribution (KS test), dispersion and outliers.
@@ -851,33 +1006,32 @@ testDispersion(simulationOutput)
 
 # A second test that is typically run for LMs, but not for GL(M)Ms is to plot residuals against the predictors in the model (or potentially predictors that were not in the model) to detect possible misspecifications
 # If you plot the residuals against predictors, space or time, the resulting plots should not only show no systematic dependency of those residuals on the covariates, but they should also again be flat for each fixed situation
-plotResiduals(simulationOutput, test_data$in_car)
-plotResiduals(simulationOutput, test_data$in_pub_res)
-plotResiduals(simulationOutput, test_data$in_rppn)
-plotResiduals(simulationOutput, test_data$in_rl)
-plotResiduals(simulationOutput, test_data$in_apa)
-plotResiduals(simulationOutput, test_data$ns_br101)
-plotResiduals(simulationOutput, test_data$prop_r100_class_4_sc)
-plotResiduals(simulationOutput, test_data$prop_r100_class_6_sc)
-plotResiduals(simulationOutput, test_data$dist_river_m_sc)
-plotResiduals(simulationOutput, test_data$dist_road_m_sc)
-plotResiduals(simulationOutput, test_data$dist_urban_m_sc)
-plotResiduals(simulationOutput, test_data$dist_edge_m_sc)
-plotResiduals(simulationOutput, test_data$slope_pct_sc)
-plotResiduals(simulationOutput, test_data$prec_sum_sc)
-plotResiduals(simulationOutput, test_data$tmin_mean_sc)
-plotResiduals(simulationOutput, test_data$year)
-plotResiduals(simulationOutput, test_data$sp_block)
+plotResiduals(simulationOutput, train_data$in_car)
+plotResiduals(simulationOutput, train_data$in_pub_res)
+plotResiduals(simulationOutput, train_data$in_rppn)
+plotResiduals(simulationOutput, train_data$in_rl)
+plotResiduals(simulationOutput, train_data$in_apa)
+plotResiduals(simulationOutput, train_data$ns_br101)
+plotResiduals(simulationOutput, train_data$prop_forest_100m_sc)
+plotResiduals(simulationOutput, train_data$prop_urb_100m_sc)
+plotResiduals(simulationOutput, train_data$dist_river_m_sc)
+plotResiduals(simulationOutput, train_data$dist_road_m_sc)
+plotResiduals(simulationOutput, train_data$dist_urban_m_sc)
+plotResiduals(simulationOutput, train_data$dist_edge_m_sc)
+plotResiduals(simulationOutput, train_data$slope_pct_sc)
+plotResiduals(simulationOutput, train_data$prec_sum_sc)
+plotResiduals(simulationOutput, train_data$tmin_mean_sc)
+plotResiduals(simulationOutput, train_data$year)
 
 
 ## Autocorrelation
 # Spatial
-res2 = recalculateResiduals(simulationOutput, group = test_data$year)
+res2 = recalculateResiduals(simulationOutput, group = train_data$year)
 testSpatialAutocorrelation(res2, 
-                           x = aggregate(test_data$x, list(test_data$year), mean)$x,
-                           y = aggregate(test_data$y, list(test_data$year), mean)$x)
+                           x = aggregate(train_data$x, list(train_data$year), mean)$x,
+                           y = aggregate(train_data$y, list(train_data$year), mean)$x)
 # Temporal
-testTemporalAutocorrelation(res2, time = unique(test_data$year))
+testTemporalAutocorrelation(res2, time = unique(train_data$year))
 
 
 ###### Spatial autocorrelation ----------
@@ -1027,7 +1181,6 @@ summary(mod_glmm)
 # In simple cases, the ICC corresponds to the difference between the conditional R2 and the marginal R2
 performance::icc(mod_glmm, by_group=TRUE)
 # 0.02 (i.e., 2%) of variance explained by inter-annual differences
-# 0.06 (i.e., 6%) of variance explained by between-block variation
 # This suggests that most variance was explained by predictors (fixed effects) rather than hierarchical grouping structure
 
 ###### R² ----------
@@ -1035,158 +1188,9 @@ performance::icc(mod_glmm, by_group=TRUE)
 # Conditional R2 = variance explained by both fixed and random effects i.e., the variance explained by the whole model
 r2_nakagawa(mod_glmm)
 
-
-##### Deforestation (GLM) ----
-# As variance is not strongly explained by random effects, we run GLMs
-
-###### GLMs -------
-
-###### Sub-sample  ----
-# We assess how well the model predicts the pixels in which LULC occur between time points
-# Extract training and testing datasets
-train_data = data_defor_pixel %>% dplyr::filter(year != 2024)
-test_data = data_defor_pixel %>% dplyr::filter(year == 2024)
-# Check equal repartition
-prop.table(table(train_data$type))
-prop.table(table(test_data$type))
-train_data %>% 
-  dplyr::group_by(year, type) %>% 
-  dplyr::count()
-test_data %>% 
-  dplyr::group_by(year, type) %>% 
-  dplyr::count()
-
-## GLM with binomial distribution
-# We use the logit function to predict values between 0 and 1
-# Binomial model
-mod_glm = glm(formula = type ~ in_car + in_pub_res + in_rppn + in_rl + in_apa + ns_br101 +
-                prop_r100_class_4_sc + prop_r100_class_6_sc + 
-                dist_river_m_sc + dist_road_m_sc + dist_urban_m_sc + dist_edge_m_sc + 
-                slope_pct_sc + prec_sum_sc + tmin_mean_sc +
-                x + y + I(x^2) + I(y^2), family=binomial, data=train_data)
-summary(mod_glm)
-
-###### Stepwise regression -------
-# stepAIC() (MASS) chooses the best model by AIC. 
-# It has an option named direction, which can take the following values: i) “both” (for stepwise regression, both forward and backward selection); “backward” (for backward selection) and “forward” (for forward selection). It return the best final model.
-step.model = stepAIC(mod_glm, direction = "both", trace = FALSE)
-summary(step.model)
-
-###### Validation -----------
-
-### Check convergence
-check_convergence(step.model)
-
-# 1) Examine plots of residuals versus fitted values for the entire model
-# 2) Model residuals versus all explanatory variables to look for patterns
-
-#### Dharma method (from Hartig 2024)
-# Rationale: misspecifications in GL(M)Ms cannot reliably be diagnosed with standard residual plots
-# The "DHARMa" package uses a simulation-based approach to create readily interpretable scaled (quantile) residuals for fitted generalized linear (mixed) models
-# The resulting residuals are standardized to values between 0 and 1 and can be interpreted as intuitively as residuals from a linear regression
-# Also provides a number of plot and test functions for typical model misspecification problems, such as over/underdispersion, zero-inflation, and residual spatial, temporal and phylogenetic autocorrelation.
-# A residual of 0 means that all simulated values are larger than the observed value, and a residual of 0.5 means half of the simulated values are larger than the observed value.
-# NB: If you have a lot of data points, residual diagnostics will nearly inevitably become significant, because having a perfectly fitting model is very unlikely.
-# DHARMa only flags a difference between the observed and expected data - the user has to decide whether this difference is actually a problem for the analysis!
-
-# We will use a smaller model because DHARMa struggles with very large models
-# GLM model
-formula = step.model$formula
-mod_glm_sample = glm(formula, family=binomial, data=test_data)
-summary(mod_glm_sample)
-
-# Calculate the residuals, using the simulateResiduals() function (randomized quantile residuals)
-simulationOutput = simulateResiduals(fittedModel = mod_glm_sample, plot = F)
-# Access to residuals
-plot(simulationOutput)
-# Left panel: qq-plot to detect overall deviations from the expected distribution, by default with added tests for correct distribution (KS test), dispersion and outliers.
-# Right panel: plotResiduals (right panel) produces a plot of the residuals against the predicted value (or alternatively, other variable). Simulation outliers (data points that are outside the range of simulated values) are highlighted as red stars.
-# To provide a visual aid in detecting deviations from uniformity in y-direction, the plot function calculates an (optional default) quantile regression, which compares the empirical 0.25, 0.5 and 0.75 quantiles in y direction (red solid lines) with the theoretical 0.25, 0.5 and 0.75 quantiles (dashed black line), and provides a p-value for the deviation from the expected quantile
-plotQQunif(simulationOutput) # left plot in plot.DHARMa()
-plotResiduals(simulationOutput) # right plot in plot.DHARMa()
-
-# GL(M)Ms often display over/underdispersion, which means that residual variance is larger/smaller than expected under the fitted model.
-# If overdispersion is present, the main effect is that confidence intervals tend to be too narrow, and p-values to small, leading to inflated type I error. The opposite is true for underdispersion, i.e. the main issue of underdispersion is that you loose power.
-# To check for over/underdispersion, plot the simulateResiduals() and check for deviation around the red line (and residuals around 0 and 1); see examples in DHARMa vignette
-# DHARMa contains several overdispersion tests that compare the dispersion of simulated residuals to the observed residuals
-testDispersion(simulationOutput)
-# A significant ratio > 1 indicates overdispersion, a significant ratio < 1 underdispersion.
-
-# A second test that is typically run for LMs, but not for GL(M)Ms is to plot residuals against the predictors in the model (or potentially predictors that were not in the model) to detect possible misspecifications
-# If you plot the residuals against predictors, space or time, the resulting plots should not only show no systematic dependency of those residuals on the covariates, but they should also again be flat for each fixed situation
-plotResiduals(simulationOutput, test_data$in_car)
-plotResiduals(simulationOutput, test_data$in_pub_res)
-plotResiduals(simulationOutput, test_data$in_rppn)
-plotResiduals(simulationOutput, test_data$in_rl)
-plotResiduals(simulationOutput, test_data$in_apa)
-plotResiduals(simulationOutput, test_data$ns_br101)
-plotResiduals(simulationOutput, test_data$prop_r100_class_4_sc)
-plotResiduals(simulationOutput, test_data$prop_r100_class_6_sc)
-plotResiduals(simulationOutput, test_data$dist_river_m_sc)
-plotResiduals(simulationOutput, test_data$dist_road_m_sc)
-plotResiduals(simulationOutput, test_data$dist_urban_m_sc)
-plotResiduals(simulationOutput, test_data$dist_edge_m_sc)
-plotResiduals(simulationOutput, test_data$slope_pct_sc)
-plotResiduals(simulationOutput, test_data$prec_sum_sc)
-plotResiduals(simulationOutput, test_data$tmin_mean_sc)
-
-## Autocorrelation
-# Spatial
-testSpatialAutocorrelation(simulationOutput, x = test_data$x, y = test_data$y)
-
-###### Simple cross-validation -----------
-# ROC is used to measure the performance of models predicting the presence or absence of a phenomenon
-# It is often summarised by the area under the curve (AUC) where one indicates a perfect fit and 0.5 indicates a purely random fit.
-
-# Training
-pred_train = predict(step.model, type="response")
-roc_train = roc(train_data$type, pred_train)
-auc_train = auc(roc_train)
-cat("Train AUC:", auc_train, "\n")
-
-# Testing
-pred_test = predict(step.model, newdata=test_data,
-                    type="response")
-roc_test = roc(test_data$type, pred_test)
-auc_test = auc(roc_test)
-cat("Test AUC:", auc_test, "\n")
-
-plot(roc_train, col="blue", lwd=2, main="ROC Curves")
-lines(roc_test, col="red", lwd=2)
-# The model is able to accurately predict deforestation in 2024 (AUC ~ 1)
-
-###### Interpretation ----------
-summary(step.model)
-
-# Intercept interpretation
-cat("When all predictors are set to 0, the model predicts a logit of probability of deforestation (presence) as:\n")
-cat("Intercept (log-odds when all predictors = 0):", round(coef(step.model)["(Intercept)"], 4), "\n\n")
-
-# Predictor interpretation
-# The model predicts:
-# - That the probability of deforestation increases in private lands (p<0.05)
-# - That the probability of deforestation decreases in public reserves (p<0.05)
-# - That the probability of deforestation decreases in RPPNs (p<0.05)
-# - That the probability of deforestation decreases in Legal Reserves (p<0.05)
-# - That the probability of deforestation decreases inside APA (p<0.05)
-# - That the probability of deforestation decreases in the South of BR-1010 (p<0.05) compared to the North
-# - A positive effect of the proportion of agriculture on the logit of the probability of deforestation (p<0.05)
-# - A positive effect of the proportion of urban area on the logit of the probability of deforestation (p<0.05)
-# - A positive effect of the distance to rivers on the logit of the probability of deforestation (p<0.05)
-# - A positive effect of the distance to roads on the logit of the probability of deforestation (p<0.05)
-# - A positive effect of the distance to urban centers on the logit of the probability of deforestation (p<0.05)
-# - A negative effect of the distance to forest edges on the logit of the probability of deforestation (p<0.05)
-# - A negative effect of the slope on the logit of the probability of deforestation (p<0.05)
-# - A positive effect of precipitations on the logit of the probability of deforestation (p<0.05)
-# - A positive effect of min temperature on the logit of the probability of deforestation (p<0.05)
-# - That latitude and longitude significantly influence the probability of deforestation (p<0.05)
-
-###### R² -------
-rsq(step.model)
-
 ###### Plot effects -------
 # Tidy summarizes information about the components of a model
-coef_defor = broom::tidy(step.model, conf.int = TRUE, conf.level = 0.95) %>%
+coef_defor = broom.mixed::tidy(mod_glmm, effects = "fixed", conf.int=TRUE) %>%
   dplyr::filter(term != "(Intercept)")
 head(coef_defor)
 # Forest plot of log-odds effect
@@ -1214,32 +1218,32 @@ ggplot(coef_defor, aes(x = OR, y = reorder(term, OR))) +
 
 
 ##### Reforestation (GLMM) ----
-str(data_refor_pixel)
+str(data_refor_final)
 
 ###### Quick checks -----
 # We check whether the probability is close to 0.5 (we cannot model probability variance under 0.1 and above 0.9)
-prop.table(table(data_refor_pixel$type))
+prop.table(table(data_refor_final$type))
 
 # Plots
-boxplot(prop_r100_class_4_sc~type, data=data_refor_pixel)
-boxplot(prop_r100_class_6_sc~type, data=data_refor_pixel)
-boxplot(dist_river_m_sc~type, data=data_refor_pixel)
-boxplot(dist_urban_m_sc~type, data=data_refor_pixel)
-boxplot(dist_road_m_sc~type, data=data_refor_pixel)
-boxplot(dist_edge_m_sc~type, data=data_refor_pixel)
-boxplot(slope_pct_sc~type, data=data_refor_pixel)
-boxplot(prec_sum_sc~type, data=data_refor_pixel)
-boxplot(tmin_mean_sc~type, data=data_refor_pixel)
+boxplot(prop_r100_class_4_sc~type, data=data_refor_final)
+boxplot(prop_r100_class_6_sc~type, data=data_refor_final)
+boxplot(dist_river_m_sc~type, data=data_refor_final)
+boxplot(dist_urban_m_sc~type, data=data_refor_final)
+boxplot(dist_road_m_sc~type, data=data_refor_final)
+boxplot(dist_edge_m_sc~type, data=data_refor_final)
+boxplot(slope_pct_sc~type, data=data_refor_final)
+boxplot(prec_sum_sc~type, data=data_refor_final)
+boxplot(tmin_mean_sc~type, data=data_refor_final)
 
 ###### GLMMs -------
 
 ###### Sub-sample  ----
 # We sub-sample the dataset for cross-validation
-data_refor_pixel = data_refor_pixel %>%
+data_refor_final = data_refor_final %>%
   dplyr::mutate(group = interaction(type, year))
 # Stratified sub-sample
 split = rsample::initial_split(
-  data_refor_pixel,
+  data_refor_final,
   prop = 0.8,  # 80% training model
   strata = "group"  # Stratification
 )
@@ -1259,11 +1263,14 @@ test_data %>%
 ## GLMM with binomial distribution
 # We use the logit function to predict values between 0 and 1
 # Binomial model
-# Crossed random effects (block and year) : (1|block)+(1|year), i.e., every block appears multiple times in every year of the dataset
-mod_glmm = glmmTMB(formula = type ~ in_car + in_pub_res + in_rppn + in_rl + in_apa + ns_br101 +
-                     prop_r100_class_4_sc + prop_r100_class_6_sc + 
+# IF crossed random effects (block and year) : (1|block)+(1|year), that means that every block appears multiple times in every year of the dataset
+mod_glmm = glmmTMB(formula = 
+                     type ~ 
+                     in_car + in_pub_res + in_rppn + in_rl + in_apa + ns_br101 +
+                     prop_forest_100m_sc + prop_urb_100m_sc + 
                      dist_river_m_sc + dist_road_m_sc + dist_urban_m_sc + dist_edge_m_sc + 
-                     slope_pct_sc + prec_sum_sc + tmin_mean_sc + (1|year) + (1|sp_block), 
+                     slope_pct_sc + prec_sum_sc + tmin_mean_sc + 
+                     (1|year), 
                    REML=T, family=binomial, data=train_data)
 summary(mod_glmm)
 
@@ -1286,17 +1293,8 @@ check_convergence(mod_glmm)
 # NB: If you have a lot of data points, residual diagnostics will nearly inevitably become significant, because having a perfectly fitting model is very unlikely.
 # DHARMa only flags a difference between the observed and expected data - the user has to decide whether this difference is actually a problem for the analysis!
 
-# We will use a smaller model because DHARMa struggles with very large models
-# GLMM model
-mod_glmm_sample = glmmTMB(type ~ in_car + in_pub_res + in_rppn + in_rl + in_apa + ns_br101 +
-                            prop_r100_class_4_sc + prop_r100_class_6_sc + 
-                            dist_river_m_sc + dist_road_m_sc + dist_urban_m_sc + dist_edge_m_sc + 
-                            slope_pct_sc + prec_sum_sc + tmin_mean_sc + (1|year) + (1|sp_block),
-                          REML=T, family=binomial, data=test_data)
-summary(mod_glmm_sample)
-
 # Calculate the residuals, using the simulateResiduals() function (randomized quantile residuals)
-simulationOutput = simulateResiduals(fittedModel = mod_glmm_sample, plot = F)
+simulationOutput = simulateResiduals(fittedModel = mod_glmm, plot = F)
 # Access to residuals
 plot(simulationOutput)
 # Left panel: qq-plot to detect overall deviations from the expected distribution, by default with added tests for correct distribution (KS test), dispersion and outliers.
@@ -1314,33 +1312,32 @@ testDispersion(simulationOutput)
 
 # A second test that is typically run for LMs, but not for GL(M)Ms is to plot residuals against the predictors in the model (or potentially predictors that were not in the model) to detect possible misspecifications
 # If you plot the residuals against predictors, space or time, the resulting plots should not only show no systematic dependency of those residuals on the covariates, but they should also again be flat for each fixed situation
-plotResiduals(simulationOutput, test_data$in_car)
-plotResiduals(simulationOutput, test_data$in_pub_res)
-plotResiduals(simulationOutput, test_data$in_rppn)
-plotResiduals(simulationOutput, test_data$in_rl)
-plotResiduals(simulationOutput, test_data$in_apa)
-plotResiduals(simulationOutput, test_data$ns_br101)
-plotResiduals(simulationOutput, test_data$prop_r100_class_4_sc)
-plotResiduals(simulationOutput, test_data$prop_r100_class_6_sc)
-plotResiduals(simulationOutput, test_data$dist_river_m_sc)
-plotResiduals(simulationOutput, test_data$dist_road_m_sc)
-plotResiduals(simulationOutput, test_data$dist_urban_m_sc)
-plotResiduals(simulationOutput, test_data$dist_edge_m_sc)
-plotResiduals(simulationOutput, test_data$slope_pct_sc)
-plotResiduals(simulationOutput, test_data$prec_sum_sc)
-plotResiduals(simulationOutput, test_data$tmin_mean_sc)
-plotResiduals(simulationOutput, test_data$year)
-plotResiduals(simulationOutput, test_data$sp_block)
+plotResiduals(simulationOutput, train_data$in_car)
+plotResiduals(simulationOutput, train_data$in_pub_res)
+plotResiduals(simulationOutput, train_data$in_rppn)
+plotResiduals(simulationOutput, train_data$in_rl)
+plotResiduals(simulationOutput, train_data$in_apa)
+plotResiduals(simulationOutput, train_data$ns_br101)
+plotResiduals(simulationOutput, train_data$prop_forest_100m_sc)
+plotResiduals(simulationOutput, train_data$prop_urb_100m_sc)
+plotResiduals(simulationOutput, train_data$dist_river_m_sc)
+plotResiduals(simulationOutput, train_data$dist_road_m_sc)
+plotResiduals(simulationOutput, train_data$dist_urban_m_sc)
+plotResiduals(simulationOutput, train_data$dist_edge_m_sc)
+plotResiduals(simulationOutput, train_data$slope_pct_sc)
+plotResiduals(simulationOutput, train_data$prec_sum_sc)
+plotResiduals(simulationOutput, train_data$tmin_mean_sc)
+plotResiduals(simulationOutput, train_data$year)
 
 
 ## Autocorrelation
 # Spatial
-res2 = recalculateResiduals(simulationOutput, group = test_data$year)
+res2 = recalculateResiduals(simulationOutput, group = train_data$year)
 testSpatialAutocorrelation(res2, 
-                           x = aggregate(test_data$x, list(test_data$year), mean)$x,
-                           y = aggregate(test_data$y, list(test_data$year), mean)$x)
+                           x = aggregate(train_data$x, list(train_data$year), mean)$x,
+                           y = aggregate(train_data$y, list(train_data$year), mean)$x)
 # Temporal
-testTemporalAutocorrelation(res2, time = unique(test_data$year))
+testTemporalAutocorrelation(res2, time = unique(train_data$year))
 
 
 ###### Spatial autocorrelation ----------
@@ -1489,7 +1486,6 @@ summary(mod_glmm)
 # ICC is the proportion of variation that can be attributed to between-group variation (Nakagawa & Schielzeth 2010)
 performance::icc(mod_glmm, by_group=TRUE)
 # 0.006 (i.e., <1%) of variance explained by inter-annual differences
-# 0.05 (i.e., 5%) of variance explained by between-block variation
 # This suggests that most variance was explained by predictors (fixed effects) rather than hierarchical grouping structure
 
 ###### R² ----------
@@ -1497,158 +1493,9 @@ performance::icc(mod_glmm, by_group=TRUE)
 # Conditional R2 = variance explained by both fixed and random effects i.e., the variance explained by the whole model
 r2_nakagawa(mod_glmm)
 
-##### Reforestation (GLM) ----
-# As variance is not strongly explained by random effects, we run GLMs
-
-###### GLMs -------
-
-###### Sub-sample  ----
-# We assess how well the model predicts the pixels in which LULC occur between time points
-# Extract training and testing datasets
-train_data = data_refor_pixel %>% dplyr::filter(year != 2024)
-test_data = data_refor_pixel %>% dplyr::filter(year == 2024)
-# Check equal repartition
-prop.table(table(train_data$type))
-prop.table(table(test_data$type))
-train_data %>% 
-  dplyr::group_by(year, type) %>% 
-  dplyr::count()
-test_data %>% 
-  dplyr::group_by(year, type) %>% 
-  dplyr::count()
-
-## GLM with binomial distribution
-# We use the logit function to predict values between 0 and 1
-# Binomial model
-mod_glm = glm(formula = type ~ in_car + in_pub_res + in_rppn + in_rl + in_apa + ns_br101 +
-                prop_r100_class_4_sc + prop_r100_class_6_sc + 
-                dist_river_m_sc + dist_road_m_sc + dist_urban_m_sc + dist_edge_m_sc + 
-                slope_pct_sc + prec_sum_sc + tmin_mean_sc +
-                x + y + I(x^2) + I(y^2),
-              family=binomial, data=train_data)
-summary(mod_glm)
-
-###### Stepwise regression -------
-# stepAIC() (MASS) chooses the best model by AIC. 
-# It has an option named direction, which can take the following values: i) “both” (for stepwise regression, both forward and backward selection); “backward” (for backward selection) and “forward” (for forward selection). It return the best final model.
-step.model = stepAIC(mod_glm, direction = "both", trace = FALSE)
-summary(step.model)
-
-###### Validation -----------
-
-### Check convergence
-check_convergence(step.model)
-
-# 1) Examine plots of residuals versus fitted values for the entire model
-# 2) Model residuals versus all explanatory variables to look for patterns
-
-#### Dharma method (from Hartig 2024)
-# Rationale: misspecifications in GL(M)Ms cannot reliably be diagnosed with standard residual plots
-# The "DHARMa" package uses a simulation-based approach to create readily interpretable scaled (quantile) residuals for fitted generalized linear (mixed) models
-# The resulting residuals are standardized to values between 0 and 1 and can be interpreted as intuitively as residuals from a linear regression
-# Also provides a number of plot and test functions for typical model misspecification problems, such as over/underdispersion, zero-inflation, and residual spatial, temporal and phylogenetic autocorrelation.
-# A residual of 0 means that all simulated values are larger than the observed value, and a residual of 0.5 means half of the simulated values are larger than the observed value.
-# NB: If you have a lot of data points, residual diagnostics will nearly inevitably become significant, because having a perfectly fitting model is very unlikely.
-# DHARMa only flags a difference between the observed and expected data - the user has to decide whether this difference is actually a problem for the analysis!
-
-# We will use a smaller model because DHARMa struggles with very large models
-# GLM model
-formula = step.model$formula
-mod_glm_sample = glm(formula, family=binomial, data=test_data)
-summary(mod_glm_sample)
-
-# Calculate the residuals, using the simulateResiduals() function (randomized quantile residuals)
-simulationOutput = simulateResiduals(fittedModel = mod_glm_sample, plot = F)
-# Access to residuals
-plot(simulationOutput)
-# Left panel: qq-plot to detect overall deviations from the expected distribution, by default with added tests for correct distribution (KS test), dispersion and outliers.
-# Right panel: plotResiduals (right panel) produces a plot of the residuals against the predicted value (or alternatively, other variable). Simulation outliers (data points that are outside the range of simulated values) are highlighted as red stars.
-# To provide a visual aid in detecting deviations from uniformity in y-direction, the plot function calculates an (optional default) quantile regression, which compares the empirical 0.25, 0.5 and 0.75 quantiles in y direction (red solid lines) with the theoretical 0.25, 0.5 and 0.75 quantiles (dashed black line), and provides a p-value for the deviation from the expected quantile
-plotQQunif(simulationOutput) # left plot in plot.DHARMa()
-plotResiduals(simulationOutput) # right plot in plot.DHARMa()
-
-# GL(M)Ms often display over/underdispersion, which means that residual variance is larger/smaller than expected under the fitted model.
-# If overdispersion is present, the main effect is that confidence intervals tend to be too narrow, and p-values to small, leading to inflated type I error. The opposite is true for underdispersion, i.e. the main issue of underdispersion is that you loose power.
-# To check for over/underdispersion, plot the simulateResiduals() and check for deviation around the red line (and residuals around 0 and 1); see examples in DHARMa vignette
-# DHARMa contains several overdispersion tests that compare the dispersion of simulated residuals to the observed residuals
-testDispersion(simulationOutput)
-# A significant ratio > 1 indicates overdispersion, a significant ratio < 1 underdispersion.
-
-# A second test that is typically run for LMs, but not for GL(M)Ms is to plot residuals against the predictors in the model (or potentially predictors that were not in the model) to detect possible misspecifications
-# If you plot the residuals against predictors, space or time, the resulting plots should not only show no systematic dependency of those residuals on the covariates, but they should also again be flat for each fixed situation
-plotResiduals(simulationOutput, test_data$in_car)
-plotResiduals(simulationOutput, test_data$in_pub_res)
-plotResiduals(simulationOutput, test_data$in_rppn)
-plotResiduals(simulationOutput, test_data$in_rl)
-plotResiduals(simulationOutput, test_data$in_apa)
-plotResiduals(simulationOutput, test_data$ns_br101)
-plotResiduals(simulationOutput, test_data$prop_r100_class_4_sc)
-plotResiduals(simulationOutput, test_data$prop_r100_class_6_sc)
-plotResiduals(simulationOutput, test_data$dist_river_m_sc)
-plotResiduals(simulationOutput, test_data$dist_road_m_sc)
-plotResiduals(simulationOutput, test_data$dist_urban_m_sc)
-plotResiduals(simulationOutput, test_data$dist_edge_m_sc)
-plotResiduals(simulationOutput, test_data$slope_pct_sc)
-plotResiduals(simulationOutput, test_data$prec_sum_sc)
-plotResiduals(simulationOutput, test_data$tmin_mean_sc)
-plotResiduals(simulationOutput, test_data$sp_block)
-
-## Autocorrelation
-# Spatial
-testSpatialAutocorrelation(simulationOutput, x = test_data$x, y = test_data$y)
-
-###### Simple cross-validation -----------
-# ROC is used to measure the performance of models predicting the presence or absence of a phenomenon
-# It is often summarised by the area under the curve (AUC) where one indicates a perfect fit and 0.5 indicates a purely random fit.
-
-# Training
-pred_train = predict(step.model, type="response")
-roc_train = roc(train_data$type, pred_train)
-auc_train = auc(roc_train)
-cat("Train AUC:", auc_train, "\n")
-
-# Testing
-pred_test = predict(step.model, newdata=test_data,
-                    type="response")
-roc_test = roc(test_data$type, pred_test)
-auc_test = auc(roc_test)
-cat("Test AUC:", auc_test, "\n")
-
-plot(roc_train, col="blue", lwd=2, main="ROC Curves")
-lines(roc_test, col="red", lwd=2)
-# The model is able to accurately predict deforestation in 2024 (AUC = 0.97)
-
-###### Interpretation ----------
-summary(step.model)
-
-# Intercept interpretation
-cat("When all predictors are set to 0, the model predicts a logit of probability of deforestation (presence) as:\n")
-cat("Intercept (log-odds when all predictors = 0):", round(coef(step.model)["(Intercept)"], 4), "\n\n")
-
-# Predictor interpretation
-# The model predicts:
-# - That the probability of reforestation decreases in private properties (p<0.05)
-# - That the probability of reforestation increases in RPPNs (p<0.05)
-# - That the probability of reforestation increases in Legal Reserves (p<0.05)
-# - That the probability of reforestation decreases inside APA (p<0.05)
-# - That the probability of reforestation increases in the South of BR-101 (p<0.05)
-# - A negative effect of the proportion of agriculture on the logit of the probability of reforestation (p<0.05)
-# - A negative effect of the proportion of urban area on the logit of the probability of reforestation (p<0.05)
-# - A positive effect of the distance to rivers on the logit of the probability of reforestation (p<0.05)
-# - A negative effect of the distance to roads on the logit of the probability of reforestation (p<0.05)
-# - A negative effect of the distance to urban centers on the logit of the probability of reforestation (p<0.05)
-# - A negative effect of the distance to forest edges on the logit of the probability of reforestation (p<0.05)
-# - A negative effect of the slope on the logit of the probability of reforestation (p<0.05)
-# - A negative effect of precipitations on the logit of the probability of reforestation (p<0.05)
-# - A negative effect of min temperature on the logit of the probability of reforestation (p<0.05)
-# - That the latitude and longitude influence the probability of reforestation (p<0.05)
-
-###### R² -------
-rsq(step.model)
-
 ###### Plot effects -------
 # Tidy summarizes information about the components of a model
-coef_refor = broom::tidy(step.model, conf.int = TRUE, conf.level = 0.95) %>%
+coef_refor = broom.mixed::tidy(mod_glmm, effects = "fixed", conf.int=TRUE) %>%
   dplyr::filter(term != "(Intercept)")
 head(coef_refor)
 # Forest plot of log-odds effect

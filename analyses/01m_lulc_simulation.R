@@ -180,8 +180,6 @@ plot(pub_res)
 
 
 ### Create Explanatory Variables Raster List ------
-# EV are represented by an object of class ExpVarRasterList
-# Can be either static (one map provided for the study period) or dynamic (one map provided for each year of the study period)
 
 #### Create rasters -------
 # Select template raster to create other rasters
