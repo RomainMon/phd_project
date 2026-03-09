@@ -23,16 +23,14 @@ library(sp)
 library(cv)
 library(rsample)
 library(pROC)
-library(lulcc)
 library(rsq)
 library(MASS)
 library(broom)
-library(GeoThinneR)
 library(broom.mixed)
 
 ### Load datasets
-data_defor_pixel = readRDS(here("outputs", "data", "Mapbiomas", "LULCC_datasets", "data_defor_pixel.rds"))
-data_refor_pixel = readRDS(here("outputs", "data", "Mapbiomas", "LULCC_datasets", "data_refor_pixel.rds"))
+data_defor_pixel = readRDS(here("outputs", "data", "Mapbiomas", "LULCC_datasets", "data_defor_pixel_thinned.rds"))
+data_refor_pixel = readRDS(here("outputs", "data", "Mapbiomas", "LULCC_datasets", "data_refor_pixel_thinned.rds"))
 data_car = readRDS(here("outputs", "data", "Mapbiomas", "LULCC_datasets", "data_defor_refor_car.rds"))
 
 
@@ -272,7 +270,8 @@ data_defor_pixel %>%
   dplyr::summarise(mean=mean(forest_age),
                    sd=sd(forest_age))
 hist(data_defor_pixel$forest_age)
-# plot(data_defor_pixel$year, data_defor_pixel$forest_age)
+plot(data_defor_pixel$year, data_defor_pixel$forest_age) # Warning here
+# Forest age is correlated with year due to construction of forest age
 
 ##### Precipitations -------
 data_defor_pixel %>% 
@@ -307,273 +306,36 @@ hist(data_refor_pixel$tmax_mean)
 
 #### Prepare datasets for GLMM --------
 
-##### Spatial autocorrelation --------
-###### Method 1: Spatial filtering (thinning) --------
+##### Spatial blocking --------
 
-###### Deforestation dataset ----------
-# 1) Thinning event cells
-data_defor_8 = data_defor_pixel %>% 
-  dplyr::filter(type == 8)
-# convert to sf
-pts = sf::st_as_sf(
-  data_defor_8,
-  coords = c("x","y"),
-  crs = 31983
-)
-# transform to WGS84
-pts_4326 = sf::st_transform(pts, 4326)
-# extract lon lat
-coords = sf::st_coordinates(pts_4326)
-# Mutate long/lat coordinates (4326)
-data_defor_8 = pts_4326 %>%
-  dplyr::mutate(
-    lon = coords[,1],
-    lat = coords[,2]
-  ) %>%
-  sf::st_drop_geometry()
-# Thinning
-data_defor_8_thin = GeoThinneR::thin_points(
-  data = data_defor_8,  # Dataframe with coordinates
-  group_col = "year",
-  lon_col = "lon", # Longitude column name
-  lat_col = "lat",  # Latitude column name
-  method = "distance", # Method for thinning
-  thin_dist = 0.2, # Thinning distance in km,
-  trials = 3, # Number of trials
-  all_trials = FALSE,  # Return all trials
-  seed = 123 # Seed for reproducibility
-)
-# Summary
-summary(data_defor_8_thin)
-sapply(data_defor_8_thin$retained, sum) # Number of kept points in each trial
-data_defor_8_thin_select = as_sf(data_defor_8_thin) # Convert to sf
+# Deforestation dataset
+data_defor_pixel$block_x = floor(data_defor_pixel$x / 20000) # Distance in meters
+data_defor_pixel$block_y = floor(data_defor_pixel$y / 20000) # Distance in meters
+data_defor_pixel = data_defor_pixel %>%
+  dplyr::mutate(sp_block = paste0(block_x, "_", block_y))
+data_defor_pixel$sp_block = factor(data_defor_pixel$sp_block)
+sample = data_defor_pixel %>% dplyr::sample_frac(0.1)
+ggplot(sample, aes(x = x, y = y, color = sp_block)) +
+  geom_point(size = 0.3) +
+  theme_minimal() +
+  guides(color = "none")
 
-# 2) Thinning control cells
-data_defor_1 = data_defor_pixel %>% 
-  dplyr::filter(type == 1)
-# convert to sf
-pts = sf::st_as_sf(
-  data_defor_1,
-  coords = c("x","y"),
-  crs = 31983
-)
-# transform to WGS84
-pts_4326 = sf::st_transform(pts, 4326)
-# extract lon lat
-coords = sf::st_coordinates(pts_4326)
-# Mutate long/lat coordinates (4326)
-data_defor_1 = pts_4326 %>%
-  dplyr::mutate(
-    lon = coords[,1],
-    lat = coords[,2]
-  ) %>%
-  sf::st_drop_geometry()
-# Thinning
-data_defor_1_thin = GeoThinneR::thin_points(
-  data = data_defor_1,  # Dataframe with coordinates
-  group_col = "year",
-  lon_col = "lon", # Longitude column name
-  lat_col = "lat",  # Latitude column name
-  method = "distance", # Method for thinning
-  thin_dist = 0.2, # Thinning distance in km,
-  trials = 2, # Number of trials
-  all_trials = FALSE,  # Return all trials
-  seed = 123 # Seed for reproducibility
-)
-# Summary
-summary(data_defor_1_thin)
-sapply(data_defor_1_thin$retained, sum) # Number of kept points in each trial
-data_defor_1_thin_select = as_sf(data_defor_1_thin) # Convert to sf
-
-# 3) Bind datasets
-data_defor_thin = dplyr::bind_rows(data_defor_8_thin_select,
-                                   data_defor_1_thin_select)
-data_defor_thin = as.data.frame(data_defor_thin)
-
-# 4) Select a balanced number of controls per year
-n_events_year = data_defor_thin %>%
-  dplyr::filter(type == 8) %>%
-  dplyr::count(year, name = "n_events")
-# Selection
-controls_balanced = data_defor_thin %>%
-  dplyr::filter(type == 1) %>%
-  dplyr::left_join(n_events_year, by = "year") %>%
-  dplyr::group_by(year) %>%
-  dplyr::group_modify(~{
-    
-    n_events = .x$n_events[1]
-    # sample controls for that year
-    dplyr::slice_sample(.x, n = min(n_events, nrow(.x)))
-    
-  }) %>%
-  dplyr::ungroup() %>%
-  dplyr::select(-n_events)
-# Events
-events = data_defor_thin %>%
-  dplyr::filter(type == 8)
-# Final dataset
-data_defor_final = dplyr::bind_rows(events, controls_balanced)
-# Check
-data_defor_final %>%
-  dplyr::count(year, type)
-# Add x and y columns
-coords = sf::st_as_sf(data_defor_final, sf_column_name = "geometry")
-coords = sf::st_coordinates(coords)
-data_defor_final = data_defor_final %>% 
-  dplyr::mutate(
-    x = coords[,1],
-    y = coords[,2]
-  )
-
-###### Reforestation dataset ----------
-# 1) Thinning event cells
-data_refor_7 = data_refor_pixel %>% 
-  dplyr::filter(type == 7)
-# convert to sf
-pts = sf::st_as_sf(
-  data_refor_7,
-  coords = c("x","y"),
-  crs = 31983
-)
-# transform to WGS84
-pts_4326 = sf::st_transform(pts, 4326)
-# extract lon lat
-coords = sf::st_coordinates(pts_4326)
-# Mutate long/lat coordinates (4326)
-data_refor_7 = pts_4326 %>%
-  dplyr::mutate(
-    lon = coords[,1],
-    lat = coords[,2]
-  ) %>%
-  sf::st_drop_geometry()
-# Thinning
-data_refor_7_thin = GeoThinneR::thin_points(
-  data = data_refor_7,  # Dataframe with coordinates
-  group_col = "year",
-  lon_col = "lon", # Longitude column name
-  lat_col = "lat",  # Latitude column name
-  method = "distance", # Method for thinning
-  thin_dist = 0.2, # Thinning distance in km,
-  trials = 3, # Number of trials
-  all_trials = FALSE,  # Return all trials
-  seed = 123 # Seed for reproducibility
-)
-# Summary
-summary(data_refor_7_thin)
-sapply(data_refor_7_thin$retained, sum) # Number of kept points in each trial
-data_refor_7_thin_select = as_sf(data_refor_7_thin) # Convert to sf
-
-# 2) Thinning control cells
-data_refor_4 = data_refor_pixel %>% 
-  dplyr::filter(type == 4)
-# convert to sf
-pts = sf::st_as_sf(
-  data_refor_4,
-  coords = c("x","y"),
-  crs = 31983
-)
-# transform to WGS84
-pts_4326 = sf::st_transform(pts, 4326)
-# extract lon lat
-coords = sf::st_coordinates(pts_4326)
-# Mutate long/lat coordinates (4326)
-data_refor_4 = pts_4326 %>%
-  dplyr::mutate(
-    lon = coords[,1],
-    lat = coords[,2]
-  ) %>%
-  sf::st_drop_geometry()
-# Thinning
-data_refor_4_thin = GeoThinneR::thin_points(
-  data = data_refor_4,  # Dataframe with coordinates
-  group_col = "year",
-  lon_col = "lon", # Longitude column name
-  lat_col = "lat",  # Latitude column name
-  method = "distance", # Method for thinning
-  thin_dist = 0.2, # Thinning distance in km,
-  trials = 2, # Number of trials
-  all_trials = FALSE,  # Return all trials
-  seed = 123 # Seed for reproducibility
-)
-# Summary
-summary(data_refor_4_thin)
-sapply(data_refor_4_thin$retained, sum) # Number of kept points in each trial
-data_refor_4_thin_select = as_sf(data_refor_4_thin) # Convert to sf
-
-# 3) Bind datasets
-data_refor_thin = dplyr::bind_rows(data_refor_7_thin_select,
-                                   data_refor_4_thin_select)
-data_refor_thin = as.data.frame(data_refor_thin)
-
-# 4) Select a balanced number of controls per year
-n_events_year = data_refor_thin %>%
-  dplyr::filter(type == 7) %>%
-  dplyr::count(year, name = "n_events")
-# Selection
-controls_balanced = data_refor_thin %>%
-  dplyr::filter(type == 4) %>%
-  dplyr::left_join(n_events_year, by = "year") %>%
-  dplyr::group_by(year) %>%
-  dplyr::group_modify(~{
-    
-    n_events = .x$n_events[1]
-    # sample controls for that year
-    dplyr::slice_sample(.x, n = min(n_events, nrow(.x)))
-    
-  }) %>%
-  dplyr::ungroup() %>%
-  dplyr::select(-n_events)
-# Events
-events = data_refor_thin %>%
-  dplyr::filter(type == 7)
-# Final dataset
-data_refor_final = dplyr::bind_rows(events, controls_balanced)
-# Check
-data_refor_final %>%
-  dplyr::count(year, type)
-str(data_refor_final)
-# Add x and y columns
-coords = sf::st_as_sf(data_refor_final, sf_column_name = "geometry")
-coords = sf::st_coordinates(coords)
-data_refor_final = data_refor_final %>% 
-  dplyr::mutate(
-    x = coords[,1],
-    y = coords[,2]
-  )
-
-###### Method 2: Spatial blocking --------
-# # Deforestation dataset
-# data_defor_pixel$block_x = floor(data_defor_pixel$x / 20000) # Distance in meters
-# data_defor_pixel$block_y = floor(data_defor_pixel$y / 20000) # Distance in meters
-# data_defor_pixel = data_defor_pixel %>% 
-#   dplyr::mutate(sp_block = paste0(block_x, "_", block_y))
-# data_defor_pixel$sp_block = factor(data_defor_pixel$sp_block)
-# sample = data_defor_pixel %>% dplyr::sample_frac(0.1)
-# ggplot(sample, aes(x = x, y = y, color = sp_block)) +
-#   geom_point(size = 0.3) +
-#   theme_minimal() +
-#   guides(color = "none")
-# ggplot(sample %>% dplyr::filter(year==2024), aes(x = x, y = y, color = sp_block)) +
-#   geom_point(size = 0.3) +
-#   theme_minimal() +
-#   guides(color = "none")
-# 
-# # Reforestation dataset
-# data_refor_pixel$block_x = floor(data_refor_pixel$x / 20000) # Distance in meters
-# data_refor_pixel$block_y = floor(data_refor_pixel$y / 20000) # Distance in meters
-# data_refor_pixel = data_refor_pixel %>% 
-#   dplyr::mutate(sp_block = paste0(block_x, "_", block_y))
-# data_refor_pixel$sp_block = factor(data_refor_pixel$sp_block)
-# sample = data_refor_pixel %>% dplyr::sample_frac(0.1)
-# ggplot(sample, aes(x = x, y = y, color = sp_block)) +
-#   geom_point(size = 0.3) +
-#   theme_minimal() +
-#   guides(color = "none")
+# Reforestation dataset
+data_refor_pixel$block_x = floor(data_refor_pixel$x / 20000) # Distance in meters
+data_refor_pixel$block_y = floor(data_refor_pixel$y / 20000) # Distance in meters
+data_refor_pixel = data_refor_pixel %>%
+  dplyr::mutate(sp_block = paste0(block_x, "_", block_y))
+data_refor_pixel$sp_block = factor(data_refor_pixel$sp_block)
+sample = data_refor_pixel %>% dplyr::sample_frac(0.1)
+ggplot(sample, aes(x = x, y = y, color = sp_block)) +
+  geom_point(size = 0.3) +
+  theme_minimal() +
+  guides(color = "none")
 
 ##### Scale drivers --------
 # We standardize to compare effect sizes with the function scale()
 # Deforestation dataset
-data_defor_final = data_defor_final %>%
+data_defor_pixel = data_defor_pixel %>%
   dplyr::mutate(dplyr::across(c(prop_forest_100m, prop_agri_100m, prop_urb_100m, prop_defor_100m,
                                 dist_river_m, dist_urban_m, dist_road_m, dist_edge_m,
                                 alt_m, slope_pct, 
@@ -582,7 +344,7 @@ data_defor_final = data_defor_final %>%
                               ~ as.vector(scale(.x)),
                               .names = "{.col}_sc"))
 # Reforestation dataset
-data_refor_final = data_refor_final %>%
+data_refor_pixel = data_refor_pixel %>%
   dplyr::mutate(dplyr::across(c(prop_forest_100m, prop_agri_100m, prop_urb_100m, prop_refor_100m,
                                 dist_river_m, dist_urban_m, dist_road_m, dist_edge_m,
                                 alt_m, slope_pct, 
@@ -595,13 +357,13 @@ data_refor_final = data_refor_final %>%
 ##### Deforestation dataset -----
 ###### Pearson =====
 
-X = data_defor_final %>% 
+X = data_defor_pixel %>% 
   dplyr::select(in_car, in_pub_res, in_rppn, in_rl, in_apa,
-                prop_forest_100m, prop_agri_100m, prop_urb_100m, prop_defor_100m,
-                dist_river_m, dist_urban_m, dist_road_m, dist_edge_m,
-                slope_pct, alt_m,
-                prec_sum, tmin_mean, tmax_mean,
-                forest_age,
+                prop_forest_100m_sc, prop_agri_100m_sc, prop_urb_100m_sc, prop_defor_100m_sc,
+                dist_river_m_sc, dist_urban_m_sc, dist_road_m_sc, dist_edge_m_sc,
+                slope_pct_sc, alt_m_sc,
+                prec_sum_sc, tmin_mean_sc, tmax_mean_sc,
+                forest_age_sc,
                 year)
 cor_mat = cor(X, use = "pairwise.complete.obs", method = "pearson")
 cor_mat
@@ -615,21 +377,21 @@ high_corr = cor_mat %>%
   dplyr::arrange(desc(abs(r)))
 
 high_corr
-# Beware: (i) the area of forest and of agriculture are strongly correlated
+# Beware: (i) proportion of forest and of agriculture are strongly correlated
 # And (ii) tmin and tmax
 # And (iii) forest_age and year
 # And (iv) proportion of agriculture and of deforested area
-# And (v) proportion of forest and deforested area
+# And (v) proportion of forest and of deforested area
 
 ###### VIF ---------
-X_vif = data_defor_final %>% 
+X_vif = data_defor_pixel %>% 
   dplyr::select(type, 
                 in_car, in_pub_res, in_rppn, in_rl, in_apa,
-                prop_forest_100m, prop_agri_100m, prop_urb_100m, prop_defor_100m,
-                dist_river_m, dist_urban_m, dist_road_m, dist_edge_m,
-                slope_pct, alt_m,
-                prec_sum, tmin_mean, tmax_mean,
-                forest_age,
+                prop_forest_100m_sc, prop_agri_100m_sc, prop_urb_100m_sc, prop_defor_100m_sc,
+                dist_river_m_sc, dist_urban_m_sc, dist_road_m_sc, dist_edge_m_sc,
+                slope_pct_sc, alt_m_sc,
+                prec_sum_sc, tmin_mean_sc, tmax_mean_sc,
+                forest_age_sc,
                 year) %>%
   as.data.frame()
 vif.result = HH::vif(X_vif, y.name="type")
@@ -647,24 +409,24 @@ vif.result[vif.result > 2.5]
 
 ###### Variable selection ----
 # We select variables based on their correlations with the response variable
-data_defor_final %>% 
+data_defor_pixel %>% 
   dplyr::select(c(type, 
-                  prop_forest_100m, prop_agri_100m, prop_defor_100m,
-                  tmin_mean, tmax_mean)) %>% 
+                  prop_forest_100m_sc, prop_agri_100m_sc, prop_defor_100m_sc,
+                  tmin_mean_sc, tmax_mean_sc)) %>% 
   corrr::correlate() %>% 
   focus(type) 
 # We retain the proportion of forest area
 # Tmin is more strongly correlated than tmax
 
 ###### Re-run VIF ------
-X_vif = data_defor_final %>% 
+X_vif = data_defor_pixel %>% 
   dplyr::select(type, 
                 in_car, in_pub_res, in_rppn, in_rl, in_apa,
-                prop_forest_100m,
-                dist_river_m, dist_urban_m, dist_road_m, dist_edge_m,
-                slope_pct, alt_m,
-                prec_sum, tmin_mean,
-                forest_age,
+                prop_forest_100m_sc,
+                dist_river_m_sc, dist_urban_m_sc, dist_road_m_sc, dist_edge_m_sc,
+                slope_pct_sc, alt_m_sc,
+                prec_sum_sc, tmin_mean_sc,
+                forest_age_sc,
                 year) %>% 
   as.data.frame()
 vif.result = HH::vif(X_vif, y.name="type")
@@ -673,12 +435,12 @@ vif.result[vif.result > 2.5]
 
 ##### Reforestation dataset -----
 ###### Pearson =====
-X = data_refor_final %>% 
+X = data_refor_pixel %>% 
   dplyr::select(in_car, in_pub_res, in_rppn, in_rl, in_apa,
-                prop_forest_100m, prop_agri_100m, prop_urb_100m, prop_refor_100m,
+                prop_forest_100m_sc, prop_agri_100m_sc, prop_urb_100m_sc, prop_refor_100m_sc,
                 dist_river_m, dist_urban_m, dist_road_m, dist_edge_m,
-                slope_pct, alt_m,
-                prec_sum, tmin_mean, tmax_mean,
+                slope_pct_sc, alt_m_sc,
+                prec_sum_sc, tmin_mean_sc, tmax_mean_sc,
                 year)
 cor_mat = cor(X, use = "pairwise.complete.obs", method = "pearson")
 cor_mat
@@ -692,19 +454,19 @@ high_corr = cor_mat %>%
   dplyr::arrange(desc(abs(r)))
 
 high_corr
-# (i) the area of forest and of agriculture are strongly correlated
+# (i) the proportion of forest and of agriculture are strongly correlated
 # (ii) tmin and tmax are strongly correlated
-# (iii) the amount of forest habitat is strongly correlated to reforested area
-# (iv) the area reforested and of agriculture are strongly correlated
+# (iii) the proportion of forest habitat is strongly correlated to reforested area
+# (iv) the proportion of reforested and area of agriculture are strongly correlated
 
 ###### VIF ---------
-X_vif = data_refor_final %>% 
+X_vif = data_refor_pixel %>% 
   dplyr::select(type, 
                 in_car, in_pub_res, in_rppn, in_rl, in_apa,
-                prop_forest_100m, prop_agri_100m, prop_urb_100m, prop_refor_100m,
-                dist_river_m, dist_urban_m, dist_road_m, dist_edge_m,
-                slope_pct, alt_m,
-                prec_sum, tmin_mean, tmax_mean,
+                prop_forest_100m_sc, prop_agri_100m_sc, prop_urb_100m_sc, prop_refor_100m_sc,
+                dist_river_m_sc, dist_urban_m_sc, dist_road_m_sc, dist_edge_m_sc,
+                slope_pct_sc, alt_m_sc,
+                prec_sum_sc, tmin_mean_sc, tmax_mean_sc,
                 year) %>% 
   as.data.frame()
 vif.result = HH::vif(X_vif, y.name="type")
@@ -717,23 +479,23 @@ vif.result[vif.result > 2.5]
 
 ###### Variable selection ----
 # We select variables based on their correlations with the response variable
-data_refor_final %>% 
+data_refor_pixel %>% 
   dplyr::select(c(type, 
-                  prop_forest_100m, prop_agri_100m, prop_refor_100m,
-                  tmin_mean, tmax_mean)) %>% 
+                  prop_forest_100m_sc, prop_agri_100m_sc, prop_refor_100m_sc,
+                  tmin_mean_sc, tmax_mean_sc)) %>% 
   corrr::correlate() %>% 
   focus(type) 
 # We retain the proportion of forest
 # We keep tmin to remain consistent
 
 ###### Re-run VIF ------
-X_vif = data_refor_final %>% 
+X_vif = data_refor_pixel %>% 
   dplyr::select(type, 
                 in_car, in_pub_res, in_rppn, in_rl, in_apa,
-                prop_forest_100m, prop_urb_100m,
-                dist_river_m, dist_urban_m, dist_road_m, dist_edge_m,
-                slope_pct, alt_m, 
-                prec_sum, tmin_mean) %>% 
+                prop_forest_100m_sc, prop_urb_100m_sc,
+                dist_river_m_sc, dist_urban_m_sc, dist_road_m_sc, dist_edge_m_sc,
+                slope_pct_sc, alt_m_sc, 
+                prec_sum_sc, tmin_mean_sc) %>% 
   as.data.frame()
 vif.result = HH::vif(X_vif, y.name="type")
 vif.result[vif.result > 2.5] # All good
@@ -741,7 +503,7 @@ vif.result[vif.result > 2.5] # All good
 #### To factor --------
 
 # We must transform categorical variables to factors
-data_defor_final = data_defor_final %>% 
+data_defor_pixel = data_defor_pixel %>% 
   dplyr::mutate(in_car = factor(in_car, levels = c(0,1), labels = c("Outside","Inside")),
                 in_pub_res = factor(in_pub_res, levels = c(0,1), labels = c("Outside","Inside")),
                 in_rppn = factor(in_rppn, levels = c(0,1), labels = c("Outside","Inside")),
@@ -751,7 +513,7 @@ data_defor_final = data_defor_final %>%
                 ns_br101 = factor(ns_br101),
                 year = factor(year),
                 cell_id = factor(cell_id))
-data_refor_final = data_refor_final %>% 
+data_refor_pixel = data_refor_pixel %>% 
   dplyr::mutate(in_car = factor(in_car, levels = c(0,1), labels = c("Outside","Inside")),
                 in_pub_res = factor(in_pub_res, levels = c(0,1), labels = c("Outside","Inside")),
                 in_rppn = factor(in_rppn, levels = c(0,1), labels = c("Outside","Inside")),
@@ -763,19 +525,19 @@ data_refor_final = data_refor_final %>%
                 cell_id = factor(cell_id))
 
 # The response variable must be 0 (control) VS 1 (deforestation/reforestation)
-data_defor_final = data_defor_final %>% 
+data_defor_pixel = data_defor_pixel %>% 
   dplyr::mutate(type = dplyr::case_when(type == 1 ~ 0,
                                         type == 8 ~ 1,
                                         TRUE ~ NA))
 
-data_refor_final = data_refor_final %>% 
+data_refor_pixel = data_refor_pixel %>% 
   dplyr::mutate(type = dplyr::case_when(type == 4 ~ 0,
                                         type == 7 ~ 1,
                                         TRUE ~ NA))
 
 # Quick checks
-prop.table(table(data_defor_final$type))
-prop.table(table(data_refor_final$type))
+prop.table(table(data_defor_pixel$type))
+prop.table(table(data_refor_pixel$type))
 
 
 #### Random Forest --------
@@ -911,33 +673,33 @@ attStats(Boruta.defor) # creates a data frame containing each attribute’s Z sc
 #### Modeling -------
 
 ##### Deforestation (GLMM) ----
-str(data_defor_final)
+str(data_defor_pixel)
 
 ###### Quick checks -----
 # We check whether the probability is close to 0.5 (we cannot model probability variance under 0.1 and above 0.9)
-prop.table(table(data_defor_final$type))
+prop.table(table(data_defor_pixel$type))
 
 # Plots
-boxplot(prop_r100_class_4_sc~type, data=data_defor_final)
-boxplot(prop_r100_class_6_sc~type, data=data_defor_final)
-boxplot(dist_river_m_sc~type, data=data_defor_final)
-boxplot(dist_urban_m_sc~type, data=data_defor_final)
-boxplot(dist_road_m_sc~type, data=data_defor_final)
-boxplot(dist_edge_m_sc~type, data=data_defor_final)
-boxplot(slope_pct_sc~type, data=data_defor_final)
-boxplot(prec_sum_sc~type, data=data_defor_final)
-boxplot(tmin_mean_sc~type, data=data_defor_final)
-boxplot(forest_age_sc~type, data=data_defor_final)
+boxplot(prop_forest_100m_sc~type, data=data_defor_pixel)
+boxplot(prop_urb_100m_sc~type, data=data_defor_pixel)
+boxplot(dist_river_m_sc~type, data=data_defor_pixel)
+boxplot(dist_urban_m_sc~type, data=data_defor_pixel)
+boxplot(dist_road_m_sc~type, data=data_defor_pixel)
+boxplot(dist_edge_m_sc~type, data=data_defor_pixel)
+boxplot(slope_pct_sc~type, data=data_defor_pixel)
+boxplot(prec_sum_sc~type, data=data_defor_pixel)
+boxplot(tmin_mean_sc~type, data=data_defor_pixel)
+boxplot(forest_age_sc~type, data=data_defor_pixel)
 
 ###### GLMMs -------
 
 ###### Sub-sample  ----
 # We sub-sample the dataset for cross-validation
-data_defor_final = data_defor_final %>%
+data_defor_pixel = data_defor_pixel %>%
   dplyr::mutate(group = interaction(type, year))
 # Stratified sub-sample
 split = rsample::initial_split(
-  data_defor_final,
+  data_defor_pixel,
   prop = 0.8,  # 80% training model
   strata = "group"  # Stratification
 )
@@ -964,7 +726,7 @@ mod_glmm = glmmTMB(formula =
                      prop_forest_100m_sc + prop_urb_100m_sc + 
                      dist_river_m_sc + dist_road_m_sc + dist_urban_m_sc + dist_edge_m_sc + 
                      slope_pct_sc + prec_sum_sc + tmin_mean_sc + 
-                     (1|year),
+                     (1|year) + (1|sp_block),
                    REML=T, family=binomial, data=train_data)
 summary(mod_glmm)
 
@@ -1003,6 +765,7 @@ plotResiduals(simulationOutput) # right plot in plot.DHARMa()
 # DHARMa contains several overdispersion tests that compare the dispersion of simulated residuals to the observed residuals
 testDispersion(simulationOutput)
 # A significant ratio > 1 indicates overdispersion, a significant ratio < 1 underdispersion.
+# Slight overdispersion 
 
 # A second test that is typically run for LMs, but not for GL(M)Ms is to plot residuals against the predictors in the model (or potentially predictors that were not in the model) to detect possible misspecifications
 # If you plot the residuals against predictors, space or time, the resulting plots should not only show no systematic dependency of those residuals on the covariates, but they should also again be flat for each fixed situation
@@ -1169,9 +932,6 @@ summary(cv(mod_glmm,
 # The cv() methods returns the CV criterion ("CV crit"), the bias- adjusted CV criterion ("adj CV crit"), the criterion for the model applied to the full data ("full crit"), the confidence interval and level for the bias-adjusted CV criterion ("confint"), the number of folds ("k")
 
 
-###### Interpretation ----------
-summary(mod_glmm)
-
 ###### ICC ----------
 # Intraclass Correlation Coefficient
 # This function calculates the intraclass-correlation coefficient (ICC) - sometimes also called variance partition coefficient (VPC) or repeatability - for mixed effects models
@@ -1180,8 +940,12 @@ summary(mod_glmm)
 # The ICC can help determine whether a mixed model is even necessary: an ICC of zero (or very close to zero) means the observations within clusters are no more similar than observations from different clusters, and setting it as a random factor might not be necessary
 # In simple cases, the ICC corresponds to the difference between the conditional R2 and the marginal R2
 performance::icc(mod_glmm, by_group=TRUE)
-# 0.02 (i.e., 2%) of variance explained by inter-annual differences
+# 0.01 (i.e., 1%) of variance explained by inter-annual differences
+# 0.04 (i.e., 4%) of variance explained by spatial blocks
 # This suggests that most variance was explained by predictors (fixed effects) rather than hierarchical grouping structure
+
+###### Interpretation ----------
+summary(mod_glmm)
 
 ###### R² ----------
 # Marginal R2 = variance explained by only the fixed effects
@@ -1193,6 +957,30 @@ r2_nakagawa(mod_glmm)
 coef_defor = broom.mixed::tidy(mod_glmm, effects = "fixed", conf.int=TRUE) %>%
   dplyr::filter(term != "(Intercept)")
 head(coef_defor)
+
+# Forest plot of log-odds effect
+
+x_labels = c(
+"in_carInside" = "Inside private property",
+"dist_river_m_sc" = "Distance to nearest river",
+"dist_urban_m_sc" = "Distance to nearest town",
+"dist_road_m_sc" = "Distance to nearest road",
+"prec_sum_sc" = "Precipitations",
+"tmin_mean_sc" = "Mean min. temperature",
+"prop_urb_100m_sc" = "Proportion of built-up area",
+"in_apaInside" = "Inside APA",
+"slope_pct_sc" = "Slope",
+"ns_br101South" = "South of BR-101",
+"in_pub_resInside" = "Inside public reserve",
+"in_rppnInside" = "Inside RPPN",
+"in_rlInside" = "Inside Legal Reserve",
+"dist_edge_m_sc" = "Distance to forest edge",
+"prop_forest_100m_sc" = "Proportion of forest area"
+)
+
+# Rename variables
+coef_defor = coef_defor %>%
+  dplyr::mutate(term = dplyr::recode(term, !!!x_labels))
 # Forest plot of log-odds effect
 ggplot(coef_defor, aes(x = estimate, y = reorder(term, estimate))) +
   geom_point(size = 3) +
@@ -1217,33 +1005,34 @@ ggplot(coef_defor, aes(x = OR, y = reorder(term, OR))) +
        y = NULL)
 
 
+
 ##### Reforestation (GLMM) ----
-str(data_refor_final)
+str(data_refor_pixel)
 
 ###### Quick checks -----
 # We check whether the probability is close to 0.5 (we cannot model probability variance under 0.1 and above 0.9)
-prop.table(table(data_refor_final$type))
+prop.table(table(data_refor_pixel$type))
 
 # Plots
-boxplot(prop_r100_class_4_sc~type, data=data_refor_final)
-boxplot(prop_r100_class_6_sc~type, data=data_refor_final)
-boxplot(dist_river_m_sc~type, data=data_refor_final)
-boxplot(dist_urban_m_sc~type, data=data_refor_final)
-boxplot(dist_road_m_sc~type, data=data_refor_final)
-boxplot(dist_edge_m_sc~type, data=data_refor_final)
-boxplot(slope_pct_sc~type, data=data_refor_final)
-boxplot(prec_sum_sc~type, data=data_refor_final)
-boxplot(tmin_mean_sc~type, data=data_refor_final)
+boxplot(prop_forest_100m_sc~type, data=data_refor_pixel)
+boxplot(prop_urb_100m_sc~type, data=data_refor_pixel)
+boxplot(dist_river_m_sc~type, data=data_refor_pixel)
+boxplot(dist_urban_m_sc~type, data=data_refor_pixel)
+boxplot(dist_road_m_sc~type, data=data_refor_pixel)
+boxplot(dist_edge_m_sc~type, data=data_refor_pixel)
+boxplot(slope_pct_sc~type, data=data_refor_pixel)
+boxplot(prec_sum_sc~type, data=data_refor_pixel)
+boxplot(tmin_mean_sc~type, data=data_refor_pixel)
 
 ###### GLMMs -------
 
 ###### Sub-sample  ----
 # We sub-sample the dataset for cross-validation
-data_refor_final = data_refor_final %>%
+data_refor_pixel = data_refor_pixel %>%
   dplyr::mutate(group = interaction(type, year))
 # Stratified sub-sample
 split = rsample::initial_split(
-  data_refor_final,
+  data_refor_pixel,
   prop = 0.8,  # 80% training model
   strata = "group"  # Stratification
 )
@@ -1270,9 +1059,8 @@ mod_glmm = glmmTMB(formula =
                      prop_forest_100m_sc + prop_urb_100m_sc + 
                      dist_river_m_sc + dist_road_m_sc + dist_urban_m_sc + dist_edge_m_sc + 
                      slope_pct_sc + prec_sum_sc + tmin_mean_sc + 
-                     (1|year), 
+                     (1|year) + (1|sp_block), 
                    REML=T, family=binomial, data=train_data)
-summary(mod_glmm)
 
 
 ###### Validation -----------
@@ -1478,15 +1266,16 @@ summary(cv(mod_glmm,
 # The cv() methods returns the CV criterion ("CV crit"), the bias- adjusted CV criterion ("adj CV crit"), the criterion for the model applied to the full data ("full crit"), the confidence interval and level for the bias-adjusted CV criterion ("confint"), the number of folds ("k")
 
 
-###### Interpretation ----------
-summary(mod_glmm)
-
 ###### ICC ----------
 # Intraclass Correlation Coefficient
 # ICC is the proportion of variation that can be attributed to between-group variation (Nakagawa & Schielzeth 2010)
 performance::icc(mod_glmm, by_group=TRUE)
 # 0.006 (i.e., <1%) of variance explained by inter-annual differences
+# 0.02 (i.e., 2%) of variance explained by spatial blocks
 # This suggests that most variance was explained by predictors (fixed effects) rather than hierarchical grouping structure
+
+###### Interpretation ----------
+summary(mod_glmm)
 
 ###### R² ----------
 # Marginal R2 = variance explained by only the fixed effects
@@ -1498,13 +1287,36 @@ r2_nakagawa(mod_glmm)
 coef_refor = broom.mixed::tidy(mod_glmm, effects = "fixed", conf.int=TRUE) %>%
   dplyr::filter(term != "(Intercept)")
 head(coef_refor)
+
+# Forest plot of log-odds effect
+x_labels = c(
+  "in_carInside" = "Inside private property",
+  "dist_river_m_sc" = "Distance to nearest river",
+  "dist_urban_m_sc" = "Distance to nearest town",
+  "dist_road_m_sc" = "Distance to nearest road",
+  "prec_sum_sc" = "Precipitations",
+  "tmin_mean_sc" = "Mean min. temperature",
+  "prop_urb_100m_sc" = "Proportion of built-up area",
+  "in_apaInside" = "Inside APA",
+  "slope_pct_sc" = "Slope",
+  "ns_br101South" = "South of BR-101",
+  "in_pub_resInside" = "Inside public reserve",
+  "in_rppnInside" = "Inside RPPN",
+  "in_rlInside" = "Inside Legal Reserve",
+  "dist_edge_m_sc" = "Distance to forest edge",
+  "prop_forest_100m_sc" = "Proportion of forest area"
+)
+
+# Rename variables
+coef_refor = coef_refor %>%
+  dplyr::mutate(term = dplyr::recode(term, !!!x_labels))
 # Forest plot of log-odds effect
 ggplot(coef_refor, aes(x = estimate, y = reorder(term, estimate))) +
   geom_point(size = 3) +
   geom_errorbarh(aes(xmin = conf.low, xmax = conf.high), width = 0.2) +
   geom_vline(xintercept = 0, linetype = "dashed") +
   theme_classic() +
-  labs(x = "Standardized log-odds effect on reforestation probability",
+  labs(x = "Standardized log-odds effect on deforestation probability",
        y = NULL)
 
 # Compute odds ratios (OR)

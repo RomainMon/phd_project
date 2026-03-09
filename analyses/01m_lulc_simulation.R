@@ -110,11 +110,6 @@ car = terra::project(car, "EPSG:31983")
 plot(car)
 car_sf = sf::st_as_sf(car)
 
-# Mutate area and id
-car_sf = car_sf %>% dplyr::mutate(car_id = row_number(),
-                                  car_area_m2 = round(as.numeric(sf::st_area(geometry)),2),
-                                  car_area_ha = round((car_area_m2 / 10000), 2))
-
 ## CAR (Reserva Legal)
 rl = terra::vect(here("data", "geo", "IBGE", "cadastro_car", "RESERVA_LEGAL", "RESERVA_LEGAL_bbox.shp"))
 rl = terra::project(rl, "EPSG:31983")
@@ -179,7 +174,7 @@ pub_res_sf = sf::st_as_sf(pub_res)
 plot(pub_res)
 
 
-### Create Explanatory Variables Raster List ------
+### Create rasters of explanatory variables ------
 
 #### Create rasters -------
 # Select template raster to create other rasters
@@ -273,117 +268,93 @@ plot(dist_edges_list[[36]])
 
 ##### LULC in a buffer -------
 
+# Function to return a raster of proportion according to a given radius
+compute_mw_prop = function(r, class_id, radius_m){
+  
+  r_class = ifel(r == class_id, 1, 0)
+  
+  cellsize = res(r)[1]
+  radius_cells = ceiling(radius_m / cellsize)
+  
+  size = 2 * radius_cells + 1
+  w = matrix(1, size, size)
+  
+  mw_class = focal(r_class, w = w, fun = sum, na.rm = TRUE)
+  
+  r_valid = !is.na(r)
+  mw_valid = focal(r_valid, w = w, fun = sum, na.rm = TRUE)
+  
+  prop = mw_class / mw_valid
+  
+  return(prop)
+}
+
 ## Forest
-# Initialisation
-prop_forest100m_list = list()  # List to store rasters
+# Store rasters in a list
+prop_forest = list()
 
 # Parameters
-cl = 1  # Land use of interest
-radius = 100 # Radius in meters
+class_id = 1  # Class value
+radius_m = 100  # Radius in meters
 
-for (yr in years_lulc) {
-  cat("  Processing LULC proportion for year:", yr, "\n")
+# Loop
+for (i in seq_along(rasters_reclass)) {
+  yr = years_lulc[i]
+  r = rasters_reclass[[i]]
   
-  # Raster of a given year
-  r_year = rasters_reclass[[as.character(yr)]]
+  cat("Calculating proportion for year:", yr, "\n")
+  # Compute proportion in a given radius
+  prop_r = compute_mw_prop(r, class_id, radius_m)
   
-  # Create binary mask
-  r_bin = r_year == cl
-  
-  # Create a circular focal matrix using the radius parameter
-  w = terra::focalMat(r_bin, type = "circle", d = radius, fillNA = TRUE)
-  
-  # Count pixels in the neighborhood
-  focal_count = terra::focal(r_bin, w = w, fun = "sum", na.rm = TRUE)
-  
-  # Count valid pixels (not NAs) in the neighborhood
-  r_valid = !is.na(r_year)
-  focal_valid = terra::focal(r_valid, w = w, fun = "sum", na.rm = TRUE)
-  
-  # Compute the proportion of LULC
-  prop = focal_count / focal_valid
-  prop[is.infinite(prop) | is.na(prop)] = NA
-  
-  # Store the result in a list
-  prop_forest100m_list[[as.character(yr)]] = prop
+  # Output = raster
+  prop_forest[[as.character(yr)]] = prop_r
 }
-plot(prop_forest100m_list[[1]])
-plot(prop_forest100m_list[[36]])
+plot(prop_forest[[1]])
+plot(prop_forest[[36]])
 
 ## Agriculture
-# Initialisation
-prop_agri100m_list = list()  # List to store rasters
+# Store rasters in a list
+prop_agri = list()
 
 # Parameters
-cl = 4  # Land use of interest
-radius = 100 # Radius in meters
+class_id = 4  # Class value
+radius_m = 100  # Radius in meters
 
-for (yr in years_lulc) {
-  cat("  Processing LULC proportion for year:", yr, "\n")
+# Loop
+for (i in seq_along(rasters_reclass)) {
+  yr = years_lulc[i]
+  r = rasters_reclass[[i]]
   
-  # Raster of a given year
-  r_year = rasters_reclass[[as.character(yr)]]
+  cat("Calculating proportion for year:", yr, "\n")
+  # Compute proportion in a given radius
+  prop_r = compute_mw_prop(r, class_id, radius_m)
   
-  # Create binary mask
-  r_bin = r_year == cl
-  
-  # Create a circular focal matrix using the radius parameter
-  w = terra::focalMat(r_bin, type = "circle", d = radius, fillNA = TRUE)
-  
-  # Count pixels in the neighborhood
-  focal_count = terra::focal(r_bin, w = w, fun = "sum", na.rm = TRUE)
-  
-  # Count valid pixels (not NAs) in the neighborhood
-  r_valid = !is.na(r_year)
-  focal_valid = terra::focal(r_valid, w = w, fun = "sum", na.rm = TRUE)
-  
-  # Compute the proportion of LULC
-  prop = focal_count / focal_valid
-  prop[is.infinite(prop) | is.na(prop)] = NA
-  
-  # Store the result in a list
-  prop_agri100m_list[[as.character(yr)]] = prop
+  # Output = raster
+  prop_agri[[as.character(yr)]] = prop_r
 }
-plot(prop_agri100m_list[[1]])
-plot(prop_agri100m_list[[36]])
+plot(prop_agri[[36]])
 
-## Urban
-# Initialisation
-prop_urban100m_list = list()  # List to store rasters
+## Built-up area
+# Store rasters in a list
+prop_urban = list()
 
 # Parameters
-cl = 6  # Land use of interest
-radius = 100 # Radius in meters
+class_id = 6  # Class value
+radius_m = 100  # Radius in meters
 
-for (yr in years_lulc) {
-  cat("  Processing LULC proportion for year:", yr, "\n")
+# Loop
+for (i in seq_along(rasters_reclass)) {
+  yr = years_lulc[i]
+  r = rasters_reclass[[i]]
   
-  # Raster of a given year
-  r_year = rasters_reclass[[as.character(yr)]]
+  cat("Calculating proportion for year:", yr, "\n")
+  # Compute proportion in a given radius
+  prop_r = compute_mw_prop(r, class_id, radius_m)
   
-  # Create binary mask
-  r_bin = r_year == cl
-  
-  # Create a circular focal matrix using the radius parameter
-  w = terra::focalMat(r_bin, type = "circle", d = radius, fillNA = TRUE)
-  
-  # Count pixels in the neighborhood
-  focal_count = terra::focal(r_bin, w = w, fun = "sum", na.rm = TRUE)
-  
-  # Count valid pixels (not NAs) in the neighborhood
-  r_valid = !is.na(r_year)
-  focal_valid = terra::focal(r_valid, w = w, fun = "sum", na.rm = TRUE)
-  
-  # Compute the proportion of LULC
-  prop = focal_count / focal_valid
-  prop[is.infinite(prop) | is.na(prop)] = NA
-  
-  # Store the result in a list
-  prop_urban100m_list[[as.character(yr)]] = prop
+  # Output = raster
+  prop_urban[[as.character(yr)]] = prop_r
 }
-plot(prop_urban100m_list[[1]])
-plot(prop_urban100m_list[[36]])
-
+plot(prop_urban[[36]])
 
 ##### North and South of BR101 -------
 br_coords = sf::st_coordinates(br101)  # x and y coordinates of BR-1010

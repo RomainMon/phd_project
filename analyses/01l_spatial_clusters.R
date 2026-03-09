@@ -14,7 +14,7 @@ library(terra)
 ### Load datasets -------------
 raster_tm_2024 = terra::rast(here("outputs", "data", "MapBiomas", "Rasters_cumulative_tm", "raster_reclass_cumul_tm_2024.tif"))
 data_car = readRDS(here("outputs", "data", "Mapbiomas", "LULCC_datasets", "data_defor_refor_car.rds"))
-plot(raster_tm_2024)
+plot(raster_tm_2024, col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e", "chartreuse", "pink"))
 
 ### Prepare dataset -------------
 defor = raster_tm_2024 == 8
@@ -24,7 +24,7 @@ refor = raster_tm_2024 == 7
 #### Compute local proportions -----
 # Grid
 bbox = st_as_sfc(st_bbox(raster_tm_2024))
-grid = st_make_grid(bbox, cellsize = 2000) %>% 
+grid = st_make_grid(bbox, cellsize = 5000) %>% 
   st_as_sf()
 st_crs(grid) = st_crs(raster_tm_2024)
 plot(defor)
@@ -75,7 +75,7 @@ legend("topright",
 #### Compute local proportions -----
 # Grid
 bbox = st_as_sfc(st_bbox(raster_tm_2024))
-grid = st_make_grid(bbox, cellsize = 2000) %>% 
+grid = st_make_grid(bbox, cellsize = 5000) %>% 
   st_as_sf()
 st_crs(grid) = st_crs(raster_tm_2024)
 plot(refor)
