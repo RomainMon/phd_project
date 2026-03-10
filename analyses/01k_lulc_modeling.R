@@ -29,8 +29,10 @@ library(broom)
 library(broom.mixed)
 
 ### Load datasets
-data_defor_pixel = readRDS(here("outputs", "data", "Mapbiomas", "LULCC_datasets", "data_defor_pixel_thinned.rds"))
-data_refor_pixel = readRDS(here("outputs", "data", "Mapbiomas", "LULCC_datasets", "data_refor_pixel_thinned.rds"))
+data_defor_pixel = readRDS(here("outputs", "data", "Mapbiomas", "LULCC_datasets", 
+                                "data_defor_pixel_thinned.rds"))
+data_refor_pixel = readRDS(here("outputs", "data", "Mapbiomas", "LULCC_datasets", 
+                                "data_refor_pixel_thinned.rds"))
 data_car = readRDS(here("outputs", "data", "Mapbiomas", "LULCC_datasets", "data_defor_refor_car.rds"))
 
 
@@ -46,8 +48,6 @@ str(data_refor_pixel)
 # Number of NAs
 sum(is.na(data_defor_pixel))
 sum(is.na(data_refor_pixel))
-na = data_car %>% 
-  dplyr::summarise(across(everything(), ~ sum(is.na(.))))
 
 ##### Number of data ------
 # Number of events
@@ -151,29 +151,6 @@ table(data_defor_pixel$type, data_defor_pixel$in_apa)
 table(data_refor_pixel$type, data_refor_pixel$in_apa)
 
 #### Quantitative variables ------
-##### Cleveland dotplot ------
-# This allows the detection of outliers
-## Deforestation dataset
-# Z = cbind(data_defor_pixel$dist_river_m, data_defor_pixel$dist_urban_m, data_defor_pixel$dist_road_m, data_defor_pixel$dist_edge_m,
-#         data_defor_pixel$area_m2_r100_class_1, data_defor_pixel$area_m2_r100_class_4, data_defor_pixel$area_m2_r100_class_6,
-#         data_defor_pixel$prec_sum, data_defor_pixel$tmin_mean, data_defor_pixel$tmax_mean, data_defor_pixel$slope_pct,
-#         data_defor_pixel$forest_age)
-# 
-# colnames(Z) = c("dist_river", "dist_urban", "dist_road", "dist_edge",
-#                  "area_forest", "area_agri", "area_urban",
-#                  "prec", "tmin", "tmax", "slope",
-#                  "forest_age")
-# 
-# dotplot(as.matrix(Z), groups = FALSE,
-#         strip = strip.custom(bg = 'white',
-#                              par.strip.text = list(cex = 0.8)),
-#         scales = list(x = list(relation = "free"),
-#                       y = list(relation = "free"),
-#                       draw = FALSE),
-#         col = 1, cex  = 0.5, pch = 16,
-#         xlab = "Value of the variable",
-#         ylab = "Order of the data from text file")
-
 ##### Distances -----
 data_defor_pixel %>% 
   dplyr::group_by(type) %>% 
@@ -1316,7 +1293,7 @@ ggplot(coef_refor, aes(x = estimate, y = reorder(term, estimate))) +
   geom_errorbarh(aes(xmin = conf.low, xmax = conf.high), width = 0.2) +
   geom_vline(xintercept = 0, linetype = "dashed") +
   theme_classic() +
-  labs(x = "Standardized log-odds effect on deforestation probability",
+  labs(x = "Standardized log-odds effect on reforestation probability",
        y = NULL)
 
 # Compute odds ratios (OR)
@@ -1332,3 +1309,47 @@ ggplot(coef_refor, aes(x = OR, y = reorder(term, OR))) +
   theme_classic() +
   labs(x = "Standardized odds ratio on reforestation probability",
        y = NULL)
+
+### Property-scale analysis -------------
+
+# Data structure
+str(data_car)
+
+##### NAs --------
+# Number of NAs
+sum(is.na(data_car))
+na = data_car %>% 
+  dplyr::summarise(across(everything(), ~ sum(is.na(.))))
+data_car = na.omit(data_car)
+
+##### Number of data ------
+cat("Number of properties:", length(data_car$car_id), "\n")
+
+##### Summary ------
+### Cleveland plot
+# This allows the detection of outliers
+
+Z = cbind(data_car$car_area_ha, 
+          data_car$area_deforest_ha,
+          data_car$area_reforest_ha,
+          data_car$prop_deforest,
+          data_car$prop_reforest,
+          data_car$area_forest_1989_ha,
+          data_car$area_forest_2024_ha,
+          data_car$area_agri_1989_ha,
+          data_car$area_agri_2024_ha,
+          data_car$area_urb_1989_ha,
+          data_car$area_urb_2024_ha)
+
+colnames(Z) = c("...",
+                "...")
+
+dotplot(as.matrix(Z), groups = FALSE,
+        strip = strip.custom(bg = 'white',
+                             par.strip.text = list(cex = 0.8)),
+        scales = list(x = list(relation = "free"),
+                      y = list(relation = "free"),
+                      draw = FALSE),
+        col = 1, cex  = 0.5, pch = 16,
+        xlab = "Value of the variable",
+        ylab = "Order of the data from text file")

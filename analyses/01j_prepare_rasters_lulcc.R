@@ -1416,6 +1416,7 @@ tm_refor[tm_refor != 7] = NA
 plot(tm_refor, col="chartreuse")
 
 ## Extract values for each CAR property
+# "Count" = the sum of fractions of raster cells with non-NA values covered by the polygon (exactextractr)
 car_sf_filtered$defor_pixels = exact_extract(tm_defor, car_sf_filtered, 'count')
 car_sf_filtered$refor_pixels = exact_extract(tm_refor, car_sf_filtered, 'count')
 
@@ -1423,8 +1424,9 @@ car_sf_filtered$refor_pixels = exact_extract(tm_refor, car_sf_filtered, 'count')
 car_sf_filtered = car_sf_filtered %>%
   dplyr::mutate(area_deforest_ha = round(defor_pixels * px_area_ha, 2),
                 area_reforest_ha = round(refor_pixels * px_area_ha, 2),
-                prop_deforest = round(area_deforest_ha * 100 / car_area_ha, 2),
-                prop_reforest = round(area_reforest_ha * 100 / car_area_ha, 2))
+                prop_deforest = ifelse(area_deforest_ha > 0, area_deforest_ha / car_area_ha, 0),
+                prop_reforest = ifelse(area_reforest_ha > 0, area_reforest_ha / car_area_ha, 0)) %>% 
+  dplyr::select(-c(defor_pixels, refor_pixels))
 
 ## Quick statistics
 cor(car_sf_filtered$car_area_ha, car_sf_filtered$area_deforest_ha)
@@ -1463,124 +1465,337 @@ car_sf_filtered$agri_pixels_2024 = exact_extract(lu2024_4, car_sf_filtered, 'cou
 car_sf_filtered$urb_pixels_1989 = exact_extract(lu1989_6, car_sf_filtered, 'count')
 car_sf_filtered$urb_pixels_2024 = exact_extract(lu2024_6, car_sf_filtered, 'count')
 
-## Surface, proportions, evolutions
-# Surface and proportions
+## Surface
 car_sf_filtered = car_sf_filtered %>%
-  dplyr::mutate(area_forest_1989_ha = round(forest_pixels_1989 * px_area_ha, 2),
+  dplyr::mutate(# Area
+                area_forest_1989_ha = round(forest_pixels_1989 * px_area_ha, 2),
                 area_forest_2024_ha = round(forest_pixels_2024 * px_area_ha, 2),
-                prop_forest_1989 = round(area_forest_1989_ha * 100 / car_area_ha, 2),
-                prop_forest_2024 = round(area_forest_2024_ha * 100 / car_area_ha, 2),
                 area_agri_1989_ha = round(agri_pixels_1989 * px_area_ha, 2),
                 area_agri_2024_ha = round(agri_pixels_2024 * px_area_ha, 2),
-                prop_agri_1989 = round(area_agri_1989_ha * 100 / car_area_ha, 2),
-                prop_agri_2024 = round(area_agri_2024_ha * 100 / car_area_ha, 2),
                 area_urb_1989_ha = round(urb_pixels_1989 * px_area_ha, 2),
                 area_urb_2024_ha = round(urb_pixels_2024 * px_area_ha, 2),
-                prop_urb_1989 = round(area_urb_1989_ha * 100 / car_area_ha, 2),
-                prop_urb_2024 = round(area_urb_2024_ha * 100 / car_area_ha, 2))
-
-# Compute the evolution
-car_sf_filtered = car_sf_filtered %>%
-  dplyr::mutate(
-    forest_evol_pct = dplyr::if_else(prop_forest_1989 > 0,
-                                     round(100 * (prop_forest_2024 - prop_forest_1989) / prop_forest_1989, 2),
-                                     NA_real_),
-    agri_evol_pct = dplyr::if_else(prop_agri_1989 > 0,
-                                   round(100 * (prop_agri_2024 - prop_agri_1989) / prop_agri_1989, 2),
-                                   NA_real_),
-    urb_evol_pct = dplyr::if_else(prop_urb_1989 > 0,
-                                   round(100 * (prop_urb_2024 - prop_urb_1989) / prop_urb_1989, 2),
-                                   NA_real_))
+                # Proportions
+                prop_forest_1989 = area_forest_1989_ha / car_area_ha,
+                prop_forest_2024 = area_forest_2024_ha / car_area_ha,
+                prop_agri_1989 = area_agri_1989_ha / car_area_ha,
+                prop_agri_2024 = area_agri_2024_ha / car_area_ha,
+                prop_urb_1989 = area_urb_1989_ha / car_area_ha,
+                prop_urb_2024 = area_urb_2024_ha / car_area_ha,
+                # Evolution
+                evol_forest_pct = ifelse(area_forest_1989_ha > 0,
+                                         100 * (area_forest_2024_ha - area_forest_1989_ha) / area_forest_1989_ha,
+                                         0),
+                evol_agri_pct = ifelse(area_agri_1989_ha > 0,
+                                       100 * (area_agri_2024_ha - area_agri_1989_ha) / area_agri_1989_ha,
+                                       0),
+                evol_urb_pct = ifelse(area_urb_1989_ha > 0,
+                                      100 * (area_urb_2024_ha - area_urb_1989_ha) / area_urb_1989_ha,
+                                      0))
 
 #### 4. Land use AROUND properties --------
 # We create buffers around properties
 # We extract the values in the buffers
 # The number of pixels outside properties equals: total pixels - pixels inside
 
+##### 100 m ---------
 ## Create buffers
-# At 500 m
-car_buffer = sf::st_buffer(car_sf_filtered, 500) # in meters
-plot(car_buffer$geometry)
+car_buffer = sf::st_buffer(car_sf_filtered, 100) # in meters
+car_buffer = crop(vect(car_buffer), template_rast) # Crop to raster extent
+car_buffer = sf::st_as_sf(car_buffer)
+plot(template_rast, col = "lightgray")
+plot(st_geometry(car_buffer), add = TRUE, border = "red")
 
 ## Extract LULC in buffers (TOTAL: inside + outside properties)
 # Forest
-car_sf_filtered$forest_buf_tot_1989 = exact_extract(lu1989_1, car_buffer, 'count')
-car_sf_filtered$forest_buf_tot_2024 = exact_extract(lu2024_1, car_buffer, 'count')
+car_sf_filtered$forest_buf100_tot_1989 = exact_extract(lu1989_1, car_buffer, 'count')
+car_sf_filtered$forest_buf100_tot_2024 = exact_extract(lu2024_1, car_buffer, 'count')
 
 # Agriculture
-car_sf_filtered$agri_buf_tot_1989 = exact_extract(lu1989_4, car_buffer, 'count')
-car_sf_filtered$agri_buf_tot_2024 = exact_extract(lu2024_4, car_buffer, 'count')
+car_sf_filtered$agri_buf100_tot_1989 = exact_extract(lu1989_4, car_buffer, 'count')
+car_sf_filtered$agri_buf100_tot_2024 = exact_extract(lu2024_4, car_buffer, 'count')
 
 # Urban
-car_sf_filtered$urb_buf_tot_1989 = exact_extract(lu1989_6, car_buffer, 'count')
-car_sf_filtered$urb_buf_tot_2024 = exact_extract(lu2024_6, car_buffer, 'count')
+car_sf_filtered$urb_buf100_tot_1989 = exact_extract(lu1989_6, car_buffer, 'count')
+car_sf_filtered$urb_buf100_tot_2024 = exact_extract(lu2024_6, car_buffer, 'count')
 
 ## Pixels AROUND properties = buffer total − pixels ON properties
 car_sf_filtered = car_sf_filtered %>%
   dplyr::mutate(
-    forest_buf_pix_1989 = forest_buf_tot_1989 - forest_pixels_1989,
-    forest_buf_pix_2024 = forest_buf_tot_2024 - forest_pixels_2024,
-    
-    agri_buf_pix_1989 = agri_buf_tot_1989 - agri_pixels_1989,
-    agri_buf_pix_2024 = agri_buf_tot_2024 - agri_pixels_2024,
-    
-    urb_buf_pix_1989 = urb_buf_tot_1989 - urb_pixels_1989,
-    urb_buf_pix_2024 = urb_buf_tot_2024 - urb_pixels_2024) %>% 
-  dplyr::select(-c(forest_buf_tot_1989, agri_buf_tot_1989, urb_buf_tot_1989))
+    forest_buf100_pix_1989 = forest_buf100_tot_1989 - forest_pixels_1989,
+    forest_buf100_pix_2024 = forest_buf100_tot_2024 - forest_pixels_2024,
+    agri_buf100_pix_1989 = agri_buf100_tot_1989 - agri_pixels_1989,
+    agri_buf100_pix_2024 = agri_buf100_tot_2024 - agri_pixels_2024,
+    urb_buf100_pix_1989 = urb_buf100_tot_1989 - urb_pixels_1989,
+    urb_buf100_pix_2024 = urb_buf100_tot_2024 - urb_pixels_2024)
 
-## Buffer area
-# Total valid pixels in buffer
-car_sf_filtered$buffer_pixels_tot =
-  exact_extract(!is.na(rasters_reclass[[1]]), car_buffer, 'count')
-# Pixels inside property
-car_sf_filtered$property_pixels =
-  exact_extract(!is.na(rasters_reclass[[1]]), car_sf_filtered, 'count')
-# Pixels AROUND property
-car_sf_filtered$buffer_pixels_ring =
-  car_sf_filtered$buffer_pixels_tot - car_sf_filtered$property_pixels
-# Area in ha
-car_sf_filtered$buffer_area_ha =
-  car_sf_filtered$buffer_pixels_ring * px_area_ha
-
-## Surface areas and proportions
+## Surface areas
 car_sf_filtered = car_sf_filtered %>%
   dplyr::mutate(
-    area_forest_buf_1989_ha = round(forest_buf_pix_1989 * px_area_ha, 2),
-    area_forest_buf_2024_ha = round(forest_buf_pix_2024 * px_area_ha, 2),
-    prop_forest_buf_1989 = round(area_forest_buf_1989_ha * 100 / buffer_area_ha, 2),
-    prop_forest_buf_2024 = round(area_forest_buf_2024_ha * 100 / buffer_area_ha, 2),
-    
-    area_agri_buf_1989_ha = round(agri_buf_pix_1989 * px_area_ha, 2),
-    area_agri_buf_2024_ha = round(agri_buf_pix_2024 * px_area_ha, 2),
-    prop_agri_buf_1989 = round(area_agri_buf_1989_ha * 100 / buffer_area_ha, 2),
-    prop_agri_buf_2024 = round(area_agri_buf_2024_ha * 100 / buffer_area_ha, 2),
-    
-    area_urb_buf_1989_ha = round(urb_buf_pix_1989 * px_area_ha, 2),
-    area_urb_buf_2024_ha = round(urb_buf_pix_2024 * px_area_ha, 2),
-    prop_urb_buf_1989 = round(area_urb_buf_1989_ha * 100 / buffer_area_ha, 2),
-    prop_urb_buf_2024 = round(area_urb_buf_2024_ha * 100 / buffer_area_ha, 2)
+    # Area
+    area_forest_buf100_1989_ha = round(forest_buf100_pix_1989 * px_area_ha, 2),
+    area_forest_buf100_2024_ha = round(forest_buf100_pix_2024 * px_area_ha, 2),
+    area_agri_buf100_1989_ha = round(agri_buf100_pix_1989 * px_area_ha, 2),
+    area_agri_buf100_2024_ha = round(agri_buf100_pix_2024 * px_area_ha, 2),
+    area_urb_buf100_1989_ha = round(urb_buf100_pix_1989 * px_area_ha, 2),
+    area_urb_buf100_2024_ha = round(urb_buf100_pix_2024 * px_area_ha, 2),
   )
 
-## Evolution
+## Proportions
+# Area of the buffer ring
 car_sf_filtered = car_sf_filtered %>%
   dplyr::mutate(
-    forest_buf_evol_pct = if_else(
-      prop_forest_buf_1989 > 0,
-      round(100 * (prop_forest_buf_2024 - prop_forest_buf_1989) / prop_forest_buf_1989, 2),
-      NA_real_
-    ),
-    agri_buf_evol_pct = if_else(
-      prop_agri_buf_1989 > 0,
-      round(100 * (prop_agri_buf_2024 - prop_agri_buf_1989) / prop_agri_buf_1989, 2),
-      NA_real_
-    ),
-    urb_buf_evol_pct = if_else(
-      prop_urb_buf_1989 > 0,
-      round(100 * (prop_urb_buf_2024 - prop_urb_buf_1989) / prop_urb_buf_1989, 2),
-      NA_real_
-    )
+    area_buf100_ring_ha = as.numeric(sf::st_area(car_buffer) / 10000) - car_area_ha
+  )
+# Proportions and evolution
+car_sf_filtered = car_sf_filtered %>%
+  dplyr::mutate(
+    
+    # proportions in the surrounding landscape
+    prop_forest_buf100_1989 = area_forest_buf100_1989_ha / area_buf100_ring_ha,
+    prop_forest_buf100_2024 = area_forest_buf100_2024_ha / area_buf100_ring_ha,
+    
+    prop_agri_buf100_1989 = area_agri_buf100_1989_ha / area_buf100_ring_ha,
+    prop_agri_buf100_2024 = area_agri_buf100_2024_ha / area_buf100_ring_ha,
+    
+    prop_urb_buf100_1989 = area_urb_buf100_1989_ha / area_buf100_ring_ha,
+    prop_urb_buf100_2024 = area_urb_buf100_2024_ha / area_buf100_ring_ha,
+    
+    # percentage change
+    evol_forest_buf100_pct =
+      ifelse(area_forest_buf100_1989_ha > 0,
+             100 * (area_forest_buf100_2024_ha - area_forest_buf100_1989_ha) /
+               area_forest_buf100_1989_ha,
+             0),
+    
+    evol_agri_buf100_pct =
+      ifelse(area_agri_buf100_1989_ha > 0,
+             100 * (area_agri_buf100_2024_ha - area_agri_buf100_1989_ha) /
+               area_agri_buf100_1989_ha,
+             0),
+    
+    evol_urb_buf100_pct =
+      ifelse(area_urb_buf100_1989_ha > 0,
+             100 * (area_urb_buf100_2024_ha - area_urb_buf100_1989_ha) /
+               area_urb_buf100_1989_ha,
+             0)
   )
 
+##### 500 m ---------
+## Create buffers
+car_buffer = sf::st_buffer(car_sf_filtered, 500) # in meters
+car_buffer = crop(vect(car_buffer), template_rast) # Crop to raster extent
+car_buffer = sf::st_as_sf(car_buffer)
+plot(template_rast, col = "lightgray")
+plot(st_geometry(car_buffer), add = TRUE, border = "red")
+
+## Extract LULC in buffers (TOTAL: inside + outside properties)
+# Forest
+car_sf_filtered$forest_buf500_tot_1989 = exact_extract(lu1989_1, car_buffer, 'count')
+car_sf_filtered$forest_buf500_tot_2024 = exact_extract(lu2024_1, car_buffer, 'count')
+
+# Agriculture
+car_sf_filtered$agri_buf500_tot_1989 = exact_extract(lu1989_4, car_buffer, 'count')
+car_sf_filtered$agri_buf500_tot_2024 = exact_extract(lu2024_4, car_buffer, 'count')
+
+# Urban
+car_sf_filtered$urb_buf500_tot_1989 = exact_extract(lu1989_6, car_buffer, 'count')
+car_sf_filtered$urb_buf500_tot_2024 = exact_extract(lu2024_6, car_buffer, 'count')
+
+## Pixels AROUND properties = buffer total − pixels ON properties
+car_sf_filtered = car_sf_filtered %>%
+  dplyr::mutate(
+    forest_buf500_pix_1989 = forest_buf500_tot_1989 - forest_pixels_1989,
+    forest_buf500_pix_2024 = forest_buf500_tot_2024 - forest_pixels_2024,
+    agri_buf500_pix_1989 = agri_buf500_tot_1989 - agri_pixels_1989,
+    agri_buf500_pix_2024 = agri_buf500_tot_2024 - agri_pixels_2024,
+    urb_buf500_pix_1989 = urb_buf500_tot_1989 - urb_pixels_1989,
+    urb_buf500_pix_2024 = urb_buf500_tot_2024 - urb_pixels_2024)
+
+## Surface areas
+car_sf_filtered = car_sf_filtered %>%
+  dplyr::mutate(
+    area_forest_buf500_1989_ha = round(forest_buf500_pix_1989 * px_area_ha, 2),
+    area_forest_buf500_2024_ha = round(forest_buf500_pix_2024 * px_area_ha, 2),
+    area_agri_buf500_1989_ha = round(agri_buf500_pix_1989 * px_area_ha, 2),
+    area_agri_buf500_2024_ha = round(agri_buf500_pix_2024 * px_area_ha, 2),
+    area_urb_buf500_1989_ha = round(urb_buf500_pix_1989 * px_area_ha, 2),
+    area_urb_buf500_2024_ha = round(urb_buf500_pix_2024 * px_area_ha, 2)
+  )
+
+## Proportions
+# Area of the buffer ring
+car_sf_filtered = car_sf_filtered %>%
+  dplyr::mutate(
+    area_buf500_ring_ha = as.numeric(sf::st_area(car_buffer) / 10000) - car_area_ha
+  )
+# Proportions and evolution
+car_sf_filtered = car_sf_filtered %>%
+  dplyr::mutate(
+    
+    # proportions in the surrounding landscape
+    prop_forest_buf500_1989 = area_forest_buf500_1989_ha / area_buf500_ring_ha,
+    prop_forest_buf500_2024 = area_forest_buf500_2024_ha / area_buf500_ring_ha,
+    
+    prop_agri_buf500_1989 = area_agri_buf500_1989_ha / area_buf500_ring_ha,
+    prop_agri_buf500_2024 = area_agri_buf500_2024_ha / area_buf500_ring_ha,
+    
+    prop_urb_buf500_1989 = area_urb_buf500_1989_ha / area_buf500_ring_ha,
+    prop_urb_buf500_2024 = area_urb_buf500_2024_ha / area_buf500_ring_ha,
+    
+    # percentage change
+    evol_forest_buf500_pct =
+      ifelse(area_forest_buf500_1989_ha > 0,
+             100 * (area_forest_buf500_2024_ha - area_forest_buf500_1989_ha) /
+               area_forest_buf500_1989_ha,
+             0),
+    
+    evol_agri_buf500_pct =
+      ifelse(area_agri_buf500_1989_ha > 0,
+             100 * (area_agri_buf500_2024_ha - area_agri_buf500_1989_ha) /
+               area_agri_buf500_1989_ha,
+             0),
+    
+    evol_urb_buf500_pct =
+      ifelse(area_urb_buf500_1989_ha > 0,
+             100 * (area_urb_buf500_2024_ha - area_urb_buf500_1989_ha) /
+               area_urb_buf500_1989_ha,
+             0)
+  )
+
+##### 1000 m ---------
+## Create buffers
+car_buffer = sf::st_buffer(car_sf_filtered, 1000) # in meters
+car_buffer = crop(vect(car_buffer), template_rast) # Crop to raster extent
+car_buffer = sf::st_as_sf(car_buffer)
+plot(template_rast, col = "lightgray")
+plot(st_geometry(car_buffer), add = TRUE, border = "red")
+
+## Extract LULC in buffers (TOTAL: inside + outside properties)
+# Forest
+car_sf_filtered$forest_buf1000_tot_1989 = exact_extract(lu1989_1, car_buffer, 'count')
+car_sf_filtered$forest_buf1000_tot_2024 = exact_extract(lu2024_1, car_buffer, 'count')
+
+# Agriculture
+car_sf_filtered$agri_buf1000_tot_1989 = exact_extract(lu1989_4, car_buffer, 'count')
+car_sf_filtered$agri_buf1000_tot_2024 = exact_extract(lu2024_4, car_buffer, 'count')
+
+# Urban
+car_sf_filtered$urb_buf1000_tot_1989 = exact_extract(lu1989_6, car_buffer, 'count')
+car_sf_filtered$urb_buf1000_tot_2024 = exact_extract(lu2024_6, car_buffer, 'count')
+
+## Pixels AROUND properties = buffer total − pixels ON properties
+car_sf_filtered = car_sf_filtered %>%
+  dplyr::mutate(
+    forest_buf1000_pix_1989 = forest_buf1000_tot_1989 - forest_pixels_1989,
+    forest_buf1000_pix_2024 = forest_buf1000_tot_2024 - forest_pixels_2024,
+    agri_buf1000_pix_1989 = agri_buf1000_tot_1989 - agri_pixels_1989,
+    agri_buf1000_pix_2024 = agri_buf1000_tot_2024 - agri_pixels_2024,
+    urb_buf1000_pix_1989 = urb_buf1000_tot_1989 - urb_pixels_1989,
+    urb_buf1000_pix_2024 = urb_buf1000_tot_2024 - urb_pixels_2024)
+
+## Surface areas
+car_sf_filtered = car_sf_filtered %>%
+  dplyr::mutate(
+    area_forest_buf1000_1989_ha = round(forest_buf1000_pix_1989 * px_area_ha, 2),
+    area_forest_buf1000_2024_ha = round(forest_buf1000_pix_2024 * px_area_ha, 2),
+    area_agri_buf1000_1989_ha = round(agri_buf1000_pix_1989 * px_area_ha, 2),
+    area_agri_buf1000_2024_ha = round(agri_buf1000_pix_2024 * px_area_ha, 2),
+    area_urb_buf1000_1989_ha = round(urb_buf1000_pix_1989 * px_area_ha, 2),
+    area_urb_buf1000_2024_ha = round(urb_buf1000_pix_2024 * px_area_ha, 2)
+  )
+
+## Proportions
+# Area of the buffer ring
+car_sf_filtered = car_sf_filtered %>%
+  dplyr::mutate(
+    area_buf1000_ring_ha = as.numeric(sf::st_area(car_buffer) / 10000) - car_area_ha
+  )
+# Proportions and evolution
+car_sf_filtered = car_sf_filtered %>%
+  dplyr::mutate(
+    
+    # proportions in the surrounding landscape
+    prop_forest_buf1000_1989 = area_forest_buf1000_1989_ha / area_buf1000_ring_ha,
+    prop_forest_buf1000_2024 = area_forest_buf1000_2024_ha / area_buf1000_ring_ha,
+    
+    prop_agri_buf1000_1989 = area_agri_buf1000_1989_ha / area_buf1000_ring_ha,
+    prop_agri_buf1000_2024 = area_agri_buf1000_2024_ha / area_buf1000_ring_ha,
+    
+    prop_urb_buf1000_1989 = area_urb_buf1000_1989_ha / area_buf1000_ring_ha,
+    prop_urb_buf1000_2024 = area_urb_buf1000_2024_ha / area_buf1000_ring_ha,
+    
+    # percentage change
+    evol_forest_buf1000_pct =
+      ifelse(area_forest_buf1000_1989_ha > 0,
+             100 * (area_forest_buf1000_2024_ha - area_forest_buf1000_1989_ha) /
+               area_forest_buf1000_1989_ha,
+             0),
+    
+    evol_agri_buf1000_pct =
+      ifelse(area_agri_buf1000_1989_ha > 0,
+             100 * (area_agri_buf1000_2024_ha - area_agri_buf1000_1989_ha) /
+               area_agri_buf1000_1989_ha,
+             0),
+    
+    evol_urb_buf1000_pct =
+      ifelse(area_urb_buf1000_1989_ha > 0,
+             100 * (area_urb_buf1000_2024_ha - area_urb_buf1000_1989_ha) /
+               area_urb_buf1000_1989_ha,
+             0)
+  )
+
+### Remove unnecessary variables
+colnames(car_sf_filtered)
+car_sf_filtered = car_sf_filtered %>% 
+  dplyr::select(-c(forest_pixels_1989,
+                   forest_pixels_2024,
+                   agri_pixels_1989,
+                   agri_pixels_2024,
+                   urb_pixels_1989,
+                   urb_pixels_2024,
+                   
+                   area_buf100_ring_ha,
+                   area_buf500_ring_ha,
+                   area_buf1000_ring_ha,
+                   
+                   forest_buf100_tot_1989,
+                   forest_buf100_tot_2024,
+                   agri_buf100_tot_1989,
+                   agri_buf100_tot_2024,
+                   urb_buf100_tot_1989,
+                   urb_buf100_tot_2024,
+                   forest_buf100_pix_1989,
+                   forest_buf100_pix_2024,
+                   agri_buf100_pix_1989,
+                   agri_buf100_pix_2024,
+                   urb_buf100_pix_1989,
+                   urb_buf100_pix_2024,
+                   
+                   forest_buf500_tot_1989,
+                   forest_buf500_tot_2024,
+                   agri_buf500_tot_1989,
+                   agri_buf500_tot_2024,
+                   urb_buf500_tot_1989,
+                   urb_buf500_tot_2024,
+                   forest_buf500_pix_1989,
+                   forest_buf500_pix_2024,
+                   agri_buf500_pix_1989,
+                   agri_buf500_pix_2024,
+                   urb_buf500_pix_1989,
+                   urb_buf500_pix_2024,
+                   
+                   forest_buf1000_tot_1989,
+                   forest_buf1000_tot_2024,
+                   agri_buf1000_tot_1989,
+                   agri_buf1000_tot_2024,
+                   urb_buf1000_tot_1989,
+                   urb_buf1000_tot_2024,
+                   forest_buf1000_pix_1989,
+                   forest_buf1000_pix_2024,
+                   agri_buf1000_pix_1989,
+                   agri_buf1000_pix_2024,
+                   urb_buf1000_pix_1989,
+                   urb_buf1000_pix_2024))
 
 #### 5. Distances --------
 
@@ -1591,32 +1806,25 @@ car_centroids_sf = car_sf_filtered %>%
 
 ### 1. Distance to urban centers
 nearest_id = sf::st_nearest_feature(car_centroids_sf, urb_centers_sf)
-
 dist_m =
   sf::st_distance(car_centroids_sf, urb_centers_sf[nearest_id, ],
                   by_element = TRUE)
-
 car_sf_filtered$dist_to_urban_m = as.numeric(dist_m)
-
 
 
 ### 2. Distance to ROADS
 nearest_id = sf::st_nearest_feature(car_centroids_sf, roads_sf)
-
 dist_m =
   sf::st_distance(car_centroids_sf, roads_sf[nearest_id, ],
                   by_element = TRUE)
-
 car_sf_filtered$dist_to_road_m = as.numeric(dist_m)
 
 
 ### 3. Distance to RIVERS
 nearest_id = sf::st_nearest_feature(car_centroids_sf, rivers_sf)
-
 dist_m =
   sf::st_distance(car_centroids_sf, rivers_sf[nearest_id, ],
                   by_element = TRUE)
-
 car_sf_filtered$dist_to_river_m = as.numeric(dist_m)
 
 # Quick correlations
@@ -1676,24 +1884,29 @@ car_sf_filtered$rppn_cover = exact_extract(rppn_r, car_sf_filtered, 'count')
 # 4. RL
 car_sf_filtered$rl_cover = exact_extract(rl_r, car_sf_filtered, 'count')
 
-## Proportions
+## Surface
 car_sf_filtered = car_sf_filtered %>% 
   dplyr::mutate(apa_cover_ha = round(apa_cover * px_area_ha, 2),
                 pub_res_cover_ha = round(pub_res_cover * px_area_ha, 2),
                 rppn_cover_ha = round(rppn_cover * px_area_ha, 2),
                 rl_cover_ha = round(rl_cover * px_area_ha, 2),
-                apa_cover_prop = round(apa_cover_ha * 100 / car_area_ha, 2),
-                pub_res_cover_prop = round(pub_res_cover_ha * 100 / car_area_ha, 2),
-                rppn_cover_prop = round(rppn_cover_ha * 100 / car_area_ha, 2),
-                rl_cover_prop = round(rl_cover_ha * 100 / car_area_ha, 2))
+                
+                prop_apa_cover = ifelse(apa_cover_ha > 0, apa_cover_ha / car_area_ha, 0),
+                prop_pub_res_cover = ifelse(pub_res_cover_ha > 0, pub_res_cover_ha / car_area_ha, 0),
+                prop_rppn_cover = ifelse(rppn_cover_ha > 0, rppn_cover_ha / car_area_ha, 0),
+                prop_rl_cover = ifelse(rl_cover_ha > 0, rl_cover_ha / car_area_ha, 0))
 
-#### 8. Slope, altitude and climatic variables --------
+## Remove variables
+car_sf_filtered = car_sf_filtered %>% 
+  dplyr::select(-c(apa_cover, pub_res_cover, rppn_cover, rl_cover))
+
+#### 8. Slope, elevation and climatic variables --------
 # Slope
 car_sf_filtered$slope_mean = exact_extract(slope_r, car_sf_filtered, 'mean')
 car_sf_filtered$slope_sd = exact_extract(slope_r, car_sf_filtered, 'stdev')
 car_sf_filtered$slope_cv = exact_extract(slope_r, car_sf_filtered, 'coefficient_of_variation')
 
-# Altitude
+# Elevation
 car_sf_filtered$alt_mean = exact_extract(topo_r, car_sf_filtered, 'mean')
 car_sf_filtered$alt_sd = exact_extract(topo_r, car_sf_filtered, 'stdev')
 car_sf_filtered$alt_cv = exact_extract(topo_r, car_sf_filtered, 'coefficient_of_variation')
@@ -1713,28 +1926,8 @@ car_sf_filtered$tmax_2024_mean = exact_extract(rasters_cumul_tmax_mean[[36]], ca
 car_sf_filtered$tmax_2024_sd = exact_extract(rasters_cumul_tmax_mean[[36]], car_sf_filtered, 'stdev')
 car_sf_filtered$tmax_2024_cv = exact_extract(rasters_cumul_tmax_mean[[36]], car_sf_filtered, 'coefficient_of_variation')
 
-#### 9. Forest age --------
-## Rasters
-for_age_2000 = rasters_forest_age[[12]]
-for_age_2000[for_age_2000 == 0] = NA
-plot(for_age_2000)
-for_age_2010 = rasters_forest_age[[22]]
-for_age_2010[for_age_2010 == 0] = NA
-plot(for_age_2010)
-for_age_2020 = rasters_forest_age[[32]]
-for_age_2020[for_age_2020 == 0] = NA
-plot(for_age_2020)
-for_age_2024 = rasters_forest_age[[36]]
-for_age_2024[for_age_2024 == 0] = NA
-plot(for_age_2024)
 
-## Compute forest age
-car_sf_filtered$for_age_mean_2000 = exact_extract(for_age_2000, car_sf_filtered, 'mean')
-car_sf_filtered$for_age_mean_2010 = exact_extract(for_age_2010, car_sf_filtered, 'mean')
-car_sf_filtered$for_age_mean_2020 = exact_extract(for_age_2020, car_sf_filtered, 'mean')
-car_sf_filtered$for_age_mean_2024 = exact_extract(for_age_2024, car_sf_filtered, 'mean')
-
-#### 10. North and South of BR-101 ----------
+#### 9 North and South of BR-101 ----------
 # Sample regular points along BR-101
 br101_sp = as_Spatial(br101)
 pts_br101 = sp::spsample(br101_sp, n = 1000, type = "regular")
@@ -1780,7 +1973,9 @@ plot(st_geometry(car_sf_filtered[car_sf_filtered$ns_br101 == "North", ]),
 plot(st_geometry(car_sf_filtered[car_sf_filtered$ns_br101 == "South", ]),
      col = "red", pch = 16, add = TRUE)
 
-
 #### Export datasets ----------
 saveRDS(car_sf_filtered,
         here("outputs", "data", "Mapbiomas", "LULCC_datasets", "data_defor_refor_car.rds"))
+sf::write_sf(
+  car_sf_filtered,
+  here("outputs", "data", "Mapbiomas", "LULCC_datasets", "data_defor_refor_car.gpkg"))
