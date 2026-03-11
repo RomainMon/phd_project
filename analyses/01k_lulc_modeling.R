@@ -27,6 +27,8 @@ library(rsq)
 library(MASS)
 library(broom)
 library(broom.mixed)
+library(outliers) 
+
 
 ### Load datasets
 data_defor_pixel = readRDS(here("outputs", "data", "Mapbiomas", "LULCC_datasets", 
@@ -515,137 +517,6 @@ data_refor_pixel = data_refor_pixel %>%
 # Quick checks
 prop.table(table(data_defor_pixel$type))
 prop.table(table(data_refor_pixel$type))
-
-
-#### Random Forest --------
-
-##### With VSURF ---------
-###### Example ---------
-# The following code is from Genuer et al. 2015, The R Journal
-
-data("toys")
-set.seed(3101318)
-
-### Wrapping function
-toys.vsurf <- VSURF(x = toys$x, y = toys$y, mtry = 100)
-names(toys.vsurf)
-summary(toys.vsurf)
-
-#### In details...
-### Step 1: Preliminary elimination and ranking
-## Variable ranking
-
-plot(toys.vsurf)
-par(mfrow=c(1,1))
-plot(toys.vsurf, step = "thres", imp.mean = FALSE, ylim = c(0, 2e-4)) # Zoom of the top right graph
-# The result of variable ranking is drawn on the top left graph. True variables are significantly more important than the noisy ones.
-# Starting from this order, the plot of the corresponding standard deviations of VI is used to estimate a threshold value for VI. This threshold (figured by the dotted horizontal red line on the top right graph of Figure 1) is set to the minimum prediction value given by a CART model fitting this curve (see the green piece-wise constant function on the same graph). Then only the variables with an averaged VI exceeding this level (i.e. above the horizontal red line in the top left graph) are retained.
-
-## Variable elimination
-# The computation of the 50 forests, the ranking and elimination steps are obtained with the VSURF_thres function
-toys.thres <- VSURF_thres(toys$x, toys$y, mtry = 100)
-# The main outputs are: varselect.thres which contains the indices of variables selected by this step, imp.mean.dec and imp.sd.dec which hold the VI mean and standard deviation (the order according to decreasing VI mean can be found in imp.mean.dec.ind).
-toys.thres$varselect.thres
-
-### Step 2: Variable selection
-## Variable selection procedure for interpretation
-toys.interp <- VSURF_interp(toys$x, toys$y, vars = toys.thres$varselect.thres) # varselect.interp: the variables selected by this step, and err.interp: OOB error rates of RF nested models
-toys.interp$varselect.interp # in the bottom left graph, we see that the error decreases quickly. It reaches its (almost) minimum when the first four true variables are included in the model (see the vertical red line) and then it remains nearly constant
-
-## Variable selection procedure for prediction
-toys.pred <- VSURF_pred(toys$x, toys$y, err.interp = toys.interp$err.interp, varselect.interp = toys.interp$varselect.interp)
-# main outputs of the VSURF_pred function are the variables selected by this final step, varselect.pred, and the OOB error rates of RF models, err.pred.
-toys.pred$varselect.pred # For the toys data, the final model for prediction purpose involves only variables V3, V6, V5
-
-
-### Other example on a data frame (ozone data set)
-data("Ozone", package = "mlbench")
-vozone <- VSURF(V4 ~ ., data = Ozone, na.action = na.omit) # V4 is the dependent variable
-summary(vozone)
-plot(vozone, step = "thres", imp.sd = FALSE, var.names = TRUE) # variable importance associated with each of the explanatory variables.
-# three very sensible groups of variables can be discerned ranging from the most to the least important
-number <- c(1:3, 5:13) # reorder the output variables of the procedure
-# To know which index is which variable, refer to the Ozone dataset: variable index "1" is the first column (V1, the month)
-number[vozone$varselect.thres] # the 3 variables of negative importance (variables 6, 3 and 2) are eliminated (not in the list)
-number[vozone$varselect.interp] # the interpretation procedure leads to select the model with 5 variables, which contains all of the most important variables
-number[vozone$varselect.pred] # the prediction step does not remove any additional variable.
-
-###### On my dataset ---------
-
-### Deforestation
-subset = data_defor_70pct %>% 
-  dplyr::select(c(type, legal_status, ns_br101,
-                in_car, in_pub_res, in_rppn, in_rl, in_apa,
-                prop_r100_class_4, prop_r100_class_6,
-                dist_river_log, dist_road_log, dist_urban_log, dist_edge_log,
-                slope_pct_log, prec_sum, tmin_mean,
-                forest_age))
-
-subset = subset %>% dplyr::sample_frac(0.05)
-
-rf = VSURF(type ~ ., data = subset, parallel = TRUE) # Very long ! See if we can optimize or try another option ?
-summary(rf)
-order = c(2:18) # reorder the output variables of the procedure (the index (e.g., 9) is the same index in the original dataframe) 
-order[rf$varselect.thres] # the variables of negative importance are eliminated (not in the list)
-order[rf$varselect.interp] # the interpretation procedure leads to select the model with X variables, which contains all of the most important variables
-order[rf$varselect.pred] # the prediction step
-
-### Reforestation
-subset = data_refor_70pct %>% 
-  dplyr::select(c(type, legal_status, ns_br101,
-                  in_car, in_pub_res, in_rppn, in_rl, in_apa,
-                  prop_r100_class_4, prop_r100_class_6,
-                  dist_river_log, dist_road_log, dist_urban_log, dist_edge_log,
-                  slope_pct_log, prec_sum, tmin_mean))
-
-subset = subset %>% dplyr::sample_frac(0.05)
-
-rf = VSURF(type ~ ., data = subset, parallel = TRUE) # Very long ! See if we can optimize or try another option ?
-summary(rf)
-order = c(2:17) # reorder the output variables of the procedure
-order[rf$varselect.thres] # the variables of negative importance are eliminated (not in the list)
-order[rf$varselect.interp] # the interpretation procedure leads to select the model with X variables, which contains all of the most important variables
-order[rf$varselect.pred] # the prediction step
-
-
-##### With Boruta ---------
-
-### Deforestation
-subset = data_defor_70pct %>% 
-  dplyr::select(c(type, legal_status, ns_br101,
-                  in_car, in_pub_res, in_rppn, in_rl, in_apa,
-                  prop_r100_class_4, prop_r100_class_6,
-                  dist_river_log, dist_road_log, dist_urban_log, dist_edge_log,
-                  slope_pct_log, prec_sum, tmin_mean,
-                  forest_age))
-
-subset = subset %>% dplyr::sample_frac(0.05)
-
-set.seed(1)
-# Setting doTrace argument to 1 or 2 makes Boruta report the progress of the process; version 2 is a little more verbose, namely it shows attribute decisions as soon as they are cleared
-Boruta.defor = Boruta(type ~ ., data = subset, doTrace = 2, ntree = 500)
-Boruta.defor # Result
-plot(Boruta.defor) # Z scores variability among attributes during the Boruta run
-getConfirmedFormula(Boruta.defor) # formula object that defines a model based only on confirmed attributes
-attStats(Boruta.defor) # creates a data frame containing each attribute’s Z score statistics and the fraction of random forest runs in which this attribute was more important than the most important shadow one
-
-### Reforestation
-subset = data_refor_70pct %>% 
-  dplyr::select(c(type, legal_status, ns_br101,
-                  in_car, in_pub_res, in_rppn, in_rl, in_apa,
-                  prop_r100_class_4, prop_r100_class_6,
-                  dist_river_log, dist_road_log, dist_urban_log, dist_edge_log,
-                  slope_pct_log, prec_sum, tmin_mean))
-
-subset = subset %>% dplyr::sample_frac(0.05)
-
-set.seed(1)
-# Setting doTrace argument to 1 or 2 makes Boruta report the progress of the process; version 2 is a little more verbose, namely it shows attribute decisions as soon as they are cleared
-Boruta.defor = Boruta(type ~ ., data = subset, doTrace = 2, ntree = 500)
-Boruta.defor # Result
-plot(Boruta.defor) # Z scores variability among attributes during the Boruta run
-getConfirmedFormula(Boruta.defor) # formula object that defines a model based only on confirmed attributes
-attStats(Boruta.defor) # creates a data frame containing each attribute’s Z score statistics and the fraction of random forest runs in which this attribute was more important than the most important shadow one
 
 #### Modeling -------
 
@@ -1315,35 +1186,238 @@ ggplot(coef_refor, aes(x = OR, y = reorder(term, OR))) +
 # Data structure
 str(data_car)
 
-##### NAs --------
+#### NAs --------
 # Number of NAs
 sum(is.na(data_car))
 na = data_car %>% 
   dplyr::summarise(across(everything(), ~ sum(is.na(.))))
 data_car = na.omit(data_car)
 
-##### Number of data ------
-cat("Number of properties:", length(data_car$car_id), "\n")
+#### To data.frame ---------
+data_car = data_car %>% 
+  sf::st_drop_geometry()
 
-##### Summary ------
-### Cleveland plot
-# This allows the detection of outliers
+#### Number of data ------
+cat("Number of properties (without NAs):", length(data_car$car_id), "\n")
 
-Z = cbind(data_car$car_area_ha, 
-          data_car$area_deforest_ha,
-          data_car$area_reforest_ha,
-          data_car$prop_deforest,
-          data_car$prop_reforest,
-          data_car$area_forest_1989_ha,
-          data_car$area_forest_2024_ha,
-          data_car$area_agri_1989_ha,
-          data_car$area_agri_2024_ha,
-          data_car$area_urb_1989_ha,
-          data_car$area_urb_2024_ha)
+#### Number of 0 ----------
+##### Count -------
+data_car %>% 
+  dplyr::filter(area_deforest_ha == 0) %>% 
+  dplyr::summarise(n=dplyr::n()) %>% 
+  dplyr::mutate(prop = n*100/5271)
+data_car %>% 
+  dplyr::filter(area_reforest_ha == 0) %>% 
+  dplyr::summarise(n=dplyr::n()) %>% 
+  dplyr::mutate(prop = n*100/5271)
 
-colnames(Z) = c("...",
-                "...")
+##### Remove 0 ------
+# Deforested area
+data_car_defor_without0 = data_car %>% 
+  dplyr::filter(area_deforest_ha > 0) 
+data_car_defor_without0 %>% 
+  dplyr::filter(area_deforest_ha == 0) %>% 
+  dplyr::summarise(n=dplyr::n())
+# Reforested area
+data_car_refor_without0 = data_car %>% 
+  dplyr::filter(area_reforest_ha > 0) 
+data_car_refor_without0 %>% 
+  dplyr::filter(area_reforest_ha == 0) %>% 
+  dplyr::summarise(n=dplyr::n())
 
+#### Best radius --------
+### Deforestation
+data_car_defor_without0 %>%
+  dplyr::select(c(area_deforest_ha, dplyr::contains("buf"))) %>%
+  corrr::correlate() %>%
+  focus(area_deforest_ha) %>% 
+  dplyr::arrange(desc(area_deforest_ha)) %>% 
+  print(n=60)
+# The most correlated variables are within 100 m
+
+### Reforestation
+data_car_refor_without0 %>%
+  dplyr::select(c(area_reforest_ha, dplyr::contains("buf"))) %>%
+  corrr::correlate() %>%
+  focus(area_reforest_ha) %>% 
+  dplyr::arrange(desc(area_reforest_ha)) %>% 
+  print(n=60)
+# The most correlated variables are within 100 m
+
+#### Random Forest --------
+
+##### With VSURF ----------
+###### Example ---------
+# The following code is from Genuer et al. 2015, The R Journal
+
+data("toys")
+set.seed(3101318)
+
+### Wrapping function
+toys.vsurf <- VSURF(x = toys$x, y = toys$y, mtry = 100)
+names(toys.vsurf)
+summary(toys.vsurf)
+
+#### In details...
+### Step 1: Preliminary elimination and ranking
+## Variable ranking
+
+plot(toys.vsurf)
+par(mfrow=c(1,1))
+plot(toys.vsurf, step = "thres", imp.mean = FALSE, ylim = c(0, 2e-4)) # Zoom of the top right graph
+# The result of variable ranking is drawn on the top left graph. True variables are significantly more important than the noisy ones.
+# Starting from this order, the plot of the corresponding standard deviations of VI is used to estimate a threshold value for VI. This threshold (figured by the dotted horizontal red line on the top right graph of Figure 1) is set to the minimum prediction value given by a CART model fitting this curve (see the green piece-wise constant function on the same graph). Then only the variables with an averaged VI exceeding this level (i.e. above the horizontal red line in the top left graph) are retained.
+
+## Variable elimination
+# The computation of the 50 forests, the ranking and elimination steps are obtained with the VSURF_thres function
+toys.thres <- VSURF_thres(toys$x, toys$y, mtry = 100)
+# The main outputs are: varselect.thres which contains the indices of variables selected by this step, imp.mean.dec and imp.sd.dec which hold the VI mean and standard deviation (the order according to decreasing VI mean can be found in imp.mean.dec.ind).
+toys.thres$varselect.thres
+
+### Step 2: Variable selection
+## Variable selection procedure for interpretation
+toys.interp <- VSURF_interp(toys$x, toys$y, vars = toys.thres$varselect.thres) # varselect.interp: the variables selected by this step, and err.interp: OOB error rates of RF nested models
+toys.interp$varselect.interp # in the bottom left graph, we see that the error decreases quickly. It reaches its (almost) minimum when the first four true variables are included in the model (see the vertical red line) and then it remains nearly constant
+
+## Variable selection procedure for prediction
+toys.pred <- VSURF_pred(toys$x, toys$y, err.interp = toys.interp$err.interp, varselect.interp = toys.interp$varselect.interp)
+# main outputs of the VSURF_pred function are the variables selected by this final step, varselect.pred, and the OOB error rates of RF models, err.pred.
+toys.pred$varselect.pred # For the toys data, the final model for prediction purpose involves only variables V3, V6, V5
+
+
+### Other example on a data frame (ozone data set)
+data("Ozone", package = "mlbench")
+vozone <- VSURF(V4 ~ ., data = Ozone, na.action = na.omit) # V4 is the dependent variable
+summary(vozone)
+plot(vozone, step = "thres", imp.sd = FALSE, var.names = TRUE) # variable importance associated with each of the explanatory variables.
+# three very sensible groups of variables can be discerned ranging from the most to the least important
+number <- c(1:3, 5:13) # reorder the output variables of the procedure
+# To know which index is which variable, refer to the Ozone dataset: variable index "1" is the first column (V1, the month)
+number[vozone$varselect.thres] # the 3 variables of negative importance (variables 6, 3 and 2) are eliminated (not in the list)
+number[vozone$varselect.interp] # the interpretation procedure leads to select the model with 5 variables, which contains all of the most important variables
+number[vozone$varselect.pred] # the prediction step does not remove any additional variable.
+
+###### On my dataset ---------
+
+### Deforestation
+subset = data_car_defor_without0 %>% 
+  dplyr::select(c(area_deforest_ha,
+                  car_area_ha,
+                  area_forest_1989_ha, area_forest_2024_ha, prop_forest_1989, prop_forest_2024, evol_forest_pct,
+                  area_agri_1989_ha, area_agri_2024_ha, prop_agri_1989, prop_agri_2024, evol_agri_pct,
+                  area_urb_1989_ha, area_urb_2024_ha, prop_urb_1989, prop_urb_2024, evol_urb_pct,
+                  area_forest_buf100_1989_ha, area_forest_buf100_2024_ha, prop_forest_buf100_1989, prop_forest_buf100_2024, evol_forest_buf100_pct,
+                  area_agri_buf100_1989_ha, area_agri_buf100_2024_ha, prop_agri_buf100_1989, prop_agri_buf100_2024, evol_agri_buf100_pct,
+                  area_urb_buf100_1989_ha, area_urb_buf100_2024_ha, prop_urb_buf100_1989, prop_urb_buf100_2024, evol_urb_buf100_pct,
+                  area_refor_buf100_2024_ha, prop_refor_buf100_2024,
+                  area_defor_buf100_2024_ha, prop_defor_buf100_2024,
+                  dist_to_urban_m, dist_to_road_m, dist_to_river_m, 
+                  intersects_river, intersects_apa, intersects_pub_res, intersects_rppn, intersects_rl,
+                  apa_cover_ha, pub_res_cover_ha, rppn_cover_ha, rl_cover_ha,
+                  prop_apa_cover, prop_pub_res_cover, prop_rppn_cover, prop_rl_cover,
+                  slope_mean, slope_sd, slope_cv,
+                  alt_mean, alt_sd, alt_cv,
+                  prec_2024_mean, prec_2024_sd, prec_2024_cv,
+                  tmin_2024_mean, tmin_2024_sd, tmin_2024_cv,
+                  tmax_2024_mean, tmax_2024_sd, tmax_2024_cv,
+                  ns_br101))
+
+rf = VSURF(area_deforest_ha ~ ., data = subset, parallel = TRUE) # Can be long
+summary(rf)
+order = c(2:68) # reorder the output variables of the procedure (the index (e.g., 9) is the same index in the original dataframe) 
+order[rf$varselect.thres] # the variables of negative importance are eliminated (not in the list)
+order[rf$varselect.interp] # the interpretation procedure leads to select the model with X variables, which contains all of the most important variables
+order[rf$varselect.pred] # the prediction step
+colnames(subset)[order[rf$varselect.thres]]
+colnames(subset)[order[rf$varselect.interp]]
+colnames(subset)[order[rf$varselect.pred]]
+
+# Create subset based on important variables
+selected_var = order[rf$varselect.interp]
+data_car_defor_rf = subset[, c(1, selected_var)]
+
+##### With Boruta ---------
+
+set.seed(1)
+# Setting doTrace argument to 1 or 2 makes Boruta report the progress of the process; version 2 is a little more verbose, namely it shows attribute decisions as soon as they are cleared
+Boruta.defor = Boruta(area_deforest_ha ~ ., data = subset, doTrace = 2, ntree = 500)
+Boruta.defor # Result
+plot(Boruta.defor) # Z scores variability among attributes during the Boruta run
+getConfirmedFormula(Boruta.defor) # formula object that defines a model based only on confirmed attributes
+attStats(Boruta.defor) # creates a data frame containing each attribute’s Z score statistics and the fraction of random forest runs in which this attribute was more important than the most important shadow one
+
+#### Correlation and VIF ---------
+###### Pearson =====
+
+X = data_car_defor_rf %>% 
+  dplyr::select(-area_deforest_ha)
+cor_mat = cor(X, use = "pairwise.complete.obs", method = "pearson")
+cor_mat
+
+# Identify strong correlations
+high_corr = cor_mat %>%
+  as.data.frame() %>%
+  tibble::rownames_to_column("var1") %>%
+  tidyr::pivot_longer(-var1,names_to = "var2",values_to = "r") %>%
+  dplyr::filter(var1 < var2, abs(r) > 0.6) %>%
+  dplyr::arrange(desc(abs(r)))
+
+print(high_corr, n=100)
+# Beware:
+# area_forest_1989_ha and car_area_ha 
+# area_agri_2024_ha and car_area_ha
+# area_agri_2024_ha and area_agri_buf100_2024_ha 
+
+###### VIF ---------
+X_vif = data_car_defor_rf %>%
+  as.data.frame()
+vif.result = HH::vif(X_vif, y.name="area_deforest_ha")
+
+# VIF(i) = 1/(1-Ri²) (where Ri² is the R² gotten from the regression of predictor i regarding other predictors)
+# If Ri² is close to 1, it means that the variable i is well explained by the linear combination of other variables ; hence the variable i is redundant in the model 
+# The more Ri² is close to 1, the more VIF increases (+Inf)
+# Thus, the higher the VIF, the stronger the collinearity of i is with other variables (ie the information of i is already contained by others)
+# Check VIF > 2.5
+vif.result[vif.result > 2.5]
+# The results confirm strong correlations between: 
+# - car area and forest area
+# - car area and agriculture area
+# - agriculture area and agriculture area in buffer
+
+###### Variable selection ----
+# We select variables based on their correlations with the response variable
+data_car_defor_rf %>%
+  corrr::correlate() %>% 
+  focus(area_deforest_ha) 
+# We retain:
+# car_area_ha
+# area_agri_buf100_2024_ha
+
+###### Re-run VIF ------
+X_vif = data_car_defor_rf %>% 
+  dplyr::select(area_deforest_ha, 
+                car_area_ha,
+                area_agri_buf100_2024_ha,
+                evol_agri_pct,
+                evol_forest_pct) %>% 
+  as.data.frame()
+vif.result = HH::vif(X_vif, y.name="area_deforest_ha")
+vif.result[vif.result > 2.5]
+
+#### Summary ----------
+##### Outliers --------
+# Cleveland plot allow the detection of outliers
+
+Z = cbind(data_car_defor_rf$area_deforest_ha,
+          data_car_defor_rf$car_area_ha,
+          data_car_defor_rf$area_agri_buf100_2024_ha,
+          data_car_defor_rf$evol_forest_pct,
+          data_car_defor_rf$evol_agri_pct)
+colnames(Z) = c("area_deforest_ha",
+                "car_area_ha",
+                "area_agri_buf100_2024_ha",
+                "evol_forest_pct",
+                "evol_agri_pct")
 dotplot(as.matrix(Z), groups = FALSE,
         strip = strip.custom(bg = 'white',
                              par.strip.text = list(cex = 0.8)),
@@ -1353,3 +1427,171 @@ dotplot(as.matrix(Z), groups = FALSE,
         col = 1, cex  = 0.5, pch = 16,
         xlab = "Value of the variable",
         ylab = "Order of the data from text file")
+
+data_car_defor_rf %>%
+  tidyr::pivot_longer(cols = everything()) %>%
+  ggplot(aes(x = name, y = value, fill = name)) +
+  geom_jitter(width=0.25) +
+  geom_boxplot() +
+  labs(title = "Détection des outliers par variable",
+       x = "Variables",
+       y = "Valeurs") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Grubbs test
+grubbs.test(data_car_defor_rf$area_deforest_ha)
+grubbs.test(data_car_defor_rf$car_area_ha)
+grubbs.test(data_car_defor_rf$area_agri_buf100_2024_ha)
+grubbs.test(data_car_defor_rf$evol_agri_pct)
+grubbs.test(data_car_defor_rf$evol_forest_pct)
+
+###### Remove outliers --------
+pinf = 0.025 # percentile for the inferior limit
+psup = 0.975 # percentile for the upper limit
+
+### Deforested area
+# Percentile method to detect outliers
+binf = quantile(data_car_defor_rf$area_deforest_ha,pinf) # compute inferior value
+bsup = quantile(data_car_defor_rf$area_deforest_ha,psup) # compute upper value
+# Remove outliers
+data_car_defor_rf_clean = data_car_defor_rf %>% 
+  dplyr::filter(area_deforest_ha >= binf & area_deforest_ha <= bsup)
+
+### Property size
+# Percentile method to detect outliers
+binf = quantile(data_car_defor_rf_clean$car_area_ha,pinf) # compute inferior value
+bsup = quantile(data_car_defor_rf_clean$car_area_ha,psup) # compute upper value
+# Remove outliers
+data_car_defor_rf_clean = data_car_defor_rf_clean %>% 
+  dplyr::filter(car_area_ha >= binf & car_area_ha <= bsup)
+
+### Evolution of agriculture (%)
+# Percentile method to detect outliers
+binf = quantile(data_car_defor_rf_clean$evol_agri_pct,pinf) # compute inferior value
+bsup = quantile(data_car_defor_rf_clean$evol_agri_pct,psup) # compute upper value
+# Remove outliers
+data_car_defor_rf_clean = data_car_defor_rf_clean %>% 
+  dplyr::filter(evol_agri_pct >= binf & evol_agri_pct <= bsup)
+
+### Evolution of forest (%)
+# Percentile method to detect outliers
+binf = quantile(data_car_defor_rf_clean$evol_forest_pct,pinf) # compute inferior value
+bsup = quantile(data_car_defor_rf_clean$evol_forest_pct,psup) # compute upper value
+# Remove outliers
+data_car_defor_rf_clean = data_car_defor_rf_clean %>% 
+  dplyr::filter(evol_forest_pct >= binf & evol_forest_pct <= bsup)
+
+##### Re-check outliers ------
+# Cleveland plot allow the detection of outliers
+
+Z = cbind(data_car_defor_rf_clean$area_deforest_ha,
+          data_car_defor_rf_clean$car_area_ha,
+          data_car_defor_rf_clean$area_agri_buf100_2024_ha,
+          data_car_defor_rf_clean$evol_forest_pct,
+          data_car_defor_rf_clean$evol_agri_pct)
+colnames(Z) = c("area_deforest_ha",
+                "car_area_ha",
+                "area_agri_buf100_2024_ha",
+                "evol_forest_pct",
+                "evol_agri_pct")
+dotplot(as.matrix(Z), groups = FALSE,
+        strip = strip.custom(bg = 'white',
+                             par.strip.text = list(cex = 0.8)),
+        scales = list(x = list(relation = "free"),
+                      y = list(relation = "free"),
+                      draw = FALSE),
+        col = 1, cex  = 0.5, pch = 16,
+        xlab = "Value of the variable",
+        ylab = "Order of the data from text file")
+
+data_car_defor_rf_clean %>%
+  tidyr::pivot_longer(cols = everything()) %>%
+  ggplot(aes(x = name, y = value, fill = name)) +
+  geom_jitter(width=0.25) +
+  geom_boxplot() +
+  labs(title = "Détection des outliers par variable",
+       x = "Variables",
+       y = "Valeurs") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+##### Distribution --------
+hist(data_car_defor_rf_clean$area_deforest_ha)
+
+hist(data_car_defor_rf_clean$car_area_ha)
+hist(log10(data_car_defor_rf_clean$car_area_ha))
+
+hist(data_car_defor_rf_clean$area_agri_buf100_2024_ha)
+hist(log10(data_car_defor_rf_clean$area_agri_buf100_2024_ha))
+
+hist(data_car_defor_rf_clean$evol_forest_pct)
+hist(data_car_defor_rf_clean$evol_agri_pct)
+
+##### Y~X ----------
+plot(data_car_defor_rf_clean$area_deforest_ha~data_car_defor_rf_clean$car_area_ha)
+plot(data_car_defor_rf_clean$area_deforest_ha~log10(data_car_defor_rf_clean$car_area_ha))
+
+plot(data_car_defor_rf_clean$area_deforest_ha~data_car_defor_rf_clean$area_agri_buf100_2024_ha)
+plot(data_car_defor_rf_clean$area_deforest_ha~log10(data_car_defor_rf_clean$area_agri_buf100_2024_ha))
+
+plot(data_car_defor_rf_clean$area_deforest_ha~data_car_defor_rf_clean$evol_forest_pct)
+plot(data_car_defor_rf_clean$area_deforest_ha~data_car_defor_rf_clean$evol_agri_pct)
+
+#### Modeling -------
+mod_glm = glm(area_deforest_ha ~ 
+              car_area_ha + 
+              area_agri_buf100_2024_ha + 
+              evol_forest_pct +
+              evol_agri_pct,
+            data=data_car_defor_rf_clean)
+summary(mod_glm)
+
+###### Validation -----------
+
+### Check convergence
+check_convergence(mod_glm)
+
+# 1) Examine plots of residuals versus fitted values for the entire model
+# 2) Model residuals versus all explanatory variables to look for patterns
+# 3) For GLMMs: residuals versus fitted values for each grouping level of a random intercept factor
+
+#### Dharma method (from Hartig 2024)
+# Rationale: misspecifications in GL(M)Ms cannot reliably be diagnosed with standard residual plots
+# The "DHARMa" package uses a simulation-based approach to create readily interpretable scaled (quantile) residuals for fitted generalized linear (mixed) models
+# The resulting residuals are standardized to values between 0 and 1 and can be interpreted as intuitively as residuals from a linear regression
+# Also provides a number of plot and test functions for typical model misspecification problems, such as over/underdispersion, zero-inflation, and residual spatial, temporal and phylogenetic autocorrelation.
+# A residual of 0 means that all simulated values are larger than the observed value, and a residual of 0.5 means half of the simulated values are larger than the observed value.
+# NB: If you have a lot of data points, residual diagnostics will nearly inevitably become significant, because having a perfectly fitting model is very unlikely.
+# DHARMa only flags a difference between the observed and expected data - the user has to decide whether this difference is actually a problem for the analysis!
+
+# Calculate the residuals, using the simulateResiduals() function (randomized quantile residuals)
+simulationOutput = simulateResiduals(fittedModel = mod_glm, plot = F)
+# Access to residuals
+plot(simulationOutput)
+# Left panel: qq-plot to detect overall deviations from the expected distribution, by default with added tests for correct distribution (KS test), dispersion and outliers.
+# Right panel: plotResiduals (right panel) produces a plot of the residuals against the predicted value (or alternatively, other variable). Simulation outliers (data points that are outside the range of simulated values) are highlighted as red stars.
+# To provide a visual aid in detecting deviations from uniformity in y-direction, the plot function calculates an (optional default) quantile regression, which compares the empirical 0.25, 0.5 and 0.75 quantiles in y direction (red solid lines) with the theoretical 0.25, 0.5 and 0.75 quantiles (dashed black line), and provides a p-value for the deviation from the expected quantile
+plotQQunif(simulationOutput) # left plot in plot.DHARMa()
+plotResiduals(simulationOutput) # right plot in plot.DHARMa()
+hist(residuals(mod_glm))
+
+# GL(M)Ms often display over/underdispersion, which means that residual variance is larger/smaller than expected under the fitted model.
+# If overdispersion is present, the main effect is that confidence intervals tend to be too narrow, and p-values to small, leading to inflated type I error. The opposite is true for underdispersion, i.e. the main issue of underdispersion is that you loose power.
+# To check for over/underdispersion, plot the simulateResiduals() and check for deviation around the red line (and residuals around 0 and 1); see examples in DHARMa vignette
+# DHARMa contains several overdispersion tests that compare the dispersion of simulated residuals to the observed residuals
+testDispersion(simulationOutput)
+# A significant ratio > 1 indicates overdispersion, a significant ratio < 1 underdispersion.
+
+# A second test that is typically run for LMs, but not for GL(M)Ms is to plot residuals against the predictors in the model (or potentially predictors that were not in the model) to detect possible misspecifications
+# If you plot the residuals against predictors, space or time, the resulting plots should not only show no systematic dependency of those residuals on the covariates, but they should also again be flat for each fixed situation
+plotResiduals(simulationOutput, data_car_defor_rf_clean$car_area_ha)
+
+## Zero-inflation
+testZeroInflation(simulationOutput)
+
+## Autocorrelation
+# Spatial
+testSpatialAutocorrelation(simulationOutput, 
+                           x = aggregate(train_data$x, list(train_data$year), mean)$x,
+                           y = aggregate(train_data$y, list(train_data$year), mean)$x)
