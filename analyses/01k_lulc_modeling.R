@@ -27,8 +27,12 @@ library(rsq)
 library(MASS)
 library(broom)
 library(broom.mixed)
-library(outliers) 
-
+library(outliers)
+library(BAMMtools)
+library(patchwork)
+library(spatialreg)
+library(nlme)
+library(MuMIn)
 
 ### Load datasets
 data_defor_pixel = readRDS(here("outputs", "data", "Mapbiomas", "LULCC_datasets", 
@@ -36,7 +40,7 @@ data_defor_pixel = readRDS(here("outputs", "data", "Mapbiomas", "LULCC_datasets"
 data_refor_pixel = readRDS(here("outputs", "data", "Mapbiomas", "LULCC_datasets", 
                                 "data_refor_pixel_thinned.rds"))
 data_car = readRDS(here("outputs", "data", "Mapbiomas", "LULCC_datasets", "data_defor_refor_car.rds"))
-
+plot(sf::st_geometry(data_car))
 
 ### Pixel-scale analysis -------------
 
@@ -1186,16 +1190,38 @@ ggplot(coef_refor, aes(x = OR, y = reorder(term, OR))) +
 # Data structure
 str(data_car)
 
+# other variables
+# Less then 20% of forest in 2024
+data_car = data_car %>% 
+  dplyr::mutate(Less20For2024 = dplyr::case_when(prop_forest_2024 <= 0.20 ~ 1, TRUE ~ 0),
+                Less20For1989 = dplyr::case_when(prop_forest_1989 <= 0.20 ~ 1, TRUE ~ 0))
+data_car %>% 
+  sf::st_drop_geometry() %>% 
+  dplyr::select(c(prop_forest_2024, Less20For2024)) %>% 
+  head()
+# Proportion of properties with less then 20% of forest
+data_car %>% 
+  sf::st_drop_geometry() %>% 
+  dplyr::group_by(Less20For1989) %>% 
+  dplyr::summarise(n=dplyr::n()) %>% 
+  dplyr::mutate(prop = n*100/sum(n))
+data_car %>% 
+  sf::st_drop_geometry() %>% 
+  dplyr::group_by(Less20For2024) %>% 
+  dplyr::summarise(n=dplyr::n()) %>% 
+  dplyr::mutate(prop = n*100/sum(n))
+
+#### Duplicates ----
+data_car = data_car %>%
+  dplyr::distinct(centroid_x, centroid_y, .keep_all = TRUE)
+
 #### NAs --------
 # Number of NAs
 sum(is.na(data_car))
 na = data_car %>% 
-  dplyr::summarise(across(everything(), ~ sum(is.na(.))))
-data_car = na.omit(data_car)
-
-#### To data.frame ---------
-data_car = data_car %>% 
+  dplyr::summarise(across(everything(), ~ sum(is.na(.)))) %>% 
   sf::st_drop_geometry()
+data_car = na.omit(data_car)
 
 #### Number of data ------
 cat("Number of properties (without NAs):", length(data_car$car_id), "\n")
@@ -1203,10 +1229,12 @@ cat("Number of properties (without NAs):", length(data_car$car_id), "\n")
 #### Number of 0 ----------
 ##### Count -------
 data_car %>% 
+  sf::st_drop_geometry() %>% 
   dplyr::filter(area_deforest_ha == 0) %>% 
   dplyr::summarise(n=dplyr::n()) %>% 
   dplyr::mutate(prop = n*100/5271)
 data_car %>% 
+  sf::st_drop_geometry() %>% 
   dplyr::filter(area_reforest_ha == 0) %>% 
   dplyr::summarise(n=dplyr::n()) %>% 
   dplyr::mutate(prop = n*100/5271)
@@ -1215,19 +1243,14 @@ data_car %>%
 # Deforested area
 data_car_defor_without0 = data_car %>% 
   dplyr::filter(area_deforest_ha > 0) 
-data_car_defor_without0 %>% 
-  dplyr::filter(area_deforest_ha == 0) %>% 
-  dplyr::summarise(n=dplyr::n())
 # Reforested area
 data_car_refor_without0 = data_car %>% 
   dplyr::filter(area_reforest_ha > 0) 
-data_car_refor_without0 %>% 
-  dplyr::filter(area_reforest_ha == 0) %>% 
-  dplyr::summarise(n=dplyr::n())
 
 #### Best radius --------
 ### Deforestation
 data_car_defor_without0 %>%
+  sf::st_drop_geometry() %>% 
   dplyr::select(c(area_deforest_ha, dplyr::contains("buf"))) %>%
   corrr::correlate() %>%
   focus(area_deforest_ha) %>% 
@@ -1237,6 +1260,7 @@ data_car_defor_without0 %>%
 
 ### Reforestation
 data_car_refor_without0 %>%
+  sf::st_drop_geometry() %>% 
   dplyr::select(c(area_reforest_ha, dplyr::contains("buf"))) %>%
   corrr::correlate() %>%
   focus(area_reforest_ha) %>% 
@@ -1250,57 +1274,23 @@ data_car_refor_without0 %>%
 ###### Example ---------
 # The following code is from Genuer et al. 2015, The R Journal
 
-data("toys")
-set.seed(3101318)
-
-### Wrapping function
-toys.vsurf <- VSURF(x = toys$x, y = toys$y, mtry = 100)
-names(toys.vsurf)
-summary(toys.vsurf)
-
-#### In details...
-### Step 1: Preliminary elimination and ranking
-## Variable ranking
-
-plot(toys.vsurf)
-par(mfrow=c(1,1))
-plot(toys.vsurf, step = "thres", imp.mean = FALSE, ylim = c(0, 2e-4)) # Zoom of the top right graph
-# The result of variable ranking is drawn on the top left graph. True variables are significantly more important than the noisy ones.
-# Starting from this order, the plot of the corresponding standard deviations of VI is used to estimate a threshold value for VI. This threshold (figured by the dotted horizontal red line on the top right graph of Figure 1) is set to the minimum prediction value given by a CART model fitting this curve (see the green piece-wise constant function on the same graph). Then only the variables with an averaged VI exceeding this level (i.e. above the horizontal red line in the top left graph) are retained.
-
-## Variable elimination
-# The computation of the 50 forests, the ranking and elimination steps are obtained with the VSURF_thres function
-toys.thres <- VSURF_thres(toys$x, toys$y, mtry = 100)
-# The main outputs are: varselect.thres which contains the indices of variables selected by this step, imp.mean.dec and imp.sd.dec which hold the VI mean and standard deviation (the order according to decreasing VI mean can be found in imp.mean.dec.ind).
-toys.thres$varselect.thres
-
-### Step 2: Variable selection
-## Variable selection procedure for interpretation
-toys.interp <- VSURF_interp(toys$x, toys$y, vars = toys.thres$varselect.thres) # varselect.interp: the variables selected by this step, and err.interp: OOB error rates of RF nested models
-toys.interp$varselect.interp # in the bottom left graph, we see that the error decreases quickly. It reaches its (almost) minimum when the first four true variables are included in the model (see the vertical red line) and then it remains nearly constant
-
-## Variable selection procedure for prediction
-toys.pred <- VSURF_pred(toys$x, toys$y, err.interp = toys.interp$err.interp, varselect.interp = toys.interp$varselect.interp)
-# main outputs of the VSURF_pred function are the variables selected by this final step, varselect.pred, and the OOB error rates of RF models, err.pred.
-toys.pred$varselect.pred # For the toys data, the final model for prediction purpose involves only variables V3, V6, V5
-
-
-### Other example on a data frame (ozone data set)
-data("Ozone", package = "mlbench")
-vozone <- VSURF(V4 ~ ., data = Ozone, na.action = na.omit) # V4 is the dependent variable
-summary(vozone)
-plot(vozone, step = "thres", imp.sd = FALSE, var.names = TRUE) # variable importance associated with each of the explanatory variables.
-# three very sensible groups of variables can be discerned ranging from the most to the least important
-number <- c(1:3, 5:13) # reorder the output variables of the procedure
-# To know which index is which variable, refer to the Ozone dataset: variable index "1" is the first column (V1, the month)
-number[vozone$varselect.thres] # the 3 variables of negative importance (variables 6, 3 and 2) are eliminated (not in the list)
-number[vozone$varselect.interp] # the interpretation procedure leads to select the model with 5 variables, which contains all of the most important variables
-number[vozone$varselect.pred] # the prediction step does not remove any additional variable.
+# ### Example on a data frame (ozone data set)
+# data("Ozone", package = "mlbench")
+# vozone <- VSURF(V4 ~ ., data = Ozone, na.action = na.omit) # V4 is the dependent variable
+# summary(vozone)
+# plot(vozone, step = "thres", imp.sd = FALSE, var.names = TRUE) # variable importance associated with each of the explanatory variables.
+# # three very sensible groups of variables can be discerned ranging from the most to the least important
+# number <- c(1:3, 5:13) # reorder the output variables of the procedure
+# # To know which index is which variable, refer to the Ozone dataset: variable index "1" is the first column (V1, the month)
+# number[vozone$varselect.thres] # the 3 variables of negative importance (variables 6, 3 and 2) are eliminated (not in the list)
+# number[vozone$varselect.interp] # the interpretation procedure leads to select the model with 5 variables, which contains all of the most important variables
+# number[vozone$varselect.pred] # the prediction step does not remove any additional variable.
 
 ###### On my dataset ---------
 
 ### Deforestation
 subset = data_car_defor_without0 %>% 
+  sf::st_drop_geometry() %>% 
   dplyr::select(c(area_deforest_ha,
                   car_area_ha,
                   area_forest_1989_ha, area_forest_2024_ha, prop_forest_1989, prop_forest_2024, evol_forest_pct,
@@ -1320,11 +1310,17 @@ subset = data_car_defor_without0 %>%
                   prec_2024_mean, prec_2024_sd, prec_2024_cv,
                   tmin_2024_mean, tmin_2024_sd, tmin_2024_cv,
                   tmax_2024_mean, tmax_2024_sd, tmax_2024_cv,
-                  ns_br101))
+                  ns_br101,
+                  Less20For1989, Less20For2024,
+                  centroid_x, centroid_y))
 
 rf = VSURF(area_deforest_ha ~ ., data = subset, parallel = TRUE) # Can be long
+# Step 1: Preliminary elimination and ranking
+# Step 2: Variable selection (for interpretation and for prediction)
+
 summary(rf)
-order = c(2:68) # reorder the output variables of the procedure (the index (e.g., 9) is the same index in the original dataframe) 
+plot(rf, step = "thres") # variable importance associated with each of the explanatory variables.
+order = c(2:72) # reorder the output variables of the procedure (the index (e.g., 9) is the same index in the original dataframe) 
 order[rf$varselect.thres] # the variables of negative importance are eliminated (not in the list)
 order[rf$varselect.interp] # the interpretation procedure leads to select the model with X variables, which contains all of the most important variables
 order[rf$varselect.pred] # the prediction step
@@ -1332,9 +1328,11 @@ colnames(subset)[order[rf$varselect.thres]]
 colnames(subset)[order[rf$varselect.interp]]
 colnames(subset)[order[rf$varselect.pred]]
 
-# Create subset based on important variables
-selected_var = order[rf$varselect.interp]
-data_car_defor_rf = subset[, c(1, selected_var)]
+###### Subset based on RF --------
+selected_vars = colnames(subset)[order[rf$varselect.interp]]
+selected_vars = c("area_deforest_ha", "centroid_x", "centroid_y", selected_vars) # Add other columns
+data_car_defor_rf = data_car_defor_without0 %>% 
+  dplyr::select(dplyr::all_of(selected_vars))
 
 ##### With Boruta ---------
 
@@ -1350,6 +1348,7 @@ attStats(Boruta.defor) # creates a data frame containing each attribute’s Z sc
 ###### Pearson =====
 
 X = data_car_defor_rf %>% 
+  sf::st_drop_geometry() %>% 
   dplyr::select(-area_deforest_ha)
 cor_mat = cor(X, use = "pairwise.complete.obs", method = "pearson")
 cor_mat
@@ -1364,12 +1363,12 @@ high_corr = cor_mat %>%
 
 print(high_corr, n=100)
 # Beware:
-# area_forest_1989_ha and car_area_ha 
-# area_agri_2024_ha and car_area_ha
-# area_agri_2024_ha and area_agri_buf100_2024_ha 
+# areas of forest and car area
+# area of agriculture and car area
 
 ###### VIF ---------
 X_vif = data_car_defor_rf %>%
+  sf::st_drop_geometry() %>% 
   as.data.frame()
 vif.result = HH::vif(X_vif, y.name="area_deforest_ha")
 
@@ -1387,38 +1386,39 @@ vif.result[vif.result > 2.5]
 ###### Variable selection ----
 # We select variables based on their correlations with the response variable
 data_car_defor_rf %>%
+  sf::st_drop_geometry() %>% 
   corrr::correlate() %>% 
-  focus(area_deforest_ha) 
+  focus(area_deforest_ha) %>% 
+  dplyr::arrange(desc(area_deforest_ha))
 # We retain:
-# car_area_ha
-# area_agri_buf100_2024_ha
+# car_area_ha 
 
 ###### Re-run VIF ------
 X_vif = data_car_defor_rf %>% 
+  sf::st_drop_geometry() %>% 
   dplyr::select(area_deforest_ha, 
                 car_area_ha,
-                area_agri_buf100_2024_ha,
+                area_agri_2024_ha,
                 evol_agri_pct,
                 evol_forest_pct) %>% 
   as.data.frame()
 vif.result = HH::vif(X_vif, y.name="area_deforest_ha")
 vif.result[vif.result > 2.5]
 
+###### Subset -------
+data_car_defor_rf = data_car_defor_rf %>% 
+  dplyr::select(c(area_deforest_ha, 
+                  car_area_ha,
+                  area_agri_2024_ha,
+                  evol_agri_pct,
+                  evol_forest_pct,
+                  centroid_x,
+                  centroid_y))
+
 #### Summary ----------
 ##### Outliers --------
 # Cleveland plot allow the detection of outliers
-
-Z = cbind(data_car_defor_rf$area_deforest_ha,
-          data_car_defor_rf$car_area_ha,
-          data_car_defor_rf$area_agri_buf100_2024_ha,
-          data_car_defor_rf$evol_forest_pct,
-          data_car_defor_rf$evol_agri_pct)
-colnames(Z) = c("area_deforest_ha",
-                "car_area_ha",
-                "area_agri_buf100_2024_ha",
-                "evol_forest_pct",
-                "evol_agri_pct")
-dotplot(as.matrix(Z), groups = FALSE,
+dotplot(as.matrix(data_car_defor_rf %>% sf::st_drop_geometry()), groups = FALSE,
         strip = strip.custom(bg = 'white',
                              par.strip.text = list(cex = 0.8)),
         scales = list(x = list(relation = "free"),
@@ -1428,50 +1428,20 @@ dotplot(as.matrix(Z), groups = FALSE,
         xlab = "Value of the variable",
         ylab = "Order of the data from text file")
 
-data_car_defor_rf %>%
-  tidyr::pivot_longer(cols = everything()) %>%
-  ggplot(aes(x = name, y = value, fill = name)) +
-  geom_jitter(width=0.25) +
-  geom_boxplot() +
-  labs(title = "Détection des outliers par variable",
-       x = "Variables",
-       y = "Valeurs") +
-  theme_minimal() +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1))
 
 # Grubbs test
-grubbs.test(data_car_defor_rf$area_deforest_ha)
 grubbs.test(data_car_defor_rf$car_area_ha)
-grubbs.test(data_car_defor_rf$area_agri_buf100_2024_ha)
-grubbs.test(data_car_defor_rf$evol_agri_pct)
-grubbs.test(data_car_defor_rf$evol_forest_pct)
 
 ###### Remove outliers --------
 pinf = 0.025 # percentile for the inferior limit
 psup = 0.975 # percentile for the upper limit
 
-### Deforested area
-# Percentile method to detect outliers
-binf = quantile(data_car_defor_rf$area_deforest_ha,pinf) # compute inferior value
-bsup = quantile(data_car_defor_rf$area_deforest_ha,psup) # compute upper value
-# Remove outliers
-data_car_defor_rf_clean = data_car_defor_rf %>% 
-  dplyr::filter(area_deforest_ha >= binf & area_deforest_ha <= bsup)
-
-### Property size
-# Percentile method to detect outliers
-binf = quantile(data_car_defor_rf_clean$car_area_ha,pinf) # compute inferior value
-bsup = quantile(data_car_defor_rf_clean$car_area_ha,psup) # compute upper value
-# Remove outliers
-data_car_defor_rf_clean = data_car_defor_rf_clean %>% 
-  dplyr::filter(car_area_ha >= binf & car_area_ha <= bsup)
-
 ### Evolution of agriculture (%)
 # Percentile method to detect outliers
-binf = quantile(data_car_defor_rf_clean$evol_agri_pct,pinf) # compute inferior value
-bsup = quantile(data_car_defor_rf_clean$evol_agri_pct,psup) # compute upper value
+binf = quantile(data_car_defor_rf$evol_agri_pct,pinf) # compute inferior value
+bsup = quantile(data_car_defor_rf$evol_agri_pct,psup) # compute upper value
 # Remove outliers
-data_car_defor_rf_clean = data_car_defor_rf_clean %>% 
+data_car_defor_rf_clean = data_car_defor_rf %>% 
   dplyr::filter(evol_agri_pct >= binf & evol_agri_pct <= bsup)
 
 ### Evolution of forest (%)
@@ -1482,20 +1452,18 @@ bsup = quantile(data_car_defor_rf_clean$evol_forest_pct,psup) # compute upper va
 data_car_defor_rf_clean = data_car_defor_rf_clean %>% 
   dplyr::filter(evol_forest_pct >= binf & evol_forest_pct <= bsup)
 
+### Agriculture area (ha)
+# Percentile method to detect outliers
+binf = quantile(data_car_defor_rf_clean$area_agri_2024_ha,pinf) # compute inferior value
+bsup = quantile(data_car_defor_rf_clean$area_agri_2024_ha,psup) # compute upper value
+# Remove outliers
+data_car_defor_rf_clean = data_car_defor_rf_clean %>% 
+  dplyr::filter(area_agri_2024_ha >= binf & area_agri_2024_ha <= bsup)
+
 ##### Re-check outliers ------
 # Cleveland plot allow the detection of outliers
 
-Z = cbind(data_car_defor_rf_clean$area_deforest_ha,
-          data_car_defor_rf_clean$car_area_ha,
-          data_car_defor_rf_clean$area_agri_buf100_2024_ha,
-          data_car_defor_rf_clean$evol_forest_pct,
-          data_car_defor_rf_clean$evol_agri_pct)
-colnames(Z) = c("area_deforest_ha",
-                "car_area_ha",
-                "area_agri_buf100_2024_ha",
-                "evol_forest_pct",
-                "evol_agri_pct")
-dotplot(as.matrix(Z), groups = FALSE,
+dotplot(as.matrix(data_car_defor_rf_clean %>% sf::st_drop_geometry()), groups = FALSE,
         strip = strip.custom(bg = 'white',
                              par.strip.text = list(cex = 0.8)),
         scales = list(x = list(relation = "free"),
@@ -1505,52 +1473,102 @@ dotplot(as.matrix(Z), groups = FALSE,
         xlab = "Value of the variable",
         ylab = "Order of the data from text file")
 
-data_car_defor_rf_clean %>%
-  tidyr::pivot_longer(cols = everything()) %>%
-  ggplot(aes(x = name, y = value, fill = name)) +
-  geom_jitter(width=0.25) +
-  geom_boxplot() +
-  labs(title = "Détection des outliers par variable",
-       x = "Variables",
-       y = "Valeurs") +
+#### Spatial blocking --------
+# Deforestation dataset
+data_car_defor_rf_clean$block_x = floor(data_car_defor_rf_clean$centroid_x / 10000) # Distance in meters
+data_car_defor_rf_clean$block_y = floor(data_car_defor_rf_clean$centroid_y / 10000) # Distance in meters
+data_car_defor_rf_clean = data_car_defor_rf_clean %>%
+  dplyr::mutate(sp_block = paste0(block_x, "_", block_y))
+data_car_defor_rf_clean$sp_block = factor(data_car_defor_rf_clean$sp_block)
+ggplot(data_car_defor_rf_clean, aes(x = centroid_x, y = centroid_y, color = sp_block)) +
+  geom_point(size = 0.3) +
   theme_minimal() +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+  guides(color = "none")
+
+#### Groups of property size -------
+BAMMtools::getJenksBreaks(data_car_defor_rf_clean$car_area_ha, k = 4)
+data_car_defor_rf_clean = data_car_defor_rf_clean %>% 
+  dplyr::mutate(car_area_grp = dplyr::case_when(car_area_ha <= 10 ~ "<10",
+                                                car_area_ha > 10 & car_area_ha <= 20 ~ "10-20",
+                                                car_area_ha > 20 & car_area_ha <= 50 ~ "20-50",
+                                                car_area_ha > 50 ~ ">50",
+                                                TRUE ~ NA))
+data_car_defor_rf_clean$car_area_grp = factor(data_car_defor_rf_clean$car_area_grp,
+                                              levels=c("<10","10-20","20-50",">50"))
+data_car_defor_rf_clean %>% 
+  sf::st_drop_geometry() %>% 
+  dplyr::group_by(car_area_grp) %>% 
+  dplyr::count()
 
 ##### Distribution --------
-hist(data_car_defor_rf_clean$area_deforest_ha)
+# Loop to plot hists
+numeric_cols = data_car_defor_rf_clean %>% 
+  sf::st_drop_geometry() %>% 
+  dplyr::select(where(is.numeric)) %>% 
+  names()
+plots = list()
+for (col in numeric_cols) {
+  p = ggplot(data_car_defor_rf_clean, aes(x = .data[[col]])) +
+    geom_histogram(bins = 30, fill = "skyblue", color = "black") +
+    labs(title = paste("Histogram of", col), x = col, y = "Frequency") +
+    theme_minimal()
+  
+  # Ajouter le graphique à la liste
+  plots[[col]] = p
+}
+combined_plot = do.call(wrap_plots, c(plots, ncol = 3))
+print(combined_plot)
 
-hist(data_car_defor_rf_clean$car_area_ha)
 hist(log10(data_car_defor_rf_clean$car_area_ha))
-
-hist(data_car_defor_rf_clean$area_agri_buf100_2024_ha)
-hist(log10(data_car_defor_rf_clean$area_agri_buf100_2024_ha))
-
-hist(data_car_defor_rf_clean$evol_forest_pct)
-hist(data_car_defor_rf_clean$evol_agri_pct)
 
 ##### Y~X ----------
 plot(data_car_defor_rf_clean$area_deforest_ha~data_car_defor_rf_clean$car_area_ha)
 plot(data_car_defor_rf_clean$area_deforest_ha~log10(data_car_defor_rf_clean$car_area_ha))
 
-plot(data_car_defor_rf_clean$area_deforest_ha~data_car_defor_rf_clean$area_agri_buf100_2024_ha)
-plot(data_car_defor_rf_clean$area_deforest_ha~log10(data_car_defor_rf_clean$area_agri_buf100_2024_ha))
+plot(data_car_defor_rf_clean$area_deforest_ha~data_car_defor_rf_clean$area_agri_2024_ha)
+plot(data_car_defor_rf_clean$area_deforest_ha~log10(data_car_defor_rf_clean$area_agri_2024_ha))
 
-plot(data_car_defor_rf_clean$area_deforest_ha~data_car_defor_rf_clean$evol_forest_pct)
 plot(data_car_defor_rf_clean$area_deforest_ha~data_car_defor_rf_clean$evol_agri_pct)
+plot(data_car_defor_rf_clean$area_deforest_ha~data_car_defor_rf_clean$evol_forest_pct)
+
+boxplot(area_deforest_ha~car_area_grp, data=data_car_defor_rf_clean,
+        outline = FALSE)
+
+##### Coplots ----------
+# See : Zuur & Ieno 2016, MEE
+# coplot is an excellent graphical tool to visualize the potential presence of interactions.
+M1 = lm(area_deforest_ha ~ car_area_grp*area_agri_2024_ha*evol_agri_pct*evol_forest_pct, 
+        data=data_car_defor_rf_clean)
+summary(M1)
+anova(M1)
+
+#Make the coplot
+# A bivariate linear regression line is added to each scatterplot
+# if all lines are parallel, then there is probably no significant interaction
+coplot(area_deforest_ha ~ area_agri_2024_ha | evol_agri_pct, 
+       data=data_car_defor_rf_clean,
+       ylab = "area_agri_2024_ha",
+       xlab = "evol_agri_pct",
+       panel = function(x, y, ...) {
+         tmp = lm(y ~ x, na.action = na.omit)
+         abline(tmp)
+         points(x, y) })
 
 #### Modeling -------
-mod_glm = glm(area_deforest_ha ~ 
-              car_area_ha + 
-              area_agri_buf100_2024_ha + 
-              evol_forest_pct +
-              evol_agri_pct,
-            data=data_car_defor_rf_clean)
-summary(mod_glm)
+##### GLMM -------
+mod_glmm = glmmTMB(log10(area_deforest_ha) ~ 
+                car_area_grp + 
+                log10(area_agri_2024_ha) +
+                evol_agri_pct +
+                evol_forest_pct +
+                (1|sp_block),
+                data=data_car_defor_rf_clean)
+summary(mod_glmm)
 
 ###### Validation -----------
 
 ### Check convergence
-check_convergence(mod_glm)
+check_convergence(mod_glmm)
 
 # 1) Examine plots of residuals versus fitted values for the entire model
 # 2) Model residuals versus all explanatory variables to look for patterns
@@ -1566,7 +1584,7 @@ check_convergence(mod_glm)
 # DHARMa only flags a difference between the observed and expected data - the user has to decide whether this difference is actually a problem for the analysis!
 
 # Calculate the residuals, using the simulateResiduals() function (randomized quantile residuals)
-simulationOutput = simulateResiduals(fittedModel = mod_glm, plot = F)
+simulationOutput = simulateResiduals(fittedModel = mod_glmm, plot = F)
 # Access to residuals
 plot(simulationOutput)
 # Left panel: qq-plot to detect overall deviations from the expected distribution, by default with added tests for correct distribution (KS test), dispersion and outliers.
@@ -1574,7 +1592,6 @@ plot(simulationOutput)
 # To provide a visual aid in detecting deviations from uniformity in y-direction, the plot function calculates an (optional default) quantile regression, which compares the empirical 0.25, 0.5 and 0.75 quantiles in y direction (red solid lines) with the theoretical 0.25, 0.5 and 0.75 quantiles (dashed black line), and provides a p-value for the deviation from the expected quantile
 plotQQunif(simulationOutput) # left plot in plot.DHARMa()
 plotResiduals(simulationOutput) # right plot in plot.DHARMa()
-hist(residuals(mod_glm))
 
 # GL(M)Ms often display over/underdispersion, which means that residual variance is larger/smaller than expected under the fitted model.
 # If overdispersion is present, the main effect is that confidence intervals tend to be too narrow, and p-values to small, leading to inflated type I error. The opposite is true for underdispersion, i.e. the main issue of underdispersion is that you loose power.
@@ -1586,12 +1603,132 @@ testDispersion(simulationOutput)
 # A second test that is typically run for LMs, but not for GL(M)Ms is to plot residuals against the predictors in the model (or potentially predictors that were not in the model) to detect possible misspecifications
 # If you plot the residuals against predictors, space or time, the resulting plots should not only show no systematic dependency of those residuals on the covariates, but they should also again be flat for each fixed situation
 plotResiduals(simulationOutput, data_car_defor_rf_clean$car_area_ha)
-
-## Zero-inflation
-testZeroInflation(simulationOutput)
-
 ## Autocorrelation
 # Spatial
-testSpatialAutocorrelation(simulationOutput, 
-                           x = aggregate(train_data$x, list(train_data$year), mean)$x,
-                           y = aggregate(train_data$y, list(train_data$year), mean)$x)
+testSpatialAutocorrelation(simulationOutput,
+                           x = data_car_defor_rf_clean$centroid_x,
+                           y = data_car_defor_rf_clean$centroid_y)
+
+##### SAR -------
+# Spatial autoregressive models are models that account for spatial autocorrelation among observations (i.e., the response variable is not randomly distributed in space)
+# Y = AX + W(Y) + B
+# # Source: https://bookdown.org/hhwagner1/LandGenCourse_book/WE_7.html#WE_7
+
+# We first need to define neighbors
+# We define weights in three ways
+# listw.gab: 1 = neighbour, 0 = not a neighbour.
+# listw.d1: inverse distance weights: neighbour j with weight 1/dij
+# listw.d2: inverse squared distance weights: neighbour j with weight 1/dij^2
+# listw.d3: k neighbors
+
+# Binary neighborhood
+mat = data_car_defor_rf_clean %>%  sf::st_drop_geometry()
+xy = data.matrix(mat[,c("centroid_x", "centroid_y")])
+nb.gab = spdep::graph2nb(spdep::gabrielneigh(xy), sym=TRUE)
+par(mar=c(0,0,0,0))
+plot(nb.gab, xy)
+listw.gab = spdep::nb2listw(nb.gab)
+
+# Inverse distances
+dlist = spdep::nbdists(nb.gab, xy)
+dlist = lapply(dlist, function(x) 1/x)
+listw.d1 = spdep::nb2listw(nb.gab, style = "W", glist=dlist)
+dlist = lapply(dlist, function(x) 1/x^2)
+listw.d2 = spdep::nb2listw(nb.gab, style = "W", glist=dlist)
+
+# Fixed number of neighbors
+col.knn.nb = knn2nb(knearneigh(sf::st_centroid(data_car_defor_rf_clean), k = 5)) # k is the nuùber of neighbors
+listw.knn = nb2listw(col.knn.nb, style = "W") # to matrix of weights
+
+# Observe spatial autocorrelation
+spdep::moran.test(data_car_defor_rf_clean$area_deforest_ha, listw.gab)
+
+# SAR
+# The method errorsarlm fits a simultaneous autoregressive model (‘sar’) to the error (‘error’) term of a ‘lm’ model
+mod_sar1 = spatialreg::spautolm(log10(area_deforest_ha) ~ 
+                                    car_area_grp + 
+                                    log10(area_agri_2024_ha) + 
+                                    evol_agri_pct + 
+                                    evol_forest_pct, 
+                                  listw=listw.gab,
+                                 data=data_car_defor_rf_clean)
+mod_sar2 = spatialreg::spautolm(log10(area_deforest_ha) ~ 
+                                    car_area_grp + 
+                                    log10(area_agri_2024_ha) + 
+                                    evol_agri_pct + 
+                                    evol_forest_pct, 
+                                  listw=listw.d1,
+                                  data=data_car_defor_rf_clean)
+mod_sar3 = spatialreg::spautolm(log10(area_deforest_ha) ~ 
+                                    car_area_grp + 
+                                    log10(area_agri_2024_ha) + 
+                                    evol_agri_pct + 
+                                    evol_forest_pct, 
+                                  listw=listw.d2,
+                                  data=data_car_defor_rf_clean)
+mod_sar4 = spatialreg::spautolm(log10(area_deforest_ha) ~ 
+                                    car_area_grp + 
+                                    log10(area_agri_2024_ha) + 
+                                    evol_agri_pct + 
+                                    evol_forest_pct, 
+                                  listw=listw.knn,
+                                  data=data_car_defor_rf_clean)
+
+# Comparison (AICc)
+Models = list(mod_sar1=mod_sar1, 
+              mod_sar2=mod_sar2,
+              mod_sar3=mod_sar3,
+              mod_sar4=mod_sar4)
+data.frame(AICc = sapply(Models, MuMIn::AICc)) %>% 
+  dplyr::mutate(delta = AICc - min(AICc)) %>%
+  dplyr::arrange(delta)
+
+# Interpretation
+# The ‘coefficients’ section in the output may be interpreted in a similar way to a standard regression model
+summary(mod_sar2, Nagelkerke = TRUE) # With the argument Nagelkerke = TRUE, we request a pseudo R-squared
+# The section starting with ‘Lamba’ summarizes the fitted spatial autocorrelation term
+# The `lambda’ section provides a p-value for the null hypothesis that λ=0 - that is, that there is a degree of spatial autocorrelation in the cancer rates. 
+# If p<0.05, we reject the null hypothesis (i.e., there is spatial autocorrelation)
+
+# Validation
+# Residuals VS adjusted
+residuals = residuals(mod_sar2)
+fitted_values = fitted(mod_sar2)
+ggplot(data.frame(fitted = fitted_values, resid = residuals), aes(x = fitted, y = resid)) +
+  geom_point() +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  labs(title = "Standardized Residuals vs. Fitted Values", x = "Fitted Values", y = "Residuals") +
+  theme_minimal()
+
+# Hist of residuals
+hist(residuals(mod_sar2))
+shapiro.test(residuals(mod_sar2))
+
+# QQplot
+# Extract residuals from the model
+residuals = residuals(mod_sar2)
+qqplot_data = data.frame(res = residuals)
+ggplot(qqplot_data, aes(sample = res)) +
+  stat_qq(distribution = qnorm) +
+  geom_abline(intercept = 0, slope = 1, color = "red", linetype = "dashed") +
+  labs(title = "QQ Plot of Residuals", x = "Theoretical Quantiles", y = "Sample Quantiles") +
+  theme_minimal()
+
+# Residuals vs. each explanatory variable
+residuals = residuals(mod_sar2)
+ggplot(data_car_defor_rf_clean, aes(x = log10(area_agri_2024_ha), y = residuals)) +
+  geom_point() +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  theme_minimal()
+ggplot(data_car_defor_rf_clean, aes(x = evol_agri_pct, y = residuals)) +
+  geom_point() +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  theme_minimal()
+ggplot(data_car_defor_rf_clean, aes(x = evol_forest_pct, y = residuals)) +
+  geom_point() +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  theme_minimal()
+ggplot(data_car_defor_rf_clean, aes(x = car_area_grp, y = residuals)) +
+  geom_boxplot() +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  theme_minimal()

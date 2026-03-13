@@ -1862,7 +1862,14 @@ car_sf_filtered = car_sf_filtered %>%
 ## Centroids (sf)
 car_centroids_sf = car_sf_filtered %>%
   dplyr::mutate(geometry = sf::st_centroid(geometry))
+plot(sf::st_geometry(car_centroids_sf))
 
+# Extract centroids coordinates
+car_sf_filtered = car_sf_filtered %>%
+  dplyr::mutate(
+    centroid_x = sf::st_coordinates(sf::st_centroid(geometry))[, 1],
+    centroid_y = sf::st_coordinates(sf::st_centroid(geometry))[, 2]
+  )
 
 ### 1. Distance to urban centers
 nearest_id = sf::st_nearest_feature(car_centroids_sf, urb_centers_sf)
@@ -2012,8 +2019,8 @@ compute_ns = function(x0, y0, br_x, br_y) {
 }
 
 # CAR centroids
-car_centroids = sf::st_centroid(car_sf_filtered)
-coords_car = sf::st_coordinates(car_centroids)
+car_centroids_sf = sf::st_centroid(car_sf_filtered)
+coords_car = sf::st_coordinates(car_centroids_sf)
 car_x = coords_car[, 1]
 car_y = coords_car[, 2]
 
