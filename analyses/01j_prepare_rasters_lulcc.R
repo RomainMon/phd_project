@@ -1471,26 +1471,12 @@ car_sf_filtered = car_sf_filtered %>%
                 area_forest_1989_ha = round(forest_pixels_1989 * px_area_ha, 2),
                 area_forest_2024_ha = round(forest_pixels_2024 * px_area_ha, 2),
                 area_agri_1989_ha = round(agri_pixels_1989 * px_area_ha, 2),
-                area_agri_2024_ha = round(agri_pixels_2024 * px_area_ha, 2),
                 area_urb_1989_ha = round(urb_pixels_1989 * px_area_ha, 2),
-                area_urb_2024_ha = round(urb_pixels_2024 * px_area_ha, 2),
                 # Proportions
                 prop_forest_1989 = area_forest_1989_ha / car_area_ha,
                 prop_forest_2024 = area_forest_2024_ha / car_area_ha,
                 prop_agri_1989 = area_agri_1989_ha / car_area_ha,
-                prop_agri_2024 = area_agri_2024_ha / car_area_ha,
-                prop_urb_1989 = area_urb_1989_ha / car_area_ha,
-                prop_urb_2024 = area_urb_2024_ha / car_area_ha,
-                # Evolution
-                evol_forest_pct = ifelse(area_forest_1989_ha > 0,
-                                         100 * (area_forest_2024_ha - area_forest_1989_ha) / area_forest_1989_ha,
-                                         0),
-                evol_agri_pct = ifelse(area_agri_1989_ha > 0,
-                                       100 * (area_agri_2024_ha - area_agri_1989_ha) / area_agri_1989_ha,
-                                       0),
-                evol_urb_pct = ifelse(area_urb_1989_ha > 0,
-                                      100 * (area_urb_2024_ha - area_urb_1989_ha) / area_urb_1989_ha,
-                                      0))
+                prop_urb_1989 = area_urb_1989_ha / car_area_ha)
 
 #### 4. Land use AROUND properties --------
 # We create buffers around properties
@@ -1893,16 +1879,6 @@ dist_m =
   sf::st_distance(car_centroids_sf, rivers_sf[nearest_id, ],
                   by_element = TRUE)
 car_sf_filtered$dist_to_river_m = as.numeric(dist_m)
-
-# Quick correlations
-cor(car_sf_filtered$area_deforest_ha, car_sf_filtered$dist_to_urban_m)
-cor(car_sf_filtered$area_reforest_ha, car_sf_filtered$dist_to_urban_m)
-
-cor(car_sf_filtered$area_deforest_ha, car_sf_filtered$dist_to_road_m)
-cor(car_sf_filtered$area_reforest_ha, car_sf_filtered$dist_to_road_m)
-
-cor(car_sf_filtered$area_deforest_ha, car_sf_filtered$dist_to_river_m)
-cor(car_sf_filtered$area_reforest_ha, car_sf_filtered$dist_to_river_m)
 
 
 #### 6. Intersections --------
