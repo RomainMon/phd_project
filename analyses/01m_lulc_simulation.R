@@ -393,7 +393,7 @@ raster_df$ns = mapply(
 ns_raster[] = raster_df$ns
 
 # Plot
-plot(ns_raster, main = "Nord (0) / Sud (1) de la BR-101", col = c("blue", "red"))
+plot(ns_raster, main = "North (0) / South (1) of BR-101", col = c("blue", "red"))
 
 ##### Water (constrained) -------
 # Here, we create a constraint on land development
@@ -413,6 +413,7 @@ for (yr in years_lulc) {
   water_list[[as.character(yr)]] = water_mask
 }
 plot(water_list$`2024`, col=c("blue","grey"))
+
 
 ### Export rasters for PLUS ------
 
@@ -441,8 +442,9 @@ dist_edges_list = lapply(dist_edges_list, terra::project, template_wgs84, method
 dist_roads_list = lapply(dist_roads_list, terra::project, template_wgs84, method = "near")
 
 # Proportions
-prop_agri100m_list = lapply(prop_agri100m_list, terra::project, template_wgs84, method = "near")
-prop_urban100m_list = lapply(prop_urban100m_list, terra::project, template_wgs84, method = "near")
+prop_agri = lapply(prop_agri, terra::project, template_wgs84, method = "near")
+prop_urban = lapply(prop_urban, terra::project, template_wgs84, method = "near")
+prop_forest = lapply(prop_forest, terra::project, template_wgs84, method = "near")
 
 # Binary rasters
 apa_r = terra::project(apa_r, template_wgs84, method="near")
@@ -534,10 +536,14 @@ terra::writeRaster(rasters_prec_sum[[36]],
                    filename = file.path(output_dir, "prec2024.tif"), 
                    overwrite = TRUE, 
                    datatype = "FLT4S")
-
 # Tmin
 terra::writeRaster(rasters_tmin_mean[[36]], 
                    filename = file.path(output_dir, "tmin2024.tif"), 
+                   overwrite = TRUE, 
+                   datatype = "FLT4S")
+# Tmax
+terra::writeRaster(rasters_tmin_mean[[36]], 
+                   filename = file.path(output_dir, "tmax2024.tif"), 
                    overwrite = TRUE, 
                    datatype = "FLT4S")
 
@@ -549,15 +555,26 @@ terra::writeRaster(slope_r,
                    datatype = "FLT4S")
 
 
+# Elevation
+terra::writeRaster(topo_r, 
+                   filename = file.path(output_dir, "elev.tif"), 
+                   overwrite = TRUE, 
+                   datatype = "FLT4S")
+
 ##### Proportions of land uses ------
 # Agriculture
-terra::writeRaster(prop_agri100m_list[[36]], 
+terra::writeRaster(prop_agri[[36]], 
                    filename = file.path(output_dir, "prop_agri100m_2024.tif"), 
                    overwrite = TRUE, 
                    datatype = "FLT4S")
 # Urban
-terra::writeRaster(prop_urban100m_list[[36]], 
+terra::writeRaster(prop_urban[[36]], 
                    filename = file.path(output_dir, "prop_urban100m_2024.tif"), 
+                   overwrite = TRUE, 
+                   datatype = "FLT4S")
+# Forest
+terra::writeRaster(prop_forest[[36]], 
+                   filename = file.path(output_dir, "prop_forest100m_2024.tif"), 
                    overwrite = TRUE, 
                    datatype = "FLT4S")
 
@@ -569,6 +586,8 @@ terra::writeRaster(water_list[['2024']],
                    overwrite = TRUE, 
                    datatype = "INT1U")
 
+
+
 #### PLUS parameters --------
 ## Land use demand
 freq(rasters_reclass_wgs84[[1]]) # Frequency of each land use
@@ -577,14 +596,16 @@ freq(rasters_reclass_wgs84[[36]]) # Land use demand
 ## Transition matrix
 # Compute transition matrix
 tm = terra::crosstab(c(rasters_reclass_wgs84[[1]], rasters_reclass_wgs84[[36]]))
-# 0 if < 500, 1 otherwise
-tm_binary = ifelse(tm < 500, 0, 1)
+tm_prop = round(tm / rowSums(tm),2) # Proportions by row
+tm_prop
+# 0 if <0.05 (i.e., less than 5% of X pixels transitioned from X to Y), 1 otherwise
+tm_binary = ifelse(tm_prop < 0.05, 0, 1)
 print(tm_binary)
 
 ## Neighborhood weights
 # Based on PLUS documentation, we can determine the neighborhood weight of each land-use type by calculating the ratio of the expansion areas of a land-use type accounting for the total land expansion
 # Import land use changes (1989-2024)
-lulc_19892024 = terra::rast(here("outputs", "data", "PLUS", "lulc_expansion", "lulc_expansion_19892024_landuse_1to2.tif"))
+lulc_19892024 = terra::rast(here("outputs", "data", "PLUS", "lulc_expansion", "lu1989_2024_landuse_1to2.tif"))
 plot(lulc_19892024)
 # Frequency table
 freq_lulc19892024 = freq(lulc_19892024)
