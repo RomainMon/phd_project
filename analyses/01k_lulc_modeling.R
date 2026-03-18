@@ -580,14 +580,17 @@ mod_glmm = glmmTMB(formula =
                      dist_river_m_sc + dist_road_m_sc + dist_urban_m_sc + dist_edge_m_sc + 
                      slope_pct_sc + prec_sum_sc + tmin_mean_sc + 
                      (1|year) + (1|sp_block),
-                   REML=T, family=binomial, data=train_data)
+                   REML=F, family=binomial, data=train_data)
 summary(mod_glmm)
 
+######  Stepwise selection -------
+best_mod = stepAIC(mod_glmm)
+summary(best_mod)
 
 ###### Validation -----------
 
 ### Check convergence
-check_convergence(mod_glmm)
+check_convergence(best_mod)
 
 # 1) Examine plots of residuals versus fitted values for the entire model
 # 2) Model residuals versus all explanatory variables to look for patterns
@@ -603,7 +606,7 @@ check_convergence(mod_glmm)
 # DHARMa only flags a difference between the observed and expected data - the user has to decide whether this difference is actually a problem for the analysis!
 
 # Calculate the residuals, using the simulateResiduals() function (randomized quantile residuals)
-simulationOutput = simulateResiduals(fittedModel = mod_glmm, plot = F)
+simulationOutput = simulateResiduals(fittedModel = best_mod, plot = F)
 # Access to residuals
 plot(simulationOutput)
 # Left panel: qq-plot to detect overall deviations from the expected distribution, by default with added tests for correct distribution (KS test), dispersion and outliers.
@@ -706,7 +709,7 @@ lines(correlog.sp$dist, correlog.sp$Null.ucl,col = "red")
   
 
 ## Autocorrelation of GLMM residuals
-res_mod1_sample = residuals(mod_glmm, type = "pearson")[sample_indices]
+res_mod1_sample = residuals(best_mod, type = "pearson")[sample_indices]
 correlog.sp = data.frame(dist=seq(from=10000, to=maxdist, by=10000),
                           Morans.i=NA, Null.lcl=NA, Null.ucl=NA, Pvalue=NA)
 head(correlog.sp)
@@ -751,14 +754,14 @@ lines(correlog.sp$dist, correlog.sp$Null.ucl,col = "red")
 # It is often summarised by the area under the curve (AUC) where one indicates a perfect fit and 0.5 indicates a purely random fit.
 
 # Training
-pred_train = predict(mod_glmm, type="response", re.form = NA) # we remove random effects
+pred_train = predict(best_mod, type="response", re.form = NA) # we remove random effects
 # By removing Random effects, we test whether predictors alone discriminate deforestation
 roc_train = roc(train_data$type, pred_train)
 auc_train = auc(roc_train)
 cat("Train AUC:", auc_train, "\n")
 
 # Testing
-pred_test = predict(mod_glmm, newdata=test_data, type="response", re.form = NA)
+pred_test = predict(best_mod, newdata=test_data, type="response", re.form = NA)
 roc_test = roc(test_data$type, pred_test)
 auc_test = auc(roc_test)
 cat("Test AUC:", auc_test, "\n")
@@ -779,7 +782,7 @@ lines(roc_test, col="red", lwd=2)
 # 2) Choose one of the folds to be the holdout set. Fit the model on the remaining k-1 folds. Calculate the test MSE on the observations in the fold that was held out.
 # 3) Repeat this process k times, using a different set each time as the holdout set.
 # 4) Calculate the overall test MSE to be the average of the k test MSE’s
-summary(cv(mod_glmm,
+summary(cv(best_mod,
            k = 5,
            clusterVariables = c("sp_block", "year")))
 # The cv() methods returns the CV criterion ("CV crit"), the bias- adjusted CV criterion ("adj CV crit"), the criterion for the model applied to the full data ("full crit"), the confidence interval and level for the bias-adjusted CV criterion ("confint"), the number of folds ("k")
@@ -792,22 +795,22 @@ summary(cv(mod_glmm,
 # This index goes from 0, if the grouping conveys no information, to 1, if all observations in a group are identical (Gelman and Hill, 2007, p. 258)
 # The ICC can help determine whether a mixed model is even necessary: an ICC of zero (or very close to zero) means the observations within clusters are no more similar than observations from different clusters, and setting it as a random factor might not be necessary
 # In simple cases, the ICC corresponds to the difference between the conditional R2 and the marginal R2
-performance::icc(mod_glmm, by_group=TRUE)
+performance::icc(best_mod, by_group=TRUE)
 # 0.01 (i.e., 1%) of variance explained by inter-annual differences
 # 0.04 (i.e., 4%) of variance explained by spatial blocks
 # This suggests that most variance was explained by predictors (fixed effects) rather than hierarchical grouping structure
 
 ###### Interpretation ----------
-summary(mod_glmm)
+summary(best_mod)
 
 ###### R² ----------
 # Marginal R2 = variance explained by only the fixed effects
 # Conditional R2 = variance explained by both fixed and random effects i.e., the variance explained by the whole model
-r2_nakagawa(mod_glmm)
+r2_nakagawa(best_mod)
 
 ###### Plot effects -------
 # Tidy summarizes information about the components of a model
-coef_defor = broom.mixed::tidy(mod_glmm, effects = "fixed", conf.int=TRUE) %>%
+coef_defor = broom.mixed::tidy(best_mod, effects = "fixed", conf.int=TRUE) %>%
   dplyr::filter(term != "(Intercept)")
 head(coef_defor)
 
@@ -916,10 +919,14 @@ mod_glmm = glmmTMB(formula =
                    REML=T, family=binomial, data=train_data)
 
 
+######  Stepwise selection -------
+best_mod = stepAIC(mod_glmm)
+summary(best_mod)
+
 ###### Validation -----------
 
 ### Check convergence
-check_convergence(mod_glmm)
+check_convergence(best_mod)
 
 # 1) Examine plots of residuals versus fitted values for the entire model
 # 2) Model residuals versus all explanatory variables to look for patterns
@@ -935,7 +942,7 @@ check_convergence(mod_glmm)
 # DHARMa only flags a difference between the observed and expected data - the user has to decide whether this difference is actually a problem for the analysis!
 
 # Calculate the residuals, using the simulateResiduals() function (randomized quantile residuals)
-simulationOutput = simulateResiduals(fittedModel = mod_glmm, plot = F)
+simulationOutput = simulateResiduals(fittedModel = best_mod, plot = F)
 # Access to residuals
 plot(simulationOutput)
 # Left panel: qq-plot to detect overall deviations from the expected distribution, by default with added tests for correct distribution (KS test), dispersion and outliers.
@@ -1038,7 +1045,7 @@ lines(correlog.sp$dist, correlog.sp$Null.ucl,col = "red")
 
 
 ## Autocorrelation of GLMM residuals
-res_mod1_sample = residuals(mod_glmm, type = "pearson")[sample_indices]
+res_mod1_sample = residuals(best_mod, type = "pearson")[sample_indices]
 correlog.sp = data.frame(dist=seq(from=10000, to=maxdist, by=10000),
                          Morans.i=NA, Null.lcl=NA, Null.ucl=NA, Pvalue=NA)
 head(correlog.sp)
@@ -1083,14 +1090,14 @@ lines(correlog.sp$dist, correlog.sp$Null.ucl,col = "red")
 # It is often summarised by the area under the curve (AUC) where one indicates a perfect fit and 0.5 indicates a purely random fit.
 
 # Training
-pred_train = predict(mod_glmm, type="response", re.form = NA) # we remove random effects
+pred_train = predict(best_mod, type="response", re.form = NA) # we remove random effects
 # By removing Random effects, we test whether predictors alone discriminate deforestation
 roc_train = roc(train_data$type, pred_train)
 auc_train = auc(roc_train)
 cat("Train AUC:", auc_train, "\n")
 
 # Testing
-pred_test = predict(mod_glmm, newdata=test_data,
+pred_test = predict(best_mod, newdata=test_data,
                     type="response",
                     re.form = NA)
 roc_test = roc(test_data$type, pred_test)
@@ -1113,7 +1120,7 @@ lines(roc_test, col="red", lwd=2)
 # 2) Choose one of the folds to be the holdout set. Fit the model on the remaining k-1 folds. Calculate the test MSE on the observations in the fold that was held out.
 # 3) Repeat this process k times, using a different set each time as the holdout set.
 # 4) Calculate the overall test MSE to be the average of the k test MSE’s
-summary(cv(mod_glmm,
+summary(cv(best_mod,
            k = 5,
            clusterVariables = c("sp_block", "year")))
 # The cv() methods returns the CV criterion ("CV crit"), the bias- adjusted CV criterion ("adj CV crit"), the criterion for the model applied to the full data ("full crit"), the confidence interval and level for the bias-adjusted CV criterion ("confint"), the number of folds ("k")
@@ -1122,22 +1129,22 @@ summary(cv(mod_glmm,
 ###### ICC ----------
 # Intraclass Correlation Coefficient
 # ICC is the proportion of variation that can be attributed to between-group variation (Nakagawa & Schielzeth 2010)
-performance::icc(mod_glmm, by_group=TRUE)
+performance::icc(best_mod, by_group=TRUE)
 # 0.006 (i.e., <1%) of variance explained by inter-annual differences
 # 0.02 (i.e., 2%) of variance explained by spatial blocks
 # This suggests that most variance was explained by predictors (fixed effects) rather than hierarchical grouping structure
 
 ###### Interpretation ----------
-summary(mod_glmm)
+summary(best_mod)
 
 ###### R² ----------
 # Marginal R2 = variance explained by only the fixed effects
 # Conditional R2 = variance explained by both fixed and random effects i.e., the variance explained by the whole model
-r2_nakagawa(mod_glmm)
+r2_nakagawa(best_mod)
 
 ###### Plot effects -------
 # Tidy summarizes information about the components of a model
-coef_refor = broom.mixed::tidy(mod_glmm, effects = "fixed", conf.int=TRUE) %>%
+coef_refor = broom.mixed::tidy(best_mod, effects = "fixed", conf.int=TRUE) %>%
   dplyr::filter(term != "(Intercept)")
 head(coef_refor)
 
