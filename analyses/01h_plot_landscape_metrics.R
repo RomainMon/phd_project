@@ -17,6 +17,7 @@ library(ggrepel)
 # library(ggstream)
 library(ggtern)
 library(extrafont)
+library(ggbreak)
 
 # Font Import
 # font_import()
@@ -26,7 +27,7 @@ fonttable()
 ### Import datasets ----------------
 base_path = here("outputs", "data", "landscapemetrics")
 all_lulc_metrics = readr::read_csv(
-  file.path(base_path, "all_lulc_classes_bbox_1989_2024.csv"),
+  file.path(base_path, "all_lulc_classes_bbox_1989_2100.csv"),
   show_col_types = FALSE
 )
 forest_class_metrics = readr::read_csv(
@@ -121,6 +122,7 @@ cat(paste0("* ", res_2024, collapse="\n"), "\n\n")
 ##### Stacked area chart ------
 # Select data
 data = all_lulc_metrics %>% 
+  dplyr::filter(year <= 2024) %>% 
   dplyr::select(year, class, pland) %>% 
   dplyr::mutate(
     year  = as.integer(year),   # x axis must be numeric/continuous
@@ -157,7 +159,7 @@ ggplot(data, aes(x = year, y = pland, fill = Description)) +
 dev.off()
 
 ###### Text --------
-# Evolution from 1989 and 2024
+# Evolution from 1989 to 2024
 data = all_lulc_metrics %>%
   dplyr::left_join(class_colors, by="class") %>%
   dplyr::group_by(Description) %>%
@@ -182,9 +184,35 @@ res_change = data %>%
 cat("Changes between 1989 and 2024 were:\n")
 cat(paste0("* ", res_change, collapse="\n"), "\n")
 
-##### Line plot -----
+# Evolution from 2024 to 2100
+data = all_lulc_metrics %>%
+  dplyr::left_join(class_colors, by="class") %>%
+  dplyr::group_by(Description) %>%
+  dplyr::summarise(
+    pland2024 = pland[year==2024],
+    pland2100 = pland[year==2100],
+    d_pland = pland2100 - pland2024
+  ) %>%
+  dplyr::ungroup()
+
+# Text
+res_change = data %>%
+  dplyr::mutate(
+    txt = paste0(
+      Description, " cover represented ", round(pland2024,1), "% of the landscape in 2024 ",
+      "while it represents ", round(pland2100,1), "% of the landscape in 2100 (",
+      ifelse(d_pland>=0, "+",""), round(d_pland,1), " %)."
+    )
+  ) %>%
+  dplyr::pull(txt)
+
+cat("Predicted changes between 2024 and 2024 are:\n")
+cat(paste0("* ", res_change, collapse="\n"), "\n")
+
+##### Line plot (1989-2024) -----
 # Select data
 data = all_lulc_metrics %>% 
+  dplyr::filter(year <= 2024) %>% 
   dplyr::select(year, class, ca) %>% 
   dplyr::mutate(
     year = as.integer(year),
@@ -269,9 +297,140 @@ res_trend = label_data %>%
 cat("Long-term land-use changes were:\n")
 cat(paste0("* ", res_trend, collapse = "\n"), "\n\n")
 
+##### Line plot (1989-2100) -----
+# Select data
+data = all_lulc_metrics %>%
+  dplyr::select(year, class, ca) %>% 
+  dplyr::mutate(
+    year = as.integer(year),
+    class = as.numeric(class),
+    ca = as.numeric(ca)
+  )
+
+# Add color codes
+data = data %>% 
+  dplyr::left_join(class_colors, by = "class")
+
+# Compute change per class
+label_data = data %>%
+  dplyr::group_by(Description) %>%
+  dplyr::arrange(year) %>%
+  dplyr::summarise(
+    year_end  = dplyr::last(year),
+    ca_end = dplyr::last(ca),
+    ca_start = dplyr::first(ca),
+    change_ha = ca_end - ca_start,
+    pct_change = 100 * change_ha / ca_start,
+    .groups = "drop"
+  ) %>%
+  dplyr::mutate(
+    label = paste0(
+      ifelse(change_ha >= 0, "+", "−"),
+      comma(abs(round(change_ha))),
+      " ha (",
+      sprintf("%+.1f%%", pct_change),
+      ")"
+    )
+  )
+
+label_data = label_data %>%
+  dplyr::mutate(ca_end_adj = dplyr::case_when(
+    Description == "Forest" ~ ca_end + 5000,
+    Description == "Agriculture" ~ ca_end - 4000,
+    Description == "Non vegetated areas" ~ ca_end + 6000,
+    Description == "Water" ~ ca_end + 4000,
+    Description == "Wetlands and mangroves" ~ ca_end + 1000,
+    Description == "Other non-forest formation" ~ ca_end - 4000,
+    TRUE ~ ca_end
+  ))
+
+# Plot
+# Define last observed year
+obs_end = 2024
+data = data %>%
+  dplyr::mutate(period = ifelse(year <= obs_end, "Observed", "Simulated"))
+
+# Plot
+ggplot() +
+  # Observed ribbon
+  geom_ribbon(
+    data = dplyr::filter(data, period == "Observed"),
+    aes(x = year, ymin = ca - 2000, ymax = ca + 2000, fill = Description),
+    alpha = 0.18
+  ) +
+  # Observed lines
+  geom_line(
+    data = dplyr::filter(data, period == "Observed"),
+    aes(x = year, y = ca, color = Description, group = Description),
+    linewidth = 1
+  ) +
+  geom_point(
+    data = dplyr::filter(data, period == "Observed"),
+    aes(x = year, y = ca, color = Description),
+    size = 1.5
+  ) +
+  # Simulated ribbon
+  geom_ribbon(
+    data = dplyr::filter(data, period == "Simulated"),
+    aes(x = year, ymin = ca - 2000, ymax = ca + 2000, fill = Description),
+    alpha = 0.18
+  ) +
+  # Simulated lines (de-emphasized)
+  geom_line(
+    data = dplyr::filter(data, period == "Simulated"),
+    aes(x = year, y = ca, color = Description, group = Description),
+    linewidth = 0.9,
+    alpha = 0.8
+  ) +
+  geom_point(
+    data = dplyr::filter(data, period == "Simulated"),
+    aes(x = year, y = ca, color = Description),
+    size = 1,
+    alpha = 0.7
+  ) +
+  # Labels
+  geom_text(
+    data = label_data,
+    aes(x = year_end + 0.6, y = ca_end_adj, label = label, color = Description),
+    hjust = 0, size = 3.5, fontface = "bold", show.legend = FALSE,
+    family = "Arial Narrow"
+  ) +
+  geom_blank(aes(x = max(data$year) + 35, y = 0)) +
+  scale_color_manual(values = setNames(class_colors$Color, class_colors$Description)) +
+  scale_fill_manual(values = setNames(class_colors$Color, class_colors$Description), guide = "none") +
+  labs(x = "Year", y = "Area (ha)", color = "Land use class") +
+  scale_x_break(c(2024, 2040), scales = 0.3, space=0, symbol="slash") +
+  coord_cartesian(clip = "off") +
+  theme_classic() +
+  theme(
+    legend.position = "bottom",
+    axis.title = element_text(size = 10, family = "Arial Narrow"),
+    axis.text = element_text(size = 8, family = "Arial"),
+    legend.title = element_text(size = 10, family = "Arial Narrow"),
+    legend.text = element_text(size = 8, family = "Arial Narrow"),
+    legend.key.spacing = unit(2, "pt"),
+    legend.key.width = unit(0.3, "cm"),
+    plot.margin = margin(10, 80, 10, 10)
+  )
+
+###### Text -------
+res_trend = label_data %>%
+  dplyr::mutate(
+    txt = paste0(
+      Description, " ",
+      ifelse(change_ha >= 0, "increased", "decreased"),
+      " by ", scales::comma(abs(round(change_ha))), " ha (",
+      sprintf("%+.1f", pct_change), "%).")
+  ) %>%
+  dplyr::pull(txt)
+
+cat("Long-term land-use changes are:\n")
+cat(paste0("* ", res_trend, collapse = "\n"), "\n\n")
+
 ##### Barplot (positive vs negative changes) ------
 # Prepare data
 data = all_lulc_metrics %>%
+  dplyr::filter(year <= 2024) %>% 
   dplyr::select(year, class, ca) %>%
   dplyr::mutate(
     year = as.integer(year),
@@ -401,6 +560,7 @@ ggplot(data, aes(x = year, y = delta_ca, fill = Description)) +
 ###### Text -------
 # filter only Forest time series
 data = all_lulc_metrics %>%
+  dplyr::filter(year <= 2024) %>% 
   dplyr::filter(class == 1) %>%
   dplyr::arrange(year)
 
@@ -520,6 +680,58 @@ ggplot(data_1989, aes(x, y, fill = Description)) +
         legend.key.height = unit(0.3, "cm")) +
   guides(fill=guide_legend(title="Land use class (1989)"))
 dev.off()
+
+## 2100
+data_2100 = all_lulc_metrics %>%
+  dplyr::filter(year == 2100) %>%
+  dplyr::left_join(class_colors, by="class") %>% 
+  dplyr::group_by(Description) %>%
+  dplyr::summarise(ca = sum(ca), .groups="drop") %>%
+  dplyr::mutate(p = round(ca/sum(ca),3)) %>% 
+  dplyr::left_join(class_colors, by="Description")
+
+data_2100 = data_2100 %>%
+  dplyr::mutate(pct_label = paste0(Description, " (", round(p*100, 2), "%)")) %>%
+  dplyr::mutate(n = round(p*100)) %>%
+  dplyr::mutate(n = ifelse(n==0,1,n)) %>%
+  dplyr::mutate(n = round(n/sum(n)*100)) %>%
+  tidyr::uncount(n) %>%
+  dplyr::mutate(i = dplyr::row_number(),
+                x = (i-1) %% 10,
+                y = (i-1) %/% 10)
+
+# Remove one row (total != 100) 
+# We remove one built-up row (i == 92)
+# We adjust positions (x and y) of other cells to keep a cohesive waffle
+# By removing 1 to X, all rows are displaced from one cell to the left (X axis)
+data_2100 = data_2100 %>% 
+  dplyr::filter(i != 92) %>% 
+  dplyr::mutate(
+    x = ifelse(i > 92, x - 1, x),
+    x = ifelse(i == 101, 9, x),
+    y = ifelse(i == 101, 9, y)
+  )
+
+# Waffle plot 
+png(here("outputs","plot","01h_lm_pland_waffle2100.png"), width = 1200, height = 1200, res = 300)
+ggplot(data_2100, aes(x, y, fill = Description)) +
+  geom_tile(color = "white", linewidth = 0.4) +
+  scale_y_reverse() +
+  coord_fixed() +
+  scale_fill_manual(
+    values = setNames(class_colors$Color, class_colors$Description),
+    labels = setNames(data_2100$pct_label, data_2100$Description),
+    name = NULL
+  ) +
+  theme_void() +
+  theme(legend.position = "right",
+        legend.text = element_text(size = 8, family = "Arial Narrow"),
+        legend.title = element_text(size = 10, family = "Arial Narrow"),
+        legend.key.width  = unit(0.4, "cm"),
+        legend.key.height = unit(0.3, "cm")) +
+  guides(fill=guide_legend(title="Land use class (2100)"))
+dev.off()
+
 
 ##### Ternary plot --------
 # # 1. Filter for the classes we need

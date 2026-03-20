@@ -34,6 +34,16 @@ library(spatialreg)
 library(nlme)
 library(MuMIn)
 library(caret)
+library(ggeffects)
+library(extrafont)
+library(emmeans)
+library(ggpubr)
+library(cowplot)
+
+# Font Import
+# font_import()
+loadfonts()
+fonttable()
 
 ### Load datasets
 data_defor_pixel = readRDS(here("outputs", "data", "Mapbiomas", "LULCC_datasets", 
@@ -1294,9 +1304,7 @@ data_car_refor_without0 %>%
 # number[vozone$varselect.interp] # the interpretation procedure leads to select the model with 5 variables, which contains all of the most important variables
 # number[vozone$varselect.pred] # the prediction step does not remove any additional variable.
 
-###### On my dataset ---------
-
-### Deforestation
+###### Deforestation  ---------
 subset = data_car_defor_without0 %>% 
   sf::st_drop_geometry() %>% 
   dplyr::select(c(area_deforest_ha,
@@ -1336,10 +1344,56 @@ colnames(subset)[order[rf$varselect.thres]]
 colnames(subset)[order[rf$varselect.interp]]
 colnames(subset)[order[rf$varselect.pred]]
 
-###### Subset based on RF --------
+###### Subset based on RF
 selected_vars = colnames(subset)[order[rf$varselect.interp]]
 selected_vars = c("car_id","area_deforest_ha", "centroid_x", "centroid_y", selected_vars) # Add other columns
 data_car_defor_rf = data_car_defor_without0 %>% 
+  dplyr::select(dplyr::all_of(selected_vars))
+
+###### Reforestation  ---------
+subset = data_car_refor_without0 %>% 
+  sf::st_drop_geometry() %>% 
+  dplyr::select(c(area_reforest_ha,
+                  car_area_ha,
+                  area_forest_1989_ha, prop_forest_1989,
+                  area_agri_1989_ha, prop_agri_1989,
+                  area_urb_1989_ha, prop_urb_1989,
+                  area_forest_buf100_1989_ha, area_forest_buf100_2024_ha, prop_forest_buf100_1989, prop_forest_buf100_2024, evol_forest_buf100_pct,
+                  area_agri_buf100_1989_ha, area_agri_buf100_2024_ha, prop_agri_buf100_1989, prop_agri_buf100_2024, evol_agri_buf100_pct,
+                  area_urb_buf100_1989_ha, area_urb_buf100_2024_ha, prop_urb_buf100_1989, prop_urb_buf100_2024, evol_urb_buf100_pct,
+                  area_refor_buf100_2024_ha, prop_refor_buf100_2024,
+                  area_defor_buf100_2024_ha, prop_defor_buf100_2024,
+                  dist_to_urban_m, dist_to_road_m, dist_to_river_m, 
+                  intersects_river, intersects_apa, intersects_pub_res, intersects_rppn, intersects_rl,
+                  apa_cover_ha, pub_res_cover_ha, rppn_cover_ha, rl_cover_ha,
+                  prop_apa_cover, prop_pub_res_cover, prop_rppn_cover, prop_rl_cover,
+                  slope_mean, slope_sd, slope_cv,
+                  alt_mean, alt_sd, alt_cv,
+                  prec_2024_mean, prec_2024_sd, prec_2024_cv,
+                  tmin_2024_mean, tmin_2024_sd, tmin_2024_cv,
+                  tmax_2024_mean, tmax_2024_sd, tmax_2024_cv,
+                  ns_br101,
+                  Less20For1989, Less20For2024,
+                  centroid_x, centroid_y))
+
+rf = VSURF(area_reforest_ha ~ ., data = subset, parallel = TRUE) # Can be long
+# Step 1: Preliminary elimination and ranking
+# Step 2: Variable selection (for interpretation and for prediction)
+
+summary(rf)
+plot(rf, step = "thres") # variable importance associated with each of the explanatory variables.
+order = c(2:63) # reorder the output variables of the procedure (the index (e.g., 9) is the same index in the original dataframe) 
+order[rf$varselect.thres] # the variables of negative importance are eliminated (not in the list)
+order[rf$varselect.interp] # the interpretation procedure leads to select the model with X variables, which contains all of the most important variables
+order[rf$varselect.pred] # the prediction step
+colnames(subset)[order[rf$varselect.thres]]
+colnames(subset)[order[rf$varselect.interp]]
+colnames(subset)[order[rf$varselect.pred]]
+
+###### Subset based on RF
+selected_vars = colnames(subset)[order[rf$varselect.interp]]
+selected_vars = c("car_id","area_reforest_ha", "centroid_x", "centroid_y", selected_vars) # Add other columns
+data_car_refor_rf = data_car_refor_without0 %>% 
   dplyr::select(dplyr::all_of(selected_vars))
 
 ##### With Boruta ---------
@@ -1353,6 +1407,8 @@ getConfirmedFormula(Boruta.defor) # formula object that defines a model based on
 attStats(Boruta.defor) # creates a data frame containing each attribute’s Z score statistics and the fraction of random forest runs in which this attribute was more important than the most important shadow one
 
 #### Correlation and VIF ---------
+
+##### Deforestation -------
 ###### Pearson =====
 
 X = data_car_defor_rf %>% 
@@ -1418,7 +1474,85 @@ data_car_defor_rf = data_car_defor_rf %>%
                   centroid_x,
                   centroid_y))
 
-#### Summary ----------
+##### Reforestation -------
+###### Pearson =====
+
+X = data_car_refor_rf %>% 
+  sf::st_drop_geometry() %>% 
+  dplyr::select(-c(area_reforest_ha,car_id))
+cor_mat = cor(X, use = "pairwise.complete.obs", method = "pearson")
+cor_mat
+
+# Identify strong correlations
+high_corr = cor_mat %>%
+  as.data.frame() %>%
+  tibble::rownames_to_column("var1") %>%
+  tidyr::pivot_longer(-var1,names_to = "var2",values_to = "r") %>%
+  dplyr::filter(var1 < var2, abs(r) > 0.6) %>%
+  dplyr::arrange(desc(abs(r)))
+
+print(high_corr, n=100)
+# Beware:
+# area of forest and RL cover
+# car area and RL cover
+# area of forest and car area
+# area of agriculture/forest inside VS buffer
+# area of agriculture and car area
+
+###### VIF ---------
+X_vif = data_car_refor_rf %>%
+  sf::st_drop_geometry() %>% 
+  as.data.frame()
+vif.result = HH::vif(X_vif, y.name="area_reforest_ha")
+
+# VIF(i) = 1/(1-Ri²) (where Ri² is the R² gotten from the regression of predictor i regarding other predictors)
+# If Ri² is close to 1, it means that the variable i is well explained by the linear combination of other variables ; hence the variable i is redundant in the model 
+# The more Ri² is close to 1, the more VIF increases (+Inf)
+# Thus, the higher the VIF, the stronger the collinearity of i is with other variables (ie the information of i is already contained by others)
+# Check VIF > 2.5
+vif.result[vif.result > 2.5]
+# The results confirm strong correlations between: 
+# CAR area and area of forest/agriculture
+
+###### Variable selection ----
+# We select variables based on their correlations with the response variable
+data_car_refor_rf %>%
+  sf::st_drop_geometry() %>% 
+  dplyr::select(-car_id) %>% 
+  corrr::correlate() %>% 
+  focus(area_reforest_ha) %>% 
+  dplyr::arrange(desc(area_reforest_ha))
+# We retain:
+# car_area_ha 
+# area_refor_buf100_2024_ha
+# area_agri_buf100_1989_ha 
+# Less20For2024
+
+
+###### Re-run VIF ------
+X_vif = data_car_refor_rf %>% 
+  sf::st_drop_geometry() %>% 
+  dplyr::select(area_reforest_ha, 
+                car_area_ha,
+                area_refor_buf100_2024_ha,
+                area_agri_buf100_1989_ha,
+                Less20For2024) %>% 
+  as.data.frame()
+vif.result = HH::vif(X_vif, y.name="area_reforest_ha")
+vif.result[vif.result > 2.5]
+
+###### Subset -------
+data_car_refor_rf = data_car_refor_rf %>% 
+  dplyr::select(c(car_id,
+                  area_reforest_ha, 
+                  car_area_ha,
+                  area_refor_buf100_2024_ha,
+                  area_agri_buf100_1989_ha,
+                  Less20For2024,
+                  centroid_x,
+                  centroid_y))
+
+#### Summary (Deforestation) ----------
 ##### Outliers --------
 # Cleveland plot allow the detection of outliers
 dotplot(as.matrix(data_car_defor_rf %>% sf::st_drop_geometry()), groups = FALSE,
@@ -1434,6 +1568,12 @@ dotplot(as.matrix(data_car_defor_rf %>% sf::st_drop_geometry()), groups = FALSE,
 
 # Grubbs test
 grubbs.test(data_car_defor_rf$car_area_ha)
+
+##### Remove very low values --------
+# Homogeneity of variance was not validated due to the presence of outliers
+data_car_defor_rf = data_car_defor_rf %>% 
+  dplyr::filter(area_deforest_ha > 0.1) %>% 
+  dplyr::filter(area_defor_buf100_2024_ha > 0.1)
 
 ##### Transform variables --------
 # Count 0
@@ -1531,13 +1671,134 @@ coplot(area_deforest_log ~ car_area_log | area_defor_buf100_2024_log,
          abline(tmp)
          points(x, y) })
 
+#### Summary (Reforestation) ----------
+##### Outliers --------
+# Cleveland plot allow the detection of outliers
+dotplot(as.matrix(data_car_refor_rf %>% sf::st_drop_geometry()), groups = FALSE,
+        strip = strip.custom(bg = 'white',
+                             par.strip.text = list(cex = 0.8)),
+        scales = list(x = list(relation = "free"),
+                      y = list(relation = "free"),
+                      draw = FALSE),
+        col = 1, cex  = 0.5, pch = 16,
+        xlab = "Value of the variable",
+        ylab = "Order of the data from text file")
+
+
+# Grubbs test
+grubbs.test(data_car_refor_rf$car_area_ha)
+
 ##### Remove very low values --------
 # Homogeneity of variance was not validated due to the presence of outliers
-data_car_defor_final = data_car_defor_rf_clean %>% 
-  dplyr::filter(area_deforest_ha > 0.1) %>% 
-  dplyr::filter(area_defor_buf100_2024_ha > 0.1)
+data_car_refor_rf = data_car_refor_rf %>% 
+  dplyr::filter(area_reforest_ha > 0.1) %>% 
+  dplyr::filter(area_refor_buf100_2024_ha > 0.1) %>% 
+  dplyr::filter(area_agri_buf100_1989_ha > 0.1)
+
+##### Transform variables --------
+# Count 0
+data_car_refor_rf %>%
+  sf::st_drop_geometry() %>% 
+  dplyr::select(where(is.numeric)) %>%
+  dplyr::summarise(across(everything(), ~ sum(.x == 0, na.rm = TRUE)))
+# Log-transform
+data_car_refor_rf_clean = data_car_refor_rf %>% 
+  dplyr::mutate(car_area_log = log(car_area_ha),
+                area_reforest_log = log(area_reforest_ha),
+                area_refor_buf100_2024_log = log(area_refor_buf100_2024_ha),
+                area_agri_buf100_1989_log = log(area_agri_buf100_1989_ha))
+# Dotplot
+dotplot(as.matrix(data_car_refor_rf_clean %>% sf::st_drop_geometry()), groups = FALSE,
+        strip = strip.custom(bg = 'white',
+                             par.strip.text = list(cex = 0.8)),
+        scales = list(x = list(relation = "free"),
+                      y = list(relation = "free"),
+                      draw = FALSE),
+        col = 1, cex  = 0.5, pch = 16,
+        xlab = "Value of the variable",
+        ylab = "Order of the data from text file")
+
+
+##### Distribution --------
+# Loop to plot hists
+numeric_cols = data_car_refor_rf_clean %>% 
+  sf::st_drop_geometry() %>% 
+  dplyr::select(where(is.numeric)) %>% 
+  names()
+plots = list()
+for (col in numeric_cols) {
+  p = ggplot(data_car_refor_rf_clean, aes(x = .data[[col]])) +
+    geom_histogram(bins = 30, fill = "skyblue", color = "black") +
+    labs(title = paste("Histogram of", col), x = col, y = "Frequency") +
+    theme_minimal()
+  
+  # Ajouter le graphique à la liste
+  plots[[col]] = p
+}
+combined_plot = do.call(wrap_plots, c(plots, ncol = 3))
+print(combined_plot)
+
+##### Spatial blocking --------
+# Deforestation dataset
+data_car_refor_rf_clean$block_x = floor(data_car_refor_rf_clean$centroid_x / 10000) # Distance in meters
+data_car_refor_rf_clean$block_y = floor(data_car_refor_rf_clean$centroid_y / 10000) # Distance in meters
+data_car_refor_rf_clean = data_car_refor_rf_clean %>%
+  dplyr::mutate(sp_block = paste0(block_x, "_", block_y))
+data_car_refor_rf_clean$sp_block = factor(data_car_refor_rf_clean$sp_block)
+ggplot(data_car_refor_rf_clean, aes(x = centroid_x, y = centroid_y, color = sp_block)) +
+  geom_point(size = 0.3) +
+  theme_minimal() +
+  guides(color = "none")
+
+##### Groups of property size -------
+BAMMtools::getJenksBreaks(data_car_refor_rf_clean$car_area_ha, k = 4)
+data_car_refor_rf_clean = data_car_refor_rf_clean %>% 
+  dplyr::mutate(car_area_grp = dplyr::case_when(car_area_ha <= 10 ~ "<10",
+                                                car_area_ha > 10 & car_area_ha <= 20 ~ "10-20",
+                                                car_area_ha > 20 & car_area_ha <= 50 ~ "20-50",
+                                                car_area_ha > 50 ~ ">50",
+                                                TRUE ~ NA))
+data_car_refor_rf_clean$car_area_grp = factor(data_car_refor_rf_clean$car_area_grp,
+                                              levels=c("<10","10-20","20-50",">50"))
+data_car_refor_rf_clean %>% 
+  sf::st_drop_geometry() %>% 
+  dplyr::group_by(car_area_grp) %>% 
+  dplyr::count()
+
+##### Y~X ----------
+plot(area_reforest_log~car_area_log, data=data_car_refor_rf_clean)
+
+plot(area_reforest_log~area_refor_buf100_2024_log, data=data_car_refor_rf_clean)
+
+plot(area_reforest_log~area_agri_buf100_1989_log, data=data_car_refor_rf_clean)
+
+boxplot(area_reforest_log~car_area_grp, data=data_car_refor_rf_clean)
+
+boxplot(area_reforest_log~Less20For2024, data=data_car_refor_rf_clean)
+
+##### Coplots ----------
+# See : Zuur & Ieno 2016, MEE
+# coplot is an excellent graphical tool to visualize the potential presence of interactions.
+M1 = lm(area_reforest_log ~ car_area_log*area_refor_buf100_2024_log*area_agri_buf100_1989_log, 
+        data=data_car_refor_rf_clean)
+summary(M1)
+anova(M1)
+
+# Make the coplot
+# A bivariate linear regression line is added to each scatterplot
+# if all lines are parallel, then there is probably no significant interaction
+coplot(area_reforest_log ~ car_area_log | area_refor_buf100_2024_log, 
+       data=data_car_refor_rf_clean,
+       ylab = "car_area_ha",
+       xlab = "area_refor_buf100_2024_ha",
+       panel = function(x, y, ...) {
+         tmp = lm(y ~ x, na.action = na.omit)
+         abline(tmp)
+         points(x, y) })
 
 #### Modeling -------
+
+##### Deforestation -------
 
 ###### Sub-sample  ----
 # Sub-sample
@@ -1553,7 +1814,7 @@ test_data = testing(split)
 rownames(train_data) = train_data$car_id
 rownames(test_data) = test_data$car_id
 
-##### GLMM -------
+###### GLMM -------
 mod_glmm = glmmTMB(area_deforest_log ~ 
                      car_area_log + area_defor_buf100_2024_log +
                      car_area_log:area_defor_buf100_2024_log +
@@ -1606,7 +1867,7 @@ testSpatialAutocorrelation(simulationOutput,
                            x = train_data$centroid_x,
                            y = train_data$centroid_y)
 
-##### SAR -------
+###### SAR -------
 # Spatial autoregressive models are models that account for spatial autocorrelation among observations (i.e., the response variable is not randomly distributed in space)
 # Y = AX + W(Y) + B
 # Sources: 
@@ -1765,3 +2026,536 @@ data.frame(
 # Read: RMSE is ±7.961294 ha
 # MAE: MAE measures the average magnitude of errors in predictions, without considering their direction. It’s calculated as the average of absolute differences between predicted and actual values.
 # Read: MAE is 3.047084 ha
+
+
+##### Reforestation -------
+
+###### Sub-sample  ----
+# Sub-sample
+split = rsample::initial_split(
+  data_car_refor_rf_clean,
+  prop = 0.8 # 80% training model
+)
+# Extract training and testing datasets
+train_data = training(split)
+test_data = testing(split)
+
+# Put id as rownames
+rownames(train_data) = train_data$car_id
+rownames(test_data) = test_data$car_id
+
+###### GLMM -------
+mod_glmm = glmmTMB(area_reforest_log ~ 
+                     car_area_log + area_refor_buf100_2024_log +
+                     area_agri_buf100_1989_log + factor(Less20For2024) +
+                     car_area_log:area_refor_buf100_2024_log +
+                     (1|sp_block),
+                   data=train_data)
+summary(mod_glmm)
+
+###### Validation -----------
+
+### Check convergence
+check_convergence(mod_glmm)
+
+# 1) Examine plots of residuals versus fitted values for the entire model (to check homogeneity of variance)
+# Zuur & Ieno (210) : In all these graphs the residual variation should be similar. The solution to heterogeneity of variance is either a transformation of the response variable to stabilize the variance, or applying statistical techniques that do not require homogeneity
+# 2) Model residuals versus all explanatory variables to look for patterns
+# 3) For GLMMs: residuals versus fitted values for each grouping level of a random intercept factor
+
+#### Dharma method (from Hartig 2024)
+# Rationale: misspecifications in GL(M)Ms cannot reliably be diagnosed with standard residual plots
+# The "DHARMa" package uses a simulation-based approach to create readily interpretable scaled (quantile) residuals for fitted generalized linear (mixed) models
+# The resulting residuals are standardized to values between 0 and 1 and can be interpreted as intuitively as residuals from a linear regression
+# Also provides a number of plot and test functions for typical model misspecification problems, such as over/underdispersion, zero-inflation, and residual spatial, temporal and phylogenetic autocorrelation.
+# A residual of 0 means that all simulated values are larger than the observed value, and a residual of 0.5 means half of the simulated values are larger than the observed value.
+# NB: If you have a lot of data points, residual diagnostics will nearly inevitably become significant, because having a perfectly fitting model is very unlikely.
+# DHARMa only flags a difference between the observed and expected data - the user has to decide whether this difference is actually a problem for the analysis!
+
+# Calculate the residuals, using the simulateResiduals() function (randomized quantile residuals)
+simulationOutput = simulateResiduals(fittedModel = mod_glmm, plot = F)
+# Access to residuals
+plot(simulationOutput)
+# Left panel: qq-plot to detect overall deviations from the expected distribution, by default with added tests for correct distribution (KS test), dispersion and outliers.
+# Right panel: plotResiduals (right panel) produces a plot of the residuals against the predicted value (or alternatively, other variable). Simulation outliers (data points that are outside the range of simulated values) are highlighted as red stars.
+# To provide a visual aid in detecting deviations from uniformity in y-direction, the plot function calculates an (optional default) quantile regression, which compares the empirical 0.25, 0.5 and 0.75 quantiles in y direction (red solid lines) with the theoretical 0.25, 0.5 and 0.75 quantiles (dashed black line), and provides a p-value for the deviation from the expected quantile
+plotQQunif(simulationOutput) # left plot in plot.DHARMa()
+plotResiduals(simulationOutput) # right plot in plot.DHARMa()
+
+# GL(M)Ms often display over/underdispersion, which means that residual variance is larger/smaller than expected under the fitted model.
+# If overdispersion is present, the main effect is that confidence intervals tend to be too narrow, and p-values to small, leading to inflated type I error. The opposite is true for underdispersion, i.e. the main issue of underdispersion is that you loose power.
+# To check for over/underdispersion, plot the simulateResiduals() and check for deviation around the red line (and residuals around 0 and 1); see examples in DHARMa vignette
+# DHARMa contains several overdispersion tests that compare the dispersion of simulated residuals to the observed residuals
+testDispersion(simulationOutput)
+# A significant ratio > 1 indicates overdispersion, a significant ratio < 1 underdispersion.
+
+# A second test that is typically run for LMs, but not for GL(M)Ms is to plot residuals against the predictors in the model (or potentially predictors that were not in the model) to detect possible misspecifications
+# If you plot the residuals against predictors, space or time, the resulting plots should not only show no systematic dependency of those residuals on the covariates, but they should also again be flat for each fixed situation
+plotResiduals(simulationOutput, train_data$car_area_ha)
+## Autocorrelation
+# Spatial
+testSpatialAutocorrelation(simulationOutput,
+                           x = train_data$centroid_x,
+                           y = train_data$centroid_y)
+
+###### SAR -------
+# Spatial autoregressive models are models that account for spatial autocorrelation among observations (i.e., the response variable is not randomly distributed in space)
+# Y = AX + W(Y) + B
+# Sources: 
+# https://bookdown.org/hhwagner1/LandGenCourse_book/WE_7.html#WE_7
+# https://r-spatial.org/python/17-Econometrics.html
+# Méthodes de régression spatiale : un grand bol d’R (authors: Philippe Apparicio Jérémy Gelb Jean Dubé Joan Carles Martori)
+
+# We first need to define neighbors
+# We define weights in three ways
+# listw.gab: 1 = neighbour, 0 = not a neighbour.
+# listw.d1: inverse distance weights: neighbour j with weight 1/dij
+# listw.d2: inverse squared distance weights: neighbour j with weight 1/dij^2
+# listw.d3: k neighbors
+
+# Binary neighborhood
+mat = train_data %>% sf::st_drop_geometry()
+xy = data.matrix(mat[,c("centroid_x", "centroid_y")])
+# ‘sym=TRUE’ means that if A is a neighbour of B, B is also a neighbour of A
+nb.gab = spdep::graph2nb(spdep::gabrielneigh(xy), sym=TRUE)
+listw.gab = spdep::nb2listw(nb.gab)
+plot(st_geometry(train_data), border = "lightgray")
+plot.nb(nb.gab, xy, add = TRUE)
+
+# Inverse distances
+dlist = spdep::nbdists(nb.gab, xy)
+dlist = lapply(dlist, function(x) 1/x)
+listw.d1 = spdep::nb2listw(nb.gab, style = "W", glist=dlist)
+dlist = lapply(dlist, function(x) 1/x^2)
+listw.d2 = spdep::nb2listw(nb.gab, style = "W", glist=dlist)
+
+# Fixed number of neighbors
+col.knn.nb = knn2nb(knearneigh(sf::st_centroid(train_data), k = 10)) # k is the nuùber of neighbors
+listw.knn = nb2listw(col.knn.nb, style = "W") # to matrix of weights
+plot(st_geometry(train_data), border = "lightgray")
+plot.nb(col.knn.nb, xy, add = TRUE)
+
+# Observe spatial autocorrelation
+spdep::moran.test(train_data$area_reforest_log, listw.gab)
+
+## SAR
+# In trying to model spatial processes, one of the earliest spatial econometric representations is to model the spatial autocorrelation in the residual (spatial error model, SEM)
+# Where Y = XB + u, with X is a covariate, B a vector of parameters, u is an spatially autocorrelated disturbance vector
+# A model with a spatial process in the response only is termed a spatial lag model (SLM, often SAR - spatial autoregressive)
+# SEM spatial error called with errorsarlm(..., Durbin=FALSE) function
+# The method errorsarlm fits a simultaneous autoregressive model (‘sar’) to the error (‘error’) term of a ‘lm’ model
+# SLM	spatial lag called with lagsarlm(..., Durbin=FALSE) function
+# The estimating functions errorsarlm() and lagsarlm() take similar arguments, where the first two, formula and data are shared by most model estimating functions. The third argument is a listw spatial weights object, while na.action behaves as in other model estimating functions if the spatial weights can reasonably be subsetted to avoid observations with missing values. The weights argument may be used to provide weights indicating the known degree of per-observation variability in the variance term - this is not available for lagsarlm().
+
+mod_sar1 = spatialreg::errorsarlm(area_reforest_log ~ 
+                                    car_area_log + area_refor_buf100_2024_log +
+                                    area_agri_buf100_1989_log + factor(Less20For2024), 
+                                  listw=listw.gab,
+                                  data=train_data)
+mod_sar2 = spatialreg::errorsarlm(area_reforest_log ~ 
+                                    car_area_log + area_refor_buf100_2024_log +
+                                    area_agri_buf100_1989_log + factor(Less20For2024), 
+                                  listw=listw.d1,
+                                  data=train_data)
+mod_sar3 = spatialreg::errorsarlm(area_reforest_log ~ 
+                                    car_area_log + area_refor_buf100_2024_log +
+                                    area_agri_buf100_1989_log + factor(Less20For2024), 
+                                  listw=listw.d2,
+                                  data=train_data)
+mod_sar4 = spatialreg::errorsarlm(area_reforest_log ~ 
+                                    car_area_log + area_refor_buf100_2024_log +
+                                    area_agri_buf100_1989_log + factor(Less20For2024), 
+                                  listw=listw.knn,
+                                  data=train_data)
+
+# Comparison (AICc)
+Models = list(mod_sar1=mod_sar1, 
+              mod_sar2=mod_sar2,
+              mod_sar3=mod_sar3,
+              mod_sar4=mod_sar4)
+data.frame(AICc = sapply(Models, MuMIn::AICc)) %>% 
+  dplyr::mutate(delta = AICc - min(AICc)) %>%
+  dplyr::arrange(delta)
+
+# Interpretation
+# The ‘coefficients’ section in the output may be interpreted in a similar way to a standard regression model
+summary(mod_sar2, Nagelkerke = TRUE) # With the argument Nagelkerke = TRUE, we request a pseudo R-squared
+# The `lambda’ section provides a p-value for the null hypothesis that λ=0 - that is, that there is a degree of spatial autocorrelation in the response variable. 
+# If p<0.05, we reject the null hypothesis (i.e., there is spatial autocorrelation)
+
+# There is a positive effect of the log-transformed property size on the log-transformed deforested area (p<0.05)
+# There is a significant positive interaction between the log-transformed property size and the log-transformed deforested area around the property (p<0.05)
+# Nagelkerke pseudo-R-squared: 0.50505 
+# Spatial autocorrelation of residuals
+moran.mc(resid(mod_sar2), listw.d1, nsim = 999)
+# Residuals are no longer spatially autocorrelated!
+
+###### Validation -------
+# Residuals VS adjusted
+residuals = residuals(mod_sar2)
+fitted_values = fitted(mod_sar2)
+ggplot(data.frame(fitted = fitted_values, resid = residuals), aes(x = fitted, y = resid)) +
+  geom_point() +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  labs(title = "Standardized Residuals vs. Fitted Values", x = "Fitted Values", y = "Residuals")
+
+# Hist of residuals
+hist(residuals(mod_sar2))
+shapiro.test(residuals(mod_sar2))
+
+# QQplot
+# Extract residuals from the model
+residuals = residuals(mod_sar2)
+qqplot_data = data.frame(res = residuals)
+ggplot(qqplot_data, aes(sample = res)) +
+  stat_qq(distribution = qnorm) +
+  geom_abline(intercept = 0, slope = 1, color = "red", linetype = "dashed") +
+  labs(title = "QQ Plot of Residuals", x = "Theoretical Quantiles", y = "Sample Quantiles") +
+  theme_minimal()
+
+# Residuals vs. each explanatory variable
+residuals = residuals(mod_sar2)
+ggplot(train_data, aes(x = area_refor_buf100_2024_log, y = residuals)) +
+  geom_point() +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  theme_minimal()
+ggplot(train_data, aes(x = car_area_log, y = residuals)) +
+  geom_point() +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  theme_minimal()
+ggplot(train_data, aes(x = area_agri_buf100_1989_log, y = residuals)) +
+  geom_point() +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  theme_minimal()
+
+###### Cross-validation -----------
+
+# Binary neighborhood
+mat = data_car_refor_rf_clean %>% sf::st_drop_geometry()
+xy = data.matrix(mat[,c("centroid_x", "centroid_y")])
+nb.gab = spdep::graph2nb(spdep::gabrielneigh(xy), sym=TRUE)
+plot(nb.gab, xy)
+listw.gab = spdep::nb2listw(nb.gab)
+
+# Inverse distances
+dlist = spdep::nbdists(nb.gab, xy)
+dlist = lapply(dlist, function(x) 1/x)
+listw.d1 = spdep::nb2listw(nb.gab, style = "W", glist=dlist)
+
+# Testing
+# See https://r-spatial.github.io/spatialreg/reference/predict.sarlm.html
+# In the out-of-sample prediction case (ie. if newdata is not NULL), if legacy.mixed=FALSE or if pred.type!="TS", it should include both in-sample and out-of-sample spatial units
+pred_test = predict(mod_sar2, 
+                    newdata = test_data,
+                    listw = listw.d1,
+                    pred.type = "TS")
+pred_test_exp = exp(pred_test) # Back transformation
+
+# RMSE and MAE
+data.frame(
+  RMSE = RMSE(pred_test_exp, test_data$area_reforest_log),
+  MAE = MAE(pred_test_exp, test_data$area_reforest_log)
+)
+# RMSE is the square root of MSE, bringing the metric back to the same units as the target variable. It provides an easily interpretable measure of average error size
+# RMSE values closer to 0 indicate better model performance. RMSE’s interpretation is straightforward since it’s in the same units as the target variable
+# Read: RMSE is ±6.262405 ha
+# MAE: MAE measures the average magnitude of errors in predictions, without considering their direction. It’s calculated as the average of absolute differences between predicted and actual values.
+# Read: MAE is 3.118551 ha
+
+###### Representation -------
+## Final SEM
+# Binary neighborhood
+mat = data_car_refor_rf_clean %>% sf::st_drop_geometry()
+xy = data.matrix(mat[,c("centroid_x", "centroid_y")])
+# ‘sym=TRUE’ means that if A is a neighbour of B, B is also a neighbour of A
+nb.gab = spdep::graph2nb(spdep::gabrielneigh(xy), sym=TRUE)
+listw.gab = spdep::nb2listw(nb.gab)
+plot(st_geometry(train_data), border = "lightgray")
+plot.nb(nb.gab, xy, add = TRUE)
+
+# Inverse distances
+dlist = spdep::nbdists(nb.gab, xy)
+dlist = lapply(dlist, function(x) 1/x)
+listw.d1 = spdep::nb2listw(nb.gab, style = "W", glist=dlist)
+
+# Reforested area ~ property size
+mod = spatialreg::errorsarlm(area_reforest_log ~ car_area_log, 
+                             listw=listw.d1,
+                             data=data_car_refor_rf_clean)
+summary(mod)
+
+# Predictions
+# Prediction grid
+newdata = data.frame(
+  car_area_log = seq(
+    min(data_car_refor_rf_clean$car_area_log, na.rm = TRUE),
+    max(data_car_refor_rf_clean$car_area_log, na.rm = TRUE),
+    length.out = 100
+  )
+)
+# Design matrix
+X = model.matrix(~ car_area_log, data = newdata)
+# Model coefficients
+beta = mod$coefficients
+V = mod$Hcov   # covariance matrix
+# Predictions + CI
+fit = as.vector(X %*% beta)
+se = sqrt(diag(X %*% V %*% t(X)))
+crit = qnorm(0.975)
+pred_manual <- data.frame(
+  x = newdata$car_area_log,
+  predicted = fit,
+  conf.low = fit - crit * se,
+  conf.high = fit + crit * se
+)
+
+# We plot the results
+ggplot() +
+  geom_line(data = pred_manual, aes(x, predicted), linewidth = 1, color="red") +
+  geom_jitter(
+    data = data_car_refor_rf_clean,
+    aes(x = car_area_log, y = area_reforest_log),
+    width = 1, size = 2.5, alpha = 0.25, color = "black"
+  ) +
+  geom_ribbon(
+    data = pred_manual,
+    aes(x, ymin = conf.low, ymax = conf.high),
+    color = NA, alpha = 0.2, fill = "red"
+  ) +
+  theme_bw() +
+  theme(
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    legend.position = c(0.17, 0.85),
+    text = element_text(family = "Arial Narrow", size=14)
+  ) +
+  xlab("Log of property size (ha)") +
+  ylab("Log of on-property reforested area (ha)")
+
+
+# Reforested area ~ surrounding agricultural area
+mod = spatialreg::errorsarlm(area_reforest_log ~ area_agri_buf100_1989_log, 
+                             listw=listw.d1,
+                             data=data_car_refor_rf_clean)
+summary(mod)
+
+# Predictions
+# Prediction grid
+newdata = data.frame(
+  area_agri_buf100_1989_log = seq(
+    min(data_car_refor_rf_clean$area_agri_buf100_1989_log, na.rm = TRUE),
+    max(data_car_refor_rf_clean$area_agri_buf100_1989_log, na.rm = TRUE),
+    length.out = 100
+  )
+)
+# Design matrix
+X = model.matrix(~ area_agri_buf100_1989_log, data = newdata)
+# Model coefficients
+beta = mod$coefficients
+V = mod$Hcov   # covariance matrix
+# Predictions + CI
+fit = as.vector(X %*% beta)
+se = sqrt(diag(X %*% V %*% t(X)))
+crit = qnorm(0.975)
+pred_manual = data.frame(
+  x = newdata$area_agri_buf100_1989_log,
+  predicted = fit,
+  conf.low = fit - crit * se,
+  conf.high = fit + crit * se
+)
+
+# We plot the results
+ggplot() +
+  geom_line(data = pred_manual, aes(x, predicted), linewidth = 1, color="red") +
+  geom_jitter(
+    data = data_car_refor_rf_clean,
+    aes(x = area_agri_buf100_1989_log, y = area_reforest_log),
+    width = 1, size = 2.5, alpha = 0.25, color = "black"
+  ) +
+  geom_ribbon(
+    data = pred_manual,
+    aes(x, ymin = conf.low, ymax = conf.high),
+    color = NA, alpha = 0.2, fill = "red"
+  ) +
+  theme_bw() +
+  theme(
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    legend.position = c(0.17, 0.85),
+    text = element_text(family = "Arial Narrow", size=14)
+  ) +
+  xlab("Log of surrounding agricultural area (100-m buffer) (ha)") +
+  ylab("Log of on-property reforested area (ha)")
+
+# Reforested area ~ surrounding reforested area
+mod = spatialreg::errorsarlm(area_reforest_log ~ area_refor_buf100_2024_log, 
+                             listw=listw.d1,
+                             data=data_car_refor_rf_clean)
+summary(mod)
+
+# Predictions
+# Prediction grid
+newdata = data.frame(
+  area_refor_buf100_2024_log = seq(
+    min(data_car_refor_rf_clean$area_refor_buf100_2024_log, na.rm = TRUE),
+    max(data_car_refor_rf_clean$area_refor_buf100_2024_log, na.rm = TRUE),
+    length.out = 100
+  )
+)
+# Design matrix
+X = model.matrix(~ area_refor_buf100_2024_log, data = newdata)
+# Model coefficients
+beta = mod$coefficients
+V = mod$Hcov   # covariance matrix
+# Predictions + CI
+fit = as.vector(X %*% beta)
+se = sqrt(diag(X %*% V %*% t(X)))
+crit = qnorm(0.975)
+pred_manual = data.frame(
+  x = newdata$area_refor_buf100_2024_log,
+  predicted = fit,
+  conf.low = fit - crit * se,
+  conf.high = fit + crit * se
+)
+
+# We plot the results
+ggplot() +
+  geom_line(data = pred_manual, aes(x, predicted), linewidth = 1, color="red") +
+  geom_jitter(
+    data = data_car_refor_rf_clean,
+    aes(x = area_refor_buf100_2024_log, y = area_reforest_log),
+    width = 1, size = 2.5, alpha = 0.25, color = "black"
+  ) +
+  geom_ribbon(
+    data = pred_manual,
+    aes(x, ymin = conf.low, ymax = conf.high),
+    color = NA, alpha = 0.2, fill = "red"
+  ) +
+  theme_bw() +
+  theme(
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    legend.position = c(0.17, 0.85),
+    text = element_text(family = "Arial Narrow", size=14)
+  ) +
+  xlab("Log of surrounding reforested area (100-m buffer) (ha)") +
+  ylab("Log of on-property reforested area (ha)")
+
+
+# Reforested area ~ Less than 20% forest in 2024
+# Multiple comparisons
+sub = data_car_refor_rf_clean %>% 
+  sf::st_drop_geometry() %>% 
+  dplyr::select(c(area_reforest_log, Less20For2024)) %>% 
+  dplyr::mutate(
+    Less20For2024 = dplyr::case_when(
+      Less20For2024 == 0 ~ "<20%",
+      Less20For2024 == 1 ~ ">20%",
+      TRUE ~ NA_character_))
+mod = glm(area_reforest_log ~ factor(Less20For2024), family=gaussian, data=sub)
+pairs = summary(pairs(emmeans(mod, ~ factor(Less20For2024)))) # Perform pairwise comparisons
+# Create significance labels
+pairs = pairs %>%
+  dplyr::mutate(signif = dplyr::case_when(
+    p.value < 0.001 ~ "***",
+    p.value < 0.01 ~ "**",
+    p.value < 0.05 ~ "*",
+    TRUE ~ "ns"
+  )) %>%
+  tidyr::separate(contrast, into = c("level1", "level2"), sep = " - ") %>%
+  dplyr::rename(
+    group1 = level1,
+    group2 = level2,
+    p.adj = p.value,
+    p.adj.signif = signif
+  )
+# Compute y.position
+pairs$y.position = max(sub$area_reforest_log, na.rm = TRUE) * 1.15
+# Plot
+ggplot(sub, aes(x = factor(Less20For2024), y = area_reforest_log)) +
+  geom_boxplot(alpha = 0.7, aes(fill = Less20For2024)) +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        legend.position = "none",
+        text = element_text(family = "Arial Narrow", size=14),
+        strip.background = element_rect(fill = "white", color = "black")) +
+  scale_fill_manual(values = c("<20%" = "#1f77b4", ">20%" = "#ff7f0e")) +
+  xlab("Proportion of forest cover on the property (2024) (%)") +
+  ylab("Log of on-property reforested area (ha)") +
+  stat_pvalue_manual(pairs, 
+                     label = "p.adj.signif",
+                     xmin = "group1",
+                     xmax = "group2",
+                     linetype=1,
+                     label_size = 8,
+                     bracket.size = 0.85,
+                     hide.ns = TRUE)
+
+
+# # Reforested area ~ Property size : Surrounding reforested area
+# sub = data_car_refor_rf_clean %>% 
+#   dplyr::mutate(car_area_grp = dplyr::case_when(car_area_ha <= 20 ~ "Small (<20 ha)",
+#                                                 car_area_ha > 20 ~ "Large (>20 ha)",
+#                                                 TRUE ~ NA))
+# # Fit models
+# model1 = glm(area_reforest_log ~ area_refor_buf100_2024_log,
+#               family = gaussian,
+#               data = sub %>% dplyr::filter(car_area_grp == "Small (<20 ha)"))
+# 
+# model2 = glm(area_reforest_log ~ area_refor_buf100_2024_log,
+#              family = gaussian,
+#              data = sub %>% dplyr::filter(car_area_grp == "Large (>20 ha)"))
+# 
+# # Predictions
+# pred1 = ggeffects::ggpredict(model1,
+#                               terms = "area_refor_buf100_2024_log",
+#                               interval = "confidence",
+#                              ci.lvl = 0.95) %>%
+#   dplyr::mutate(car_area_grp = "Small (<20 ha)")
+# 
+# pred2 = ggeffects::ggpredict(model2,
+#                               terms = "area_refor_buf100_2024_log",
+#                               interval = "confidence",
+#                              ci.lvl = 0.95) %>%
+#   dplyr::mutate(car_area_grp = "Large (>20 ha)")
+# 
+# # Combine predictions
+# pred_all = dplyr::bind_rows(pred1, pred2)
+# 
+# # Plot everything together
+# ggplot() +
+#   # raw data
+#   geom_jitter(data = sub,
+#               aes(x = area_refor_buf100_2024_log,
+#                   y = area_reforest_log,
+#                   color = car_area_grp),
+#               width = 1, size = 2.5, alpha = 0.5) +
+#   
+#   # regression lines
+#   geom_line(data = pred_all,
+#             aes(x = x, y = predicted, color = car_area_grp),
+#             linewidth = 1.2) +
+#   
+#   # confidence bands
+#   geom_ribbon(data = pred_all,
+#               aes(x = x, ymin = conf.low, ymax = conf.high,
+#                   fill = car_area_grp),
+#               alpha = 0.2, color = NA) +
+#   
+#   # manual colors
+#   scale_color_manual(values = c("Small (<20 ha)" = "lightblue",
+#                                 "Large (>20 ha)" = "red")) +
+#   scale_fill_manual(values = c("Small (<20 ha)" = "lightblue",
+#                                "Large (>20 ha)" = "red")) +
+#   
+#   theme_bw() +
+#   theme(panel.grid = element_blank(),
+#         text = element_text(family = "Arial Narrow", size = 14)) +
+#   
+#   labs(
+#     x = "Log of surrounding reforested area (100-m buffer) (ha)",
+#     y = "Log of on-property reforested area (ha)",
+#     color = "Property size",
+#     fill = "Property size"
+#   )

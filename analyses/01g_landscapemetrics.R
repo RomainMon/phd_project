@@ -129,16 +129,43 @@ for (i in seq_along(rasters_forest_age)) {
 plot(rasters_forest_age[[36]], col = c("#AFC0F1", "#BEC3EB","#CCC7E6", "#EACEDB"))
 
 
+#### Simulation rasters -------
+base_path = here("outputs", "data", "PLUS", "ca_simul")
+raster_files = list.files(base_path, pattern = "\\.tif$", full.names = TRUE)
+
+# Extract years
+years_ca = stringr::str_extract(basename(raster_files), "(?<!\\d)\\d{4}(?!\\d)")
+# Create a dataframe to link files and years
+raster_df = data.frame(file = raster_files, years_ca = as.numeric(years_ca)) %>%
+  dplyr::arrange(years_ca)
+# Remove first line (2024 simulation)
+raster_df = raster_df %>% 
+  dplyr::filter(years_ca != 2024)
+# Load rasters in chronological order
+rasters_ca = lapply(raster_df$file, terra::rast)
+years_ca = raster_df$years_ca
+# Check
+for (i in seq_along(rasters_ca)) {
+  cat("Year", years_ca[i], " → raster name:", basename(raster_df$file[i]), "\n")
+}
+plot(rasters_ca[[1]], col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e"))
+plot(rasters_ca[[2]], col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e"))
+plot(rasters_ca[[3]], col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e"))
+# Reproject
+# Template raster
+template_rast = rasters_reclass[[1]]
+crs(template_rast)
+rasters_ca = lapply(rasters_ca, terra::project, template_rast, method = "near")
+crs(rasters_ca[[1]])
+
 ### Download Makurhini -----
 # library(devtools)
 # library(remotes)
 # install_github("connectscape/Makurhini", dependencies = TRUE, upgrade = "never")
 
-
 ### Compute class-level landscape metrics ---------
 # NB: All functions in landscapemetrics start with lsm_ (for landscape metrics). The second part of the name specifies the level (patch - p, class - c or landscape - l)
 # landscapemetrics works on categorical rasters where classes are integers. check_landscape() verifies if the landscapes are in good format
-
 
 # Check landscape validity (for landscape metrics)
 check_landscape(rasters_reclass[[36]])
@@ -147,7 +174,7 @@ check_landscape(rasters_reclass_cons_cat[[21]])
 check_landscape(rasters_mspa[[36]])
 check_landscape(rasters_tm[[35]])
 check_landscape(rasters_forest_age[[36]])
-
+check_landscape(rasters_ca[[1]])
 
 #### Using landscapemetrics  ---------
 
@@ -222,8 +249,8 @@ compute_one_class_metrics = function(r, year, class_value, metrics_to_compute) {
 }
 
 
-##### Global LULC evolution -----
-# Here, we're interested in forest evolution (as a whole)
+##### Past LULC evolution -----
+# Here, we're interested in evolution of all land uses
 all_lulc_classes = purrr::map2_dfr(
   rasters_reclass,
   years,
@@ -244,6 +271,27 @@ all_lulc_classes = all_lulc_classes %>%
 # quick summary
 summary(all_lulc_classes)
 
+##### Future LULC evolution -----
+# Here, we're interested in simulated LULC evolution
+all_lulc_classes_simul = purrr::map2_dfr(
+  rasters_ca,
+  years_ca,
+  ~ compute_class_metrics(.x, .y, metrics_to_compute = c("lsm_c_ca", "lsm_c_pland", "lsm_c_ed"))
+)
+
+# To wide format
+all_lulc_classes_simul = all_lulc_classes_simul %>% 
+  tidyr::pivot_wider(
+    names_from = metric,  # the column whose values will become new column names
+    values_from = value   # the column containing the values
+  )
+
+# Remove columns
+all_lulc_classes_simul = all_lulc_classes_simul %>% 
+  dplyr::select(-c(id,layer))
+
+# quick summary
+summary(all_lulc_classes_simul)
 
 ##### Forest status --------
 plot(rasters_reclass_forest_cat[[36]])
@@ -583,14 +631,16 @@ forest_class_metrics_final = dplyr::left_join(forest_class_metrics_FFI, ECA_fina
 
 
 # 2. Landscape metrics for forest core and corridor
-forest_core_corridor_metrics_final = bind_rows(forest_core_metrics, forest_corridors_metrics)
+forest_core_corridor_metrics_final = dplyr::bind_rows(forest_core_metrics, forest_corridors_metrics)
 
+# 3. Past and future LULC evolution
+all_lulc_classes_final = dplyr::bind_rows(all_lulc_classes, all_lulc_classes_simul)
 
 ### Export datasets ------
 base_path = here("outputs", "data", "landscapemetrics")
 
 # Export landscape metrics
-write.csv(all_lulc_classes, file = file.path(base_path, "all_lulc_classes_bbox_1989_2024.csv"), row.names = FALSE)
+write.csv(all_lulc_classes_final, file = file.path(base_path, "all_lulc_classes_bbox_1989_2100.csv"), row.names = FALSE)
 write.csv(forest_class_metrics_final, file = file.path(base_path, "forest_class_metrics_bbox_1989_2024.csv"), row.names=FALSE)
 write.csv(forest_core_corridor_metrics_final, file = file.path(base_path, "forest_core_corridors_metrics_bbox_1989_2024.csv"), row.names=FALSE)
 write.csv(forest_cat_metrics, file = file.path(base_path, "forest_cat_metrics_bbox_2024.csv"), row.names=FALSE)
