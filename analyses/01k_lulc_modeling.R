@@ -409,23 +409,23 @@ data_defor_pixel %>%
                   tmin_mean_sc, tmax_mean_sc)) %>% 
   corrr::correlate() %>% 
   focus(type) 
-# We retain the proportion of forest area
-# Tmin is more strongly correlated than tmax
+# We retain :
+# The proportion of forest area
+# Tmin
 
 ###### Re-run VIF ------
 X_vif = data_defor_pixel %>% 
   dplyr::select(type, 
                 in_car, in_pub_res, in_rppn, in_rl, in_apa,
-                prop_forest_100m_sc,
+                prop_forest_100m_sc, prop_urb_100m_sc,
                 dist_river_m_sc, dist_urban_m_sc, dist_road_m_sc, dist_edge_m_sc,
                 slope_pct_sc, alt_m_sc,
                 prec_sum_sc, tmin_mean_sc,
-                forest_age_sc,
                 year) %>% 
   as.data.frame()
 vif.result = HH::vif(X_vif, y.name="type")
 vif.result[vif.result > 2.5]
-# There is still a strong correlation between forest age and year
+# All good!
 
 ##### Reforestation dataset -----
 ###### Pearson =====
@@ -479,8 +479,9 @@ data_refor_pixel %>%
                   tmin_mean_sc, tmax_mean_sc)) %>% 
   corrr::correlate() %>% 
   focus(type) 
-# We retain the proportion of forest
-# We keep tmin to remain consistent
+# We retain:
+# The proportion of forest
+# Tmin
 
 ###### Re-run VIF ------
 X_vif = data_refor_pixel %>% 
@@ -492,7 +493,7 @@ X_vif = data_refor_pixel %>%
                 prec_sum_sc, tmin_mean_sc) %>% 
   as.data.frame()
 vif.result = HH::vif(X_vif, y.name="type")
-vif.result[vif.result > 2.5] # All good
+vif.result[vif.result > 2.5] # All good!
 
 #### To factor --------
 
@@ -578,6 +579,11 @@ train_data %>%
 test_data %>% 
   dplyr::group_by(year, type) %>% 
   dplyr::count()
+
+### Export both datasets
+base_path = here("outputs", "data", "MapBiomas", "LULCC_datasets")
+write.csv(train_data, file = file.path(base_path, "train_data_pixel_defor.csv"), row.names = FALSE)
+write.csv(test_data, file = file.path(base_path, "test_data_pixel_defor.csv"), row.names = FALSE)
 
 ## GLMM with binomial distribution
 # We use the logit function to predict values between 0 and 1
@@ -914,6 +920,11 @@ train_data %>%
 test_data %>% 
   dplyr::group_by(year, type) %>% 
   dplyr::count()
+
+### Export both datasets
+base_path = here("outputs", "data", "MapBiomas", "LULCC_datasets")
+write.csv(train_data, file = file.path(base_path, "train_data_pixel_refor.csv"), row.names = FALSE)
+write.csv(test_data, file = file.path(base_path, "test_data_pixel_refor.csv"), row.names = FALSE)
 
 ## GLMM with binomial distribution
 # We use the logit function to predict values between 0 and 1
@@ -1460,7 +1471,8 @@ X_vif = data_car_defor_rf %>%
   sf::st_drop_geometry() %>% 
   dplyr::select(area_deforest_ha, 
                 car_area_ha,
-                area_defor_buf100_2024_ha) %>% 
+                area_defor_buf100_2024_ha,
+                area_agri_buf100_2024_ha) %>% 
   as.data.frame()
 vif.result = HH::vif(X_vif, y.name="area_deforest_ha")
 vif.result[vif.result > 2.5]
@@ -1471,6 +1483,7 @@ data_car_defor_rf = data_car_defor_rf %>%
                   area_deforest_ha, 
                   car_area_ha,
                   area_defor_buf100_2024_ha,
+                  area_agri_buf100_2024_ha,
                   centroid_x,
                   centroid_y))
 
@@ -1803,12 +1816,17 @@ coplot(area_reforest_log ~ car_area_log | area_refor_buf100_2024_log,
 ###### Sub-sample  ----
 # Sub-sample
 split = rsample::initial_split(
-  data_car_defor_final,
+  data_car_defor_rf_clean,
   prop = 0.8 # 80% training model
 )
 # Extract training and testing datasets
 train_data = training(split)
 test_data = testing(split)
+
+### Export both datasets
+base_path = here("outputs", "data", "MapBiomas", "LULCC_datasets")
+write.csv(train_data, file = file.path(base_path, "train_data_car_defor.csv"), row.names = FALSE)
+write.csv(test_data, file = file.path(base_path, "test_data_car_defor.csv"), row.names = FALSE)
 
 # Put id as rownames
 rownames(train_data) = train_data$car_id
@@ -2039,6 +2057,11 @@ split = rsample::initial_split(
 # Extract training and testing datasets
 train_data = training(split)
 test_data = testing(split)
+
+### Export both datasets
+base_path = here("outputs", "data", "MapBiomas", "LULCC_datasets")
+write.csv(train_data, file = file.path(base_path, "train_data_car_refor.csv"), row.names = FALSE)
+write.csv(test_data, file = file.path(base_path, "test_data_car_refor.csv"), row.names = FALSE)
 
 # Put id as rownames
 rownames(train_data) = train_data$car_id
