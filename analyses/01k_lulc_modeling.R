@@ -1407,11 +1407,12 @@ selected_vars = c("car_id","area_reforest_ha", "centroid_x", "centroid_y", selec
 data_car_refor_rf = data_car_refor_without0 %>% 
   dplyr::select(dplyr::all_of(selected_vars))
 
+
 ##### With Boruta ---------
 
 set.seed(1)
 # Setting doTrace argument to 1 or 2 makes Boruta report the progress of the process; version 2 is a little more verbose, namely it shows attribute decisions as soon as they are cleared
-Boruta.defor = Boruta(area_deforest_ha ~ ., data = subset, doTrace = 2, ntree = 500)
+Boruta.defor = Boruta(area_reforest_ha ~ ., data = subset, doTrace = 2, ntree = 500)
 Boruta.defor # Result
 plot(Boruta.defor) # Z scores variability among attributes during the Boruta run
 getConfirmedFormula(Boruta.defor) # formula object that defines a model based only on confirmed attributes
@@ -1825,8 +1826,8 @@ test_data = testing(split)
 
 ### Export both datasets
 base_path = here("outputs", "data", "MapBiomas", "LULCC_datasets")
-write.csv(train_data, file = file.path(base_path, "train_data_car_defor.csv"), row.names = FALSE)
-write.csv(test_data, file = file.path(base_path, "test_data_car_defor.csv"), row.names = FALSE)
+st_write(train_data, here(base_path, "train_data_car_defor.gpkg"))
+st_write(test_data, here(base_path, "test_data_car_defor.gpkg"))
 
 # Put id as rownames
 rownames(train_data) = train_data$car_id
@@ -2060,8 +2061,8 @@ test_data = testing(split)
 
 ### Export both datasets
 base_path = here("outputs", "data", "MapBiomas", "LULCC_datasets")
-write.csv(train_data, file = file.path(base_path, "train_data_car_refor.csv"), row.names = FALSE)
-write.csv(test_data, file = file.path(base_path, "test_data_car_refor.csv"), row.names = FALSE)
+st_write(train_data, here(base_path, "train_data_car_refor.gpkg"))
+st_write(test_data, here(base_path, "test_data_car_refor.gpkg"))
 
 # Put id as rownames
 rownames(train_data) = train_data$car_id

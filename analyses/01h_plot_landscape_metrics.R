@@ -206,7 +206,7 @@ res_change = data %>%
   ) %>%
   dplyr::pull(txt)
 
-cat("Predicted changes between 2024 and 2024 are:\n")
+cat("Predicted changes between 2024 and 2100 are:\n")
 cat(paste0("* ", res_change, collapse="\n"), "\n")
 
 ##### Line plot (1989-2024) -----
