@@ -1219,7 +1219,7 @@ ggplot(coef_refor, aes(x = OR, y = reorder(term, OR))) +
 # Data structure
 str(data_car)
 
-# other variables
+# Other variables
 # Less then 20% of forest in 2024
 data_car = data_car %>% 
   dplyr::mutate(Less20For2024 = dplyr::case_when(prop_forest_2024 <= 0.20 ~ 1, TRUE ~ 0),
@@ -1465,7 +1465,9 @@ data_car_defor_rf %>%
   focus(area_deforest_ha) %>% 
   dplyr::arrange(desc(area_deforest_ha))
 # We retain:
-# car_area_ha 
+# area_defor_buf100_2024_ha 
+# area_agri_buf100_2024_ha
+# car_area_ha
 
 ###### Re-run VIF ------
 X_vif = data_car_defor_rf %>% 
@@ -1490,7 +1492,6 @@ data_car_defor_rf = data_car_defor_rf %>%
 
 ##### Reforestation -------
 ###### Pearson =====
-
 X = data_car_refor_rf %>% 
   sf::st_drop_geometry() %>% 
   dplyr::select(-c(area_reforest_ha,car_id))
@@ -1507,11 +1508,12 @@ high_corr = cor_mat %>%
 
 print(high_corr, n=100)
 # Beware:
-# area of forest and RL cover
-# car area and RL cover
-# area of forest and car area
+# area of agriculture vs area of forest
+# value in 1989 vs value in 2024
+# area of forest vs rl cover
+# car area VS rl cover
 # area of agriculture/forest inside VS buffer
-# area of agriculture and car area
+# area of forest/agriculture VS car area
 
 ###### VIF ---------
 X_vif = data_car_refor_rf %>%
@@ -1525,8 +1527,7 @@ vif.result = HH::vif(X_vif, y.name="area_reforest_ha")
 # Thus, the higher the VIF, the stronger the collinearity of i is with other variables (ie the information of i is already contained by others)
 # Check VIF > 2.5
 vif.result[vif.result > 2.5]
-# The results confirm strong correlations between: 
-# CAR area and area of forest/agriculture
+# The results confirm strong correlations
 
 ###### Variable selection ----
 # We select variables based on their correlations with the response variable
@@ -1535,21 +1536,22 @@ data_car_refor_rf %>%
   dplyr::select(-car_id) %>% 
   corrr::correlate() %>% 
   focus(area_reforest_ha) %>% 
-  dplyr::arrange(desc(area_reforest_ha))
+  dplyr::arrange(desc(area_reforest_ha)) %>% 
+  print(n=25)
 # We retain:
 # car_area_ha 
 # area_refor_buf100_2024_ha
-# area_agri_buf100_1989_ha 
+# area_forest_buf100_1989_ha 
+# rl_cover_ha
 # Less20For2024
-
 
 ###### Re-run VIF ------
 X_vif = data_car_refor_rf %>% 
   sf::st_drop_geometry() %>% 
   dplyr::select(area_reforest_ha, 
                 car_area_ha,
+                area_forest_buf100_1989_ha,
                 area_refor_buf100_2024_ha,
-                area_agri_buf100_1989_ha,
                 Less20For2024) %>% 
   as.data.frame()
 vif.result = HH::vif(X_vif, y.name="area_reforest_ha")
@@ -1560,8 +1562,8 @@ data_car_refor_rf = data_car_refor_rf %>%
   dplyr::select(c(car_id,
                   area_reforest_ha, 
                   car_area_ha,
+                  area_forest_buf100_1989_ha,
                   area_refor_buf100_2024_ha,
-                  area_agri_buf100_1989_ha,
                   Less20For2024,
                   centroid_x,
                   centroid_y))
@@ -1597,9 +1599,10 @@ data_car_defor_rf %>%
   dplyr::summarise(across(everything(), ~ sum(.x == 0, na.rm = TRUE)))
 # Log-transform
 data_car_defor_rf_clean = data_car_defor_rf %>% 
-  dplyr::mutate(car_area_log = log(car_area_ha),
-                area_deforest_log = log(area_deforest_ha),
-                area_defor_buf100_2024_log = log(area_defor_buf100_2024_ha+ 0.0001))
+  dplyr::mutate(area_deforest_log = log(area_deforest_ha),
+                car_area_log = log(car_area_ha),
+                area_defor_buf100_2024_log = log(area_defor_buf100_2024_ha),
+                area_agri_buf100_2024_log = log(area_agri_buf100_2024_ha+0.0001))
 # Dotplot
 dotplot(as.matrix(data_car_defor_rf_clean %>% sf::st_drop_geometry()), groups = FALSE,
         strip = strip.custom(bg = 'white',
@@ -1611,6 +1614,11 @@ dotplot(as.matrix(data_car_defor_rf_clean %>% sf::st_drop_geometry()), groups = 
         xlab = "Value of the variable",
         ylab = "Order of the data from text file")
 
+# Outlier
+# Grubbs test
+grubbs.test(data_car_defor_rf_clean$area_agri_buf100_2024_log)
+data_car_defor_rf_clean = data_car_defor_rf_clean %>% 
+  dplyr::filter(area_agri_buf100_2024_log > -9)
 
 ##### Distribution --------
 # Loop to plot hists
@@ -1707,7 +1715,7 @@ grubbs.test(data_car_refor_rf$car_area_ha)
 data_car_refor_rf = data_car_refor_rf %>% 
   dplyr::filter(area_reforest_ha > 0.1) %>% 
   dplyr::filter(area_refor_buf100_2024_ha > 0.1) %>% 
-  dplyr::filter(area_agri_buf100_1989_ha > 0.1)
+  dplyr::filter(area_forest_buf100_1989_ha > 0.1)
 
 ##### Transform variables --------
 # Count 0
@@ -1717,10 +1725,10 @@ data_car_refor_rf %>%
   dplyr::summarise(across(everything(), ~ sum(.x == 0, na.rm = TRUE)))
 # Log-transform
 data_car_refor_rf_clean = data_car_refor_rf %>% 
-  dplyr::mutate(car_area_log = log(car_area_ha),
-                area_reforest_log = log(area_reforest_ha),
-                area_refor_buf100_2024_log = log(area_refor_buf100_2024_ha),
-                area_agri_buf100_1989_log = log(area_agri_buf100_1989_ha))
+  dplyr::mutate(area_reforest_log = log(area_reforest_ha),
+                car_area_log = log(car_area_ha),
+                area_forest_buf100_1989_log = log(area_forest_buf100_1989_ha),
+                area_refor_buf100_2024_log = log(area_refor_buf100_2024_ha))
 # Dotplot
 dotplot(as.matrix(data_car_refor_rf_clean %>% sf::st_drop_geometry()), groups = FALSE,
         strip = strip.custom(bg = 'white',
@@ -1784,7 +1792,7 @@ plot(area_reforest_log~car_area_log, data=data_car_refor_rf_clean)
 
 plot(area_reforest_log~area_refor_buf100_2024_log, data=data_car_refor_rf_clean)
 
-plot(area_reforest_log~area_agri_buf100_1989_log, data=data_car_refor_rf_clean)
+plot(area_reforest_log~area_forest_buf100_1989_log, data=data_car_refor_rf_clean)
 
 boxplot(area_reforest_log~car_area_grp, data=data_car_refor_rf_clean)
 
@@ -1793,7 +1801,7 @@ boxplot(area_reforest_log~Less20For2024, data=data_car_refor_rf_clean)
 ##### Coplots ----------
 # See : Zuur & Ieno 2016, MEE
 # coplot is an excellent graphical tool to visualize the potential presence of interactions.
-M1 = lm(area_reforest_log ~ car_area_log*area_refor_buf100_2024_log*area_agri_buf100_1989_log, 
+M1 = lm(area_reforest_log ~ car_area_log*area_refor_buf100_2024_log*area_forest_buf100_1989_log, 
         data=data_car_refor_rf_clean)
 summary(M1)
 anova(M1)
@@ -1826,8 +1834,8 @@ test_data = testing(split)
 
 ### Export both datasets
 base_path = here("outputs", "data", "MapBiomas", "LULCC_datasets")
-st_write(train_data, here(base_path, "train_data_car_defor.gpkg"))
-st_write(test_data, here(base_path, "test_data_car_defor.gpkg"))
+st_write(train_data, here(base_path, "train_data_car_defor.gpkg"), append=FALSE)
+st_write(test_data, here(base_path, "test_data_car_defor.gpkg"), append=FALSE)
 
 # Put id as rownames
 rownames(train_data) = train_data$car_id
@@ -2015,7 +2023,7 @@ ggplot(train_data, aes(x = car_area_log, y = residuals)) +
 ###### Cross-validation -----------
 
 # Binary neighborhood
-mat = data_car_defor_final %>% sf::st_drop_geometry()
+mat = test_data %>% sf::st_drop_geometry()
 xy = data.matrix(mat[,c("centroid_x", "centroid_y")])
 nb.gab = spdep::graph2nb(spdep::gabrielneigh(xy), sym=TRUE)
 plot(nb.gab, xy)
@@ -2061,8 +2069,8 @@ test_data = testing(split)
 
 ### Export both datasets
 base_path = here("outputs", "data", "MapBiomas", "LULCC_datasets")
-st_write(train_data, here(base_path, "train_data_car_refor.gpkg"))
-st_write(test_data, here(base_path, "test_data_car_refor.gpkg"))
+st_write(train_data, here(base_path, "train_data_car_refor.gpkg"), append=FALSE)
+st_write(test_data, here(base_path, "test_data_car_refor.gpkg"), append=FALSE)
 
 # Put id as rownames
 rownames(train_data) = train_data$car_id
@@ -2255,7 +2263,7 @@ ggplot(train_data, aes(x = area_agri_buf100_1989_log, y = residuals)) +
 ###### Cross-validation -----------
 
 # Binary neighborhood
-mat = data_car_refor_rf_clean %>% sf::st_drop_geometry()
+mat = test_data %>% sf::st_drop_geometry()
 xy = data.matrix(mat[,c("centroid_x", "centroid_y")])
 nb.gab = spdep::graph2nb(spdep::gabrielneigh(xy), sym=TRUE)
 plot(nb.gab, xy)
