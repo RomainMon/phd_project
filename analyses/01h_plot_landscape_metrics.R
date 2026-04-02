@@ -60,7 +60,7 @@ defor_refor_metrics = readr::read_csv(
 class_colors = tibble::tibble(
   class = c(1,2,3,4,5,6),
   Description = c("Forest", "Other non-forest formation", "Wetlands and mangroves", "Agriculture",
-                  "Water","Non vegetated areas"
+                  "Water","Built-up"
   ),
   Color = c(
     "#32a65e", "#ad975a", "#519799", "#D1D100", "#0000FF", "#d4271e"
@@ -541,15 +541,15 @@ ggplot(data, aes(x = year, y = delta_ca, fill = Description)) +
                      expand = expansion(mult = c(0.02, 0.05))) +
   scale_fill_manual(values = c("Forest" = "#32a65e",
                                "Agriculture" = "#D1D100",
-                               "Non vegetated areas" = "#d4271e",
+                               "Built-up" = "#d4271e",
                                "forest increasing" = "#B8E0FF",
                                "forest decreasing" = "#FFA8A8"),
-    breaks = c("Forest", "Agriculture", "Non vegetated areas"),
-    labels = c("Forest", "Agriculture", "Non vegetated areas"),
+    breaks = c("Forest", "Agriculture", "Built-up"),
+    labels = c("Forest", "Agriculture", "Built-up"),
     name = "Land use class") +
   scale_color_manual(values = c("Forest" = "#32a65e",
                                 "Agriculture" = "#D1D100",
-                                "Non vegetated areas" = "#d4271e"),
+                                "Built-up" = "#d4271e"),
                      guide = "none") +
   labs(x = "Year", y = "Change in surface (ha)") +
   theme_classic(base_size = 14) +
