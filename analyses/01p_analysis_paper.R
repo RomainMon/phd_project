@@ -391,7 +391,7 @@ waffle1989 = ggplot(data_1989, aes(x, y, fill = Description)) +
         plot.title = element_text(
           family = "Arial Narrow",
           face = "bold",
-          size = 12,
+          size = 16,
           hjust = 0.5))
 
 
@@ -427,7 +427,7 @@ waffle2024 = ggplot(data_2024, aes(x, y, fill = Description)) +
         plot.title = element_text(
           family = "Arial Narrow",
           face = "bold",
-          size = 12,
+          size = 16,
           hjust = 0.5))
 
 
@@ -471,7 +471,7 @@ waffle2100 = ggplot(data_2100, aes(x, y, fill = Description)) +
         plot.title = element_text(
           family = "Arial Narrow",
           face = "bold",
-          size = 12,
+          size = 16,
           hjust = 0.5))
 
 
@@ -602,9 +602,9 @@ lulcc_plot = ggplot() +
   theme(
     legend.position = "right",
     plot.margin = margin(0, 0, 0, 0),
-    plot.title = element_text(family = "Arial Narrow", face = "bold", size = 12, hjust = 0),
-    axis.title = element_text(size = 10, family = "Arial Narrow"),
-    axis.text = element_text(size = 8, family = "Arial")
+    plot.title = element_text(family = "Arial Narrow", face = "bold", size = 16, hjust = 0),
+    axis.title = element_text(size = 14, family = "Arial Narrow"),
+    axis.text = element_text(size = 12, family = "Arial")
   ) +
   geom_segment(
     data = transition_data,
@@ -633,6 +633,62 @@ plot(final_plot)
 png(here("outputs","plot","01p_paper1_LULC_1989-2100.png"), width = 3000, height = 2000, res = 300)
 plot(final_plot)
 dev.off()
+
+#### Evolution of main land uses -------
+# Prepare data
+data = all_lulc_metrics %>%
+  dplyr::filter(year <= 2024) %>% 
+  dplyr::select(year, class, ca) %>%
+  dplyr::mutate(
+    year = as.integer(year),
+    class = as.integer(class),
+    ca = as.numeric(ca)
+  ) %>%
+  # Keep only Forest (1), Agriculture (4), Artificial (6)
+  dplyr::filter(class %in% c(1, 4, 6)) %>%
+  # Compute change in surface
+  dplyr::group_by(class) %>%
+  dplyr::mutate(delta_ca = ca - dplyr::lag(ca, order_by = year)) %>%
+  dplyr::filter(!is.na(delta_ca)) %>%
+  dplyr::ungroup() %>%
+  # Add readable names and colors
+  dplyr::left_join(class_colors, by = "class")
+
+
+png(here("outputs","plot","01h_lm_pland_barplot0.png"), width = 2500, height = 1500, res = 300)
+
+ggplot(data, aes(x = year, y = delta_ca, group = Description)) +
+  geom_col(data = data,aes(x = year, y = delta_ca, fill = Description),
+           position = position_dodge(width = 0.8), # Increase width to increase non-overlapping between bars
+           color = "white", linewidth = 0.2, width = 1) +
+  geom_smooth(data = data, aes(x = year, y = delta_ca, color = Description), 
+              method = "loess",
+              se = FALSE,
+              linewidth = 1,
+              linetype = "longdash",
+              span = 0.300) + # change the span to change the smoothening of the line)
+  geom_hline(yintercept = 0, color = "black", linewidth = 0.6) +
+  scale_x_continuous( breaks = seq(min(data$year), max(data$year), by = 2)) +
+  scale_fill_manual(values = setNames(class_colors$Color, class_colors$Description), name = "Land use class") +
+  scale_color_manual(values = setNames(class_colors$Color, class_colors$Description), name = "Land use class") +
+  labs(
+    x = "Year",
+    y = "Change in surface (ha)",
+    fill = "Land use class",
+    color = "Land use class",
+  ) +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "bottom",
+        axis.title = element_text(size = 14, family = "Arial Narrow"),
+        axis.text = element_text(size = 12, family = "Arial"),
+        legend.title = element_text(size = 12, family = "Arial Narrow"),
+        legend.text  = element_text(size = 12, family = "Arial Narrow"),
+        legend.key.width  = unit(0.4, "cm"),
+        legend.key.height = unit(0.3, "cm"))
+
+dev.off()
+
 
 #### Forest age -------
 data = forest_age_metrics %>%
@@ -731,12 +787,11 @@ ggplot() +
     y = "Forest area (ha)") +
   theme_minimal() +
   theme(
-    plot.title = element_text(face = "bold", hjust = 0.5, family = "Arial Narrow"),
-    axis.title = element_text(size = 12, family = "Arial Narrow"),
-    axis.text  = element_text(size = 10, family = "Arial"),
-    axis.text.x = element_text(size = 8, angle = 45, hjust = 1, family = "Arial"),
-    legend.title = element_text(size = 11, family = "Arial Narrow"),
-    legend.text  = element_text(size = 10),
+    axis.title = element_text(size = 14, family = "Arial Narrow"),
+    axis.text  = element_text(size = 12, family = "Arial"),
+    axis.text.x = element_text(size = 10, angle = 45, hjust = 1, family = "Arial"),
+    legend.title = element_text(size = 14, family = "Arial Narrow"),
+    legend.text  = element_text(size = 12),
     panel.grid.minor = element_blank(),
     legend.position = "bottom"
   )
@@ -758,15 +813,15 @@ data = forest_class_metrics %>%
   ) %>%
   dplyr::mutate(
     Metric = dplyr::case_when(
-      Metric == "ca" ~ "Surface area (ha)",
-      Metric == "np" ~ "Number of patches",
-      Metric == "area_mn" ~ "Mean patch size (ha)",
-      Metric == "FFI" ~ "Forest Fragmentation Index (FFI)",
+      Metric == "ca" ~ "a) Surface area (ha)",
+      Metric == "np" ~ "b) Number of patches",
+      Metric == "area_mn" ~ "c) Mean patch size (ha)",
+      Metric == "FFI" ~ "d) Forest Fragmentation Index (FFI)",
       TRUE ~ Metric))
 
 # Set facet order
-data$Metric = factor(data$Metric, levels=c("Surface area (ha)", "Number of patches", 
-                                           "Mean patch size (ha)", "Forest Fragmentation Index (FFI)"))
+data$Metric = factor(data$Metric, levels=c("a) Surface area (ha)", "b) Number of patches", 
+                                           "c) Mean patch size (ha)", "d) Forest Fragmentation Index (FFI)"))
 
 # Plot facets
 png(here("outputs","plot","01h_lm_forest_metrics_lineplot.png"), width = 2000, height = 2000, res = 300)
@@ -940,10 +995,11 @@ defor_coeff_plot = ggplot(coef_defor, aes(x = OR, y = term_ordered, color = colo
   theme(
     panel.border = element_rect(color="black", fill = NA, linewidth = 0.5),
     text = element_text(family = "Arial Narrow"),
-    plot.title = element_text(family = "Arial Narrow", face = "bold", size = 12, hjust = 0),
+    plot.title = element_text(family = "Arial Narrow", face = "bold", size = 14, hjust = 0),
     axis.title.y = element_blank(),
-    axis.text.y = element_text(hjust = 0),
-    strip.text.y.left = element_text(angle = 90, face = "bold"),
+    axis.text.y = element_text(hjust = 0, size = 12),
+    axis.title.x = element_text(size = 14),
+    strip.text.y.left = element_text(angle = 90, face = "bold", size = 14),
     strip.placement = "outside"
   ) +
   facet_grid(group ~ ., scales = "free_y", space = "free_y", switch="y")
@@ -1079,9 +1135,9 @@ refor_coeff_plot = ggplot(coef_refor, aes(x = OR, y = term_ordered, color = colo
   theme(
     panel.border = element_rect(color="black", fill = NA, linewidth = 0.5),
     text = element_text(family = "Arial Narrow"),
-    plot.title = element_text(family = "Arial Narrow", face = "bold", size = 12, hjust = 0),
+    plot.title = element_text(family = "Arial Narrow", face = "bold", size = 14, hjust = 0),
     legend.position = "none",
-    axis.title.y = element_blank(),
+    axis.title.x = element_text(size= 14),
     axis.text.y = element_blank(),
     axis.ticks.y = element_blank(),
     strip.text.y.left = element_blank(),
@@ -1094,7 +1150,7 @@ forest_all = defor_coeff_plot + refor_coeff_plot +
   plot_layout(ncol = 2, widths = c(1, 2.5), axis_titles = "collect")
 forest_all
 
-png(here("outputs","plot","01p_paper1_or_pixel.png"), width = 3000, height = 2000, res = 300)
+png(here("outputs","plot","01p_paper1_or_pixel.png"), width = 3000, height = 2900, res = 300)
 plot(forest_all)
 dev.off()
 
@@ -1360,28 +1416,28 @@ spdep::moran.test(train_data_car_refor$area_reforest_log, listw.gab)
 mod_sar1 = spatialreg::errorsarlm(area_reforest_log ~ 
                                     car_area_log + 
                                     area_refor_buf100_2024_log +
-                                    area_forest_buf100_1989_log +
+                                    area_agri_buf100_1989_log +
                                     factor(Less20For2024), 
                                   listw=listw.gab,
                                   data=train_data_car_refor)
 mod_sar2 = spatialreg::errorsarlm(area_reforest_log ~ 
                                     car_area_log + 
                                     area_refor_buf100_2024_log +
-                                    area_forest_buf100_1989_log +
+                                    area_agri_buf100_1989_log +
                                     factor(Less20For2024), 
                                   listw=listw.d1,
                                   data=train_data_car_refor)
 mod_sar3 = spatialreg::errorsarlm(area_reforest_log ~ 
                                     car_area_log + 
                                     area_refor_buf100_2024_log +
-                                    area_forest_buf100_1989_log +
+                                    area_agri_buf100_1989_log +
                                     factor(Less20For2024), 
                                   listw=listw.d2,
                                   data=train_data_car_refor)
 mod_sar4 = spatialreg::errorsarlm(area_reforest_log ~ 
                                     car_area_log + 
                                     area_refor_buf100_2024_log +
-                                    area_forest_buf100_1989_log +
+                                    area_agri_buf100_1989_log +
                                     factor(Less20For2024), 
                                   listw=listw.knn,
                                   data=train_data_car_refor)
@@ -1421,7 +1477,7 @@ ggplot(train_data_car_refor, aes(x = area_refor_buf100_2024_log, y = residuals))
   geom_point() +
   geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
   theme_minimal()
-ggplot(train_data_car_refor, aes(x = area_forest_buf100_1989_log, y = residuals)) +
+ggplot(train_data_car_refor, aes(x = area_agri_buf100_1989_log, y = residuals)) +
   geom_point() +
   geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
   theme_minimal()
@@ -1526,7 +1582,7 @@ plot_x1 = ggplot(pred_manual, aes(x = x, y = predicted, color = Less20For2024, f
     panel.grid.major = element_blank(),
     panel.grid.minor = element_blank(),
     legend.position = "bottom",
-    text = element_text(family = "Arial Narrow", size = 12)
+    text = element_text(family = "Arial Narrow", size = 14)
   )
 
 ## X2
@@ -1675,7 +1731,7 @@ refor = raster_tm_2024 == 7
 
 # Grid
 bbox = st_as_sfc(st_bbox(raster_tm_2024))
-grid = st_make_grid(bbox, cellsize = 5000, square = TRUE) %>% 
+grid = st_make_grid(bbox, cellsize = 2500, square = TRUE) %>% 
   st_as_sf()
 st_crs(grid) = st_crs(raster_tm_2024)
 
@@ -1885,7 +1941,8 @@ map_hotspots_refor = ggplot() +
 ## Merge maps
 hotspots_all = map_hotspots_defor + map_hotspots_refor +
   plot_layout(ncol = 2, guides = "collect") &
-  theme(legend.position = "bottom")
+  theme(legend.position = "bottom",
+        legend.text  = element_text(size = 12, family = "Arial Narrow"))
 
 png(here("outputs","plot","01p_paper1_hotspots.png"), width = 3000, height = 1700, res = 300)
 plot(hotspots_all)

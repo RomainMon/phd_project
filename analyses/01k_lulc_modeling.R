@@ -1541,7 +1541,7 @@ data_car_refor_rf %>%
 # We retain:
 # car_area_ha 
 # area_refor_buf100_2024_ha
-# area_forest_buf100_1989_ha 
+# area_agri_buf100_1989_ha 
 # rl_cover_ha
 # Less20For2024
 
@@ -1550,7 +1550,7 @@ X_vif = data_car_refor_rf %>%
   sf::st_drop_geometry() %>% 
   dplyr::select(area_reforest_ha, 
                 car_area_ha,
-                area_forest_buf100_1989_ha,
+                area_agri_buf100_1989_ha,
                 area_refor_buf100_2024_ha,
                 Less20For2024) %>% 
   as.data.frame()
@@ -1562,7 +1562,7 @@ data_car_refor_rf = data_car_refor_rf %>%
   dplyr::select(c(car_id,
                   area_reforest_ha, 
                   car_area_ha,
-                  area_forest_buf100_1989_ha,
+                  area_agri_buf100_1989_ha,
                   area_refor_buf100_2024_ha,
                   Less20For2024,
                   centroid_x,
@@ -1708,14 +1708,14 @@ dotplot(as.matrix(data_car_refor_rf %>% sf::st_drop_geometry()), groups = FALSE,
 
 
 # Grubbs test
-grubbs.test(data_car_refor_rf$car_area_ha)
+grubbs.test(data_car_refor_rf$area_agri_buf100_1989_ha)
 
 ##### Remove very low values --------
 # Homogeneity of variance was not validated due to the presence of outliers
 data_car_refor_rf = data_car_refor_rf %>% 
   dplyr::filter(area_reforest_ha > 0.1) %>% 
   dplyr::filter(area_refor_buf100_2024_ha > 0.1) %>% 
-  dplyr::filter(area_forest_buf100_1989_ha > 0.1)
+  dplyr::filter(area_agri_buf100_1989_ha > 0.1)
 
 ##### Transform variables --------
 # Count 0
@@ -1727,7 +1727,7 @@ data_car_refor_rf %>%
 data_car_refor_rf_clean = data_car_refor_rf %>% 
   dplyr::mutate(area_reforest_log = log(area_reforest_ha),
                 car_area_log = log(car_area_ha),
-                area_forest_buf100_1989_log = log(area_forest_buf100_1989_ha),
+                area_agri_buf100_1989_log = log(area_agri_buf100_1989_ha),
                 area_refor_buf100_2024_log = log(area_refor_buf100_2024_ha))
 # Dotplot
 dotplot(as.matrix(data_car_refor_rf_clean %>% sf::st_drop_geometry()), groups = FALSE,
@@ -1792,7 +1792,7 @@ plot(area_reforest_log~car_area_log, data=data_car_refor_rf_clean)
 
 plot(area_reforest_log~area_refor_buf100_2024_log, data=data_car_refor_rf_clean)
 
-plot(area_reforest_log~area_forest_buf100_1989_log, data=data_car_refor_rf_clean)
+plot(area_reforest_log~area_agri_buf100_1989_log, data=data_car_refor_rf_clean)
 
 boxplot(area_reforest_log~car_area_grp, data=data_car_refor_rf_clean)
 
@@ -1801,7 +1801,7 @@ boxplot(area_reforest_log~Less20For2024, data=data_car_refor_rf_clean)
 ##### Coplots ----------
 # See : Zuur & Ieno 2016, MEE
 # coplot is an excellent graphical tool to visualize the potential presence of interactions.
-M1 = lm(area_reforest_log ~ car_area_log*area_refor_buf100_2024_log*area_forest_buf100_1989_log, 
+M1 = lm(area_reforest_log ~ car_area_log*area_refor_buf100_2024_log*area_agri_buf100_1989_log*factor(Less20For2024), 
         data=data_car_refor_rf_clean)
 summary(M1)
 anova(M1)
