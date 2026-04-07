@@ -31,11 +31,18 @@ primary_roads = roads_sf %>%
   dplyr::filter(highway == "motorway" | highway == "trunk" | highway == "primary")
 plot(raster_lulc_2024, col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e"))
 plot(st_geometry(primary_roads), col="#ff3399", add=TRUE)
+primary_roads = primary_roads %>%
+  dplyr::mutate(road_type = dplyr::case_when(
+    ref == "BR-101" ~ "BR-101",
+    TRUE ~ "Main roads"
+  ))
 
 # SJ watershed
 sj_watershed = terra::vect(here("data", "geo", "AMLD", "hidrografia", "Rio_Sao_Joao_Watershed.shp"))
 sj_watershed = terra::project(sj_watershed, "EPSG:31983")
 sj_watershed_sf = st_as_sf(sj_watershed)
+sj_watershed_sf = sj_watershed_sf %>%
+  dplyr::mutate(feature = "SJ watershed")
 
 # APA mld
 apa_mld = terra::vect(here("data", "geo", "MMA", "protected_areas", "ucs", "apa_mld.shp"))
@@ -100,6 +107,13 @@ cols_pa = c(
   "União" = "#fdbf6f"
 )
 
+# Colors for line features
+line_cols = c(
+  "SJ watershed" = "blue4",
+  "Main roads" = "#444444",
+  "BR-101" = "#ff3399"
+)
+
 # Plot
 png(here("outputs","plot","01p_paper1_study_area.png"), width = 3000, height = 1700, res = 300)
 
@@ -108,6 +122,8 @@ ggplot() +
               aes(x = x, y = y, fill = value)) +
   scale_fill_manual(values = cols_lulc,
                     name = "Land use") +
+  
+  # Protected areas
   geom_sf_pattern(
     data = pa_sf,
     aes(pattern = name,
@@ -118,20 +134,35 @@ ggplot() +
     pattern_density = 0.4,
     pattern_spacing = 0.025,
     linewidth = 0.6) +
+  
+  # Watershed
   geom_sf(
     data = sj_watershed_sf,
-    color = "blue4",
+    aes(color = feature),
     fill = NA,
     linewidth = 1,
     linetype = "dashed") +
+  
+  # Roads
   geom_sf(
     data = primary_roads,
-    color = "#444444",
+    aes(color = road_type),
     linewidth = 1) +
+  
+  # Optional white casing effect (no legend)
   geom_sf(
     data = primary_roads,
     color = "white",
-    linewidth = 0.3) +
+    linewidth = 0.3,
+    show.legend = FALSE) +
+  
+  # Combined legend for lines
+  scale_color_manual(
+    name = "Other features",
+    values = line_cols,
+    breaks = c("SJ watershed", "Main roads", "BR-101")
+  ) +
+  
   scale_pattern_manual(
     values = c(
       "São João River Basin APA" = "circle",
@@ -145,6 +176,7 @@ ggplot() +
     values = cols_pa,
     name = "Protected areas"
   ) +
+  
   ggspatial::annotation_scale(
     location = "bl",
     style = "ticks",

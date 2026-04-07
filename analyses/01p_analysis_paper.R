@@ -1139,6 +1139,7 @@ refor_coeff_plot = ggplot(coef_refor, aes(x = OR, y = term_ordered, color = colo
     legend.position = "none",
     axis.title.x = element_text(size= 14),
     axis.text.y = element_blank(),
+    axis.title.y = element_blank(),
     axis.ticks.y = element_blank(),
     strip.text.y.left = element_blank(),
     strip.placement = "outside"
@@ -1527,7 +1528,7 @@ newdata_0 = data.frame(
   car_area_log = seq(min(train_data_car_refor$car_area_log, na.rm=TRUE),
                      max(train_data_car_refor$car_area_log, na.rm=TRUE), length.out=100),
   area_refor_buf100_2024_log = mean(train_data_car_refor$area_refor_buf100_2024_log, na.rm=TRUE),
-  area_forest_buf100_1989_log = mean(train_data_car_refor$area_forest_buf100_1989_log, na.rm=TRUE),
+  area_agri_buf100_1989_log = mean(train_data_car_refor$area_agri_buf100_1989_log, na.rm=TRUE),
   Less20For2024 = factor(0, levels = c(0, 1))
 )
 
@@ -1538,7 +1539,7 @@ newdata_1$Less20For2024 = factor(1, levels = c(0, 1))
 newdata = rbind(newdata_0, newdata_1)
 
 # Get model matrix and betas
-X = model.matrix(~ car_area_log + area_refor_buf100_2024_log + area_forest_buf100_1989_log + Less20For2024, data=newdata)
+X = model.matrix(~ car_area_log + area_refor_buf100_2024_log + area_agri_buf100_1989_log + Less20For2024, data=newdata)
 beta = mod$coefficients
 V = mod$Hcov
 
@@ -1592,7 +1593,7 @@ newdata_0 = data.frame(
   car_area_log = mean(train_data_car_refor$car_area_log, na.rm=TRUE),
   area_refor_buf100_2024_log = seq(min(train_data_car_refor$area_refor_buf100_2024_log, na.rm=TRUE),
                                    max(train_data_car_refor$area_refor_buf100_2024_log, na.rm=TRUE), length.out=100),
-  area_forest_buf100_1989_log = mean(train_data_car_refor$area_forest_buf100_1989_log, na.rm=TRUE),
+  area_agri_buf100_1989_log = mean(train_data_car_refor$area_agri_buf100_1989_log, na.rm=TRUE),
   Less20For2024 = factor(0, levels = c(0, 1))
 )
 
@@ -1603,7 +1604,7 @@ newdata_1$Less20For2024 = factor(1, levels = c(0, 1))
 newdata = rbind(newdata_0, newdata_1)
 
 # Get model matrix and betas
-X = model.matrix(~ car_area_log + area_refor_buf100_2024_log + area_forest_buf100_1989_log + Less20For2024, data=newdata)
+X = model.matrix(~ car_area_log + area_refor_buf100_2024_log + area_agri_buf100_1989_log + Less20For2024, data=newdata)
 beta = mod$coefficients
 V = mod$Hcov
 
@@ -1656,8 +1657,8 @@ plot_x2 = ggplot(pred_manual, aes(x = x, y = predicted, color = Less20For2024, f
 newdata_0 = data.frame(
   car_area_log = mean(train_data_car_refor$car_area_log, na.rm=TRUE),
   area_refor_buf100_2024_log = mean(train_data_car_refor$area_refor_buf100_2024_log, na.rm=TRUE),
-  area_forest_buf100_1989_log = seq(min(train_data_car_refor$area_forest_buf100_1989_log, na.rm=TRUE),
-                                  max(train_data_car_refor$area_forest_buf100_1989_log, na.rm=TRUE), length.out=100),
+  area_agri_buf100_1989_log = seq(min(train_data_car_refor$area_agri_buf100_1989_log, na.rm=TRUE),
+                                  max(train_data_car_refor$area_agri_buf100_1989_log, na.rm=TRUE), length.out=100),
   Less20For2024 = factor(0, levels = c(0, 1))
 )
 
@@ -1668,7 +1669,7 @@ newdata_1$Less20For2024 = factor(1, levels = c(0, 1))
 newdata = rbind(newdata_0, newdata_1)
 
 # Get model matrix and betas
-X = model.matrix(~ car_area_log + area_refor_buf100_2024_log + area_forest_buf100_1989_log + Less20For2024, data=newdata)
+X = model.matrix(~ car_area_log + area_refor_buf100_2024_log + area_agri_buf100_1989_log + Less20For2024, data=newdata)
 beta = mod$coefficients
 V = mod$Hcov
 
@@ -1676,7 +1677,7 @@ V = mod$Hcov
 fit = as.vector(X %*% beta)
 se = sqrt(diag(X %*% V %*% t(X)))
 pred_manual = data.frame(
-  x = newdata$area_forest_buf100_1989_log,
+  x = newdata$area_agri_buf100_1989_log,
   predicted = fit,
   conf.low = fit - 1.96 * se,
   conf.high = fit + 1.96 * se,
@@ -1689,12 +1690,12 @@ plot_x3 = ggplot(pred_manual, aes(x = x, y = predicted, color = Less20For2024, f
   geom_ribbon(aes(ymin = conf.low, ymax = conf.high), alpha = 0.2, color = NA) +
   geom_jitter(
     data = train_data_car_refor,
-    aes(x = area_forest_buf100_1989_log, y = area_reforest_log, color = factor(Less20For2024)),
+    aes(x = area_agri_buf100_1989_log, y = area_reforest_log, color = factor(Less20For2024)),
     inherit.aes = FALSE,
     width = 1, size = 2.5, alpha = 0.15
   ) +
-  xlab("Log of surrounding forest area (ha)") +
-  ggtitle("c) Effect of surrounding forest area (1989)") +
+  xlab("Log of surrounding agricultural area (ha)") +
+  ggtitle("c) Effect of surrounding agricultural area (1989)") +
   scale_color_manual(
     values = c("0" = "#1f77b4", "1" = "#ff7f0e"),
     labels = c("<20% forest cover", ">20% forest cover"),
@@ -1731,7 +1732,7 @@ refor = raster_tm_2024 == 7
 
 # Grid
 bbox = st_as_sfc(st_bbox(raster_tm_2024))
-grid = st_make_grid(bbox, cellsize = 2500, square = TRUE) %>% 
+grid = st_make_grid(bbox, cellsize = 5000, square = FALSE) %>% 
   st_as_sf()
 st_crs(grid) = st_crs(raster_tm_2024)
 
@@ -1769,17 +1770,43 @@ grid[(mp$x >= 0 & mp$wx <= 0) & (grid$lmp <= 0.05), "quadrant"]= 3
 grid[(mp$x <= 0 & mp$wx >= 0) & (grid$lmp <= 0.05), "quadrant"]= 4
 # non-significant
 grid[(grid$lmp > 0.05), "quadrant"] = 5
-unique(grid$quadrant)
+unique(grid$quadrant) # Remove values (and associated color) below (e.g., "High-Low" based on unique values)
 # Make quadrant a factor with labels
+# grid$quadrant = factor(grid$quadrant,
+#                        levels = c(1, 2, 3, 4, 5),
+#                        labels = c("High-High", "Low-Low", "High-Low", "Low-High", "Non-significant"))
 grid$quadrant = factor(grid$quadrant,
-                       levels = c(1, 2, 3, 4, 5),
-                       labels = c("High-High", "Low-Low", "High-Low", "Low-High", "Non-significant"))
-
+                       levels = c(1, 2, 4, 5),
+                       labels = c("High-High", "Low-Low", "Low-High", "Non-significant"))
 # Colors
-cols = c("red", "blue", "lightpink", "skyblue2", "white")
+cols = c("red", "blue", "skyblue2", "white")
+# Plot
+ggplot(grid) +
+  geom_sf(aes(fill = quadrant),
+          color = "black",
+          size = 0.2,
+          alpha = 0.8) +
+  scale_fill_manual(values = cols,
+                    name = NULL) +
+  labs(title = "Clusters") +
+  theme_minimal() +
+  theme(
+    legend.position = "right",
+    panel.grid = element_blank(),
+    plot.title = element_text(face = "bold")
+  )
+
+# Only keep hotspots and coldspots
+hotspots = grid %>% dplyr::filter(quadrant %in% c("High-High", "Low-Low"))
+hotspots$quadrant = factor(hotspots$quadrant, levels=c("High-High", "Low-Low"))
+hotspots = hotspots %>% 
+  dplyr::mutate(quadrant = dplyr::case_when(quadrant == "High-High" ~ "Hotspot",
+                                            quadrant == "Low-Low" ~ "Coldspot",
+                                            TRUE ~ quadrant))
+# Colors
+cols = c("blue", "red")
 
 #### Map -----------
-hotspots = grid %>% dplyr::filter(quadrant == "High-High")
 hotspots = sf::st_crop(hotspots, st_bbox(raster_tm_2024))
 # Raster to dataframe
 defor_df = as.data.frame(raster_tm_2024, xy = TRUE)
@@ -1794,29 +1821,34 @@ defor_df$value = factor(defor_df$`2024`,
                                    "Built-up",
                                    "Reforested",
                                    "Deforested"))
-cols = c("#32a65e", "#ad975a", "#519799", "#FFFFB2",
-         "#0000FF", "#d4271e", "chartreuse", "pink")
+land_use_cols = c("#32a65e", "#ad975a", "#519799", "#FFFFB2",
+                  "#0000FF", "#d4271e", "chartreuse", "pink")
 
 # Plot
 map_hotspots_defor = ggplot() +
   geom_raster(data = defor_df,
               aes(x = x, y = y, fill = value)) +
   scale_fill_manual(name = "Land use",
-                    values = cols) +
+                    values = land_use_cols) +
+  ggnewscale::new_scale_fill() +
   geom_sf(data = hotspots,
-          fill = "red",
+          aes(fill = quadrant),
           color = "black",
-          alpha = 0.5,
+          alpha = 0.6,
           size = 0.2) +
-  labs(title = "a) Deforestation hotspots",
-       x = NULL, y = NULL) + 
+  scale_fill_manual(
+    name = "Cluster type",
+    values = cols,
+    drop = FALSE
+  ) +
+  labs(title = "a) Deforestation clusters",
+       x = NULL, y = NULL) +
   annotation_scale(
     location = "tr",
     text_cex = 0.6,
     pad_x = unit(1, "cm"),
     pad_y = unit(0.5, "cm"),
     style = "ticks",
-    line_width = unit(1, "cm"),
     width_hint = 0.15
   ) +
   annotation_north_arrow(
@@ -1871,17 +1903,43 @@ grid[(mp$x >= 0 & mp$wx <= 0) & (grid$lmp <= 0.05), "quadrant"]= 3
 grid[(mp$x <= 0 & mp$wx >= 0) & (grid$lmp <= 0.05), "quadrant"]= 4
 # non-significant
 grid[(grid$lmp > 0.05), "quadrant"] = 5
-unique(grid$quadrant)
+unique(grid$quadrant) # Remove values (and associated color) below (e.g., "High-Low" based on unique values)
 # Make quadrant a factor with labels
+# grid$quadrant = factor(grid$quadrant,
+#                        levels = c(1, 2, 3, 4, 5),
+#                        labels = c("High-High", "Low-Low", "High-Low", "Low-High", "Non-significant"))
 grid$quadrant = factor(grid$quadrant,
-                       levels = c(1, 2, 3, 4, 5),
-                       labels = c("High-High", "Low-Low", "High-Low", "Low-High", "Non-significant"))
-
+                       levels = c(1, 2, 4, 5),
+                       labels = c("High-High", "Low-Low", "Low-High", "Non-significant"))
 # Colors
-cols = c("red", "blue", "lightpink", "skyblue2", "white")
+cols = c("red", "blue", "skyblue2", "white")
+# Plot
+ggplot(grid) +
+  geom_sf(aes(fill = quadrant),
+          color = "black",
+          size = 0.2,
+          alpha = 0.8) +
+  scale_fill_manual(values = cols,
+                    name = NULL) +
+  labs(title = "Clusters") +
+  theme_minimal() +
+  theme(
+    legend.position = "right",
+    panel.grid = element_blank(),
+    plot.title = element_text(face = "bold")
+  )
+
+# Only keep hotspots and coldspots
+hotspots = grid %>% dplyr::filter(quadrant %in% c("High-High", "Low-Low"))
+hotspots$quadrant = factor(hotspots$quadrant, levels=c("High-High", "Low-Low"))
+hotspots = hotspots %>% 
+  dplyr::mutate(quadrant = dplyr::case_when(quadrant == "High-High" ~ "Hotspot",
+                                            quadrant == "Low-Low" ~ "Coldspot",
+                                            TRUE ~ quadrant))
+# Colors
+cols = c("blue", "red")
 
 #### Map -----------
-hotspots = grid %>% dplyr::filter(quadrant == "High-High")
 hotspots = sf::st_crop(hotspots, st_bbox(raster_tm_2024))
 # Raster to dataframe
 refor_df = as.data.frame(raster_tm_2024, xy = TRUE)
@@ -1896,29 +1954,34 @@ refor_df$value = factor(refor_df$`2024`,
                                    "Built-up",
                                    "Reforested",
                                    "Deforested"))
-cols = c("#32a65e", "#ad975a", "#519799", "#FFFFB2",
-         "#0000FF", "#d4271e", "chartreuse", "pink")
+land_use_cols = c("#32a65e", "#ad975a", "#519799", "#FFFFB2",
+                  "#0000FF", "#d4271e", "chartreuse", "pink")
 
 # Plot
 map_hotspots_refor = ggplot() +
   geom_raster(data = refor_df,
               aes(x = x, y = y, fill = value)) +
   scale_fill_manual(name = "Land use",
-                    values = cols) +
+                    values = land_use_cols) +
+  ggnewscale::new_scale_fill() +
   geom_sf(data = hotspots,
-          fill = "red",
+          aes(fill = quadrant),
           color = "black",
-          alpha = 0.5,
+          alpha = 0.6,
           size = 0.2) +
-  labs(title = "b) Reforestation hotspots",
-       x = NULL, y = NULL) + 
+  scale_fill_manual(
+    name = "Cluster type",
+    values = cols,
+    drop = FALSE
+  ) +
+  labs(title = "b) Reforestation clusters",
+       x = NULL, y = NULL) +
   annotation_scale(
     location = "tr",
     text_cex = 0.6,
     pad_x = unit(1, "cm"),
     pad_y = unit(0.5, "cm"),
     style = "ticks",
-    line_width = unit(1, "cm"),
     width_hint = 0.15
   ) +
   annotation_north_arrow(
