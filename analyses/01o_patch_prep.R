@@ -12,7 +12,6 @@ library(raster)
 library(landscapemetrics)
 library(Makurhini)
 library(sf)
-source(here::here("R","progress_bar.R"))
 
 ### Import rasters -------
 #### Rasters reclassified ----
@@ -50,6 +49,29 @@ for (i in seq_along(rasters_mspa)) {
   cat("Year", years[i], " → raster name:", basename(raster_df$file[i]), "\n")
 }
 plot(rasters_mspa[[36]], col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e", "orange"))
+
+### Import vectors ----------
+# Import roads
+roads = vect(here("data", "geo", "OSM", "work", "Highway_OSM_clean.shp"))
+roads_sf = sf::st_as_sf(roads)
+plot(rasters_mspa[[36]], col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e", "orange"))
+plot(sf::st_geometry(roads_sf), add=TRUE, lwd=1.5)
+
+# Import Regions
+regions = terra::vect(here("data", "geo", "APonchon", "GLT", "RegionsName.shp"))
+regions = terra::project(regions, "EPSG:31983")
+regions_sf = sf::st_as_sf(regions)
+plot(rasters_reclass[[36]], col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e"))
+plot(sf::st_geometry(regions_sf), pch=1, col="yellow", add=TRUE)
+
+# Import bounding box
+# BBOX
+bbox = terra::vect(here("data", "geo", "BBOX", "sampling_units_bbox_31983.shp"))
+bbox_sf = sf::st_as_sf(bbox)
+# Min bbox
+minbbox = terra::vect(here("data", "geo", "BBOX", "sampling_units_minbbox_buffer5km.shp"))
+minbbox_sf = sf::st_as_sf(minbbox)
+
 
 ### Dilatation-erosion --------
 # Here, we apply dilatation-erosion on habitats (value = 1)
@@ -93,21 +115,43 @@ plot(rasters_dilate[[36]], main=paste0("After dilatation–Erosion ", years[36])
 freq(rasters_mspa[[36]])
 freq(rasters_dilate[[36]])
 
-### Compute patch-level metrics   ---------
-# Import Regions
-regions = terra::vect(here("data", "geo", "APonchon", "GLT", "RegionsName.shp"))
-regions = terra::project(regions, "EPSG:31983")
-regions_sf = sf::st_as_sf(regions)
-plot(rasters_reclass[[36]], col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e"))
-plot(sf::st_geometry(regions_sf), pch=1, col="yellow", add=TRUE)
+### Overlay linear features -----
+# Here, we overlay vector linear features to the rasters using a buffer width and assign the intersected cells a new numeric value
+# -> Adapt the buffer width and value according to the linear feature (for instance: roads = 15m)
+apply_linear_feature_single = function(r, yr, feature, buffer_width, value, use_date) {
+  feat_valid = if (use_date && "date_crea" %in% names(feature)) {
+    feature[feature$date_crea <= yr, ]
+  } else feature
+  
+  if (nrow(feat_valid) > 0) {
+    feat_buff = terra::buffer(feat_valid, width = buffer_width)
+    feat_rast = terra::rasterize(feat_buff, r, field = value, background = NA)
+    r = cover(feat_rast, r)
+  }
+  
+  return(r)  # single SpatRaster
+}
 
-# Import bounding box
-# BBOX
-bbox = terra::vect(here("data", "geo", "BBOX", "sampling_units_bbox_31983.shp"))
-bbox_sf = sf::st_as_sf(bbox)
-# Min bbox
-minbbox = terra::vect(here("data", "geo", "BBOX", "sampling_units_minbbox_buffer5km.shp"))
-minbbox_sf = sf::st_as_sf(minbbox)
+##### Step 6 – Apply linear features on top of raster layers -----
+# First, we distinguish roads based on their nature (primary, secondary, tertiary)
+roads_sf %>% sf::st_drop_geometry() %>%  dplyr::select(highway) %>% dplyr::group_by(highway) %>% dplyr::summarise(n=n())
+highway = roads_sf %>% dplyr::filter(highway == "motorway" | highway == "trunk" | highway == "primary") %>% terra::vect()
+plot(highway)
+
+# Second, we apply linear features
+# Main roads take the value "artificial" (6)
+# WARNING: at this resolution (30 x 30 m), a minimum of 20 m is needed for linear features to create continuous linear features (below, some cells are not overwritten, and some raster cells are still connected through their vertices)
+rasters_lf = purrr::map2(rasters_dilate, years, function(r, yr) {
+  message("  - Applying linear features for year ", yr)
+  r_lin = r
+  # r_lin = apply_linear_feature_single(r_lin, yr, pipelines, buffer_width = 20, value = 2, use_date = TRUE)
+  r_lin = apply_linear_feature_single(r_lin, yr, highway, buffer_width = 20, value = 6, use_date = TRUE)
+  r_lin
+})
+
+
+### Compute patch-level metrics   ---------
+
 
 #### On a single raster -----
 ##### Patch selection (core only) ----------
@@ -232,7 +276,7 @@ patches_metrics_final = patches_metrics_final %>%
 #### Apply to all rasters ----------------
 
 ##### Total version -----
-# Compute patch area, connectivity (centroid + resistance-based)
+# Patch area, connectivity (centroid + resistance-based)
 compute_patch_metrics_tot = function(r, 
                                  year,
                                  sample_loc, 
@@ -312,7 +356,7 @@ all_years_metrics = purrr::map2(rasters_dilate, years,
                                                         buffer_patch = 500))
 
 ##### Simplified version ----------
-# Compute patch area, connectivity (centroid-based only)
+# Patch area, connectivity (centroid-based only)
 compute_patch_metrics_simple = function(r, 
                                         year,
                                         sample_loc,
@@ -367,7 +411,36 @@ all_years_metrics = purrr::map2(rasters_dilate, years,
                                                                buf_around_loc = regions_buffer))
 
 ##### Only landscape metrics ----------
-# Compute patch metrics using landscape metrics only
+# Patch metrics using landscape metrics only
+## Area
+compute_patch_metrics_only = function(r,
+                                      year){
+  
+  message("Processing year: ", year)
+  
+  # PATCH SELECTION
+  
+  forest_patches = landscapemetrics::get_patches(r, class = 1, directions = 8)
+  patches_final = sf::st_as_sf(as.polygons(forest_patches[[1]][[1]], dissolve = TRUE))
+  
+  # LANDSCAPE METRICS
+  mask_rast = terra::rasterize(patches_final, r, field = 1)
+  patch_lm = landscapemetrics::spatialize_lsm(mask_rast,
+                                              what = c("lsm_p_area"),
+                                              directions=8)
+  
+  patch_area = sf::st_as_sf(terra::extract(patch_lm$layer_1$lsm_p_area, patches_final, fun=unique, bind=TRUE)) %>% dplyr::rename(area=value)
+
+  patches_metrics_final =
+    patches_final %>%
+    dplyr::left_join(sf::st_drop_geometry(patch_area), by="lyr.1") %>%
+    dplyr::mutate(area = round(area,2), 
+                  year = year)
+  
+  return(patches_metrics_final)
+}
+
+## Area and ENN
 compute_patch_metrics_only = function(r,
                                       year){
   
@@ -398,7 +471,7 @@ compute_patch_metrics_only = function(r,
 }
 
 # Loop
-all_years_metrics_simple = purrr::map2(rasters_dilate, years,
+all_years_metrics_simple = purrr::map2(rasters_lf, years,
                                 ~ compute_patch_metrics_only(r = .x,
                                                              year = .y
                                                              ))
@@ -409,8 +482,8 @@ purrr::walk2(
   all_years_metrics_simple,
   years,
   ~ {
-    output_path = file.path(base_path, paste0("patches_metrics_area_enn_", .y, ".gpkg"))
-    sf::st_write(.x, output_path, layer = "patches", delete_dsn = TRUE, quiet = TRUE)
+    output_path = file.path(base_path, paste0("patches_metrics_area_", .y, ".gpkg"))
+    sf::st_write(.x, output_path, layer = "patches", append=FALSE, delete_dsn = TRUE, quiet = TRUE)
     message("Exported: ", output_path)
   }
 )
