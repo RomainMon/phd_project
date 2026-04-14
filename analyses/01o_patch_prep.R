@@ -106,7 +106,7 @@ dilatation_erosion = function(raster, seuil) {
 message("Applying dilatation–erosion...")
 rasters_dilate = lapply(seq_along(rasters_mspa), function(i) {
   message("  - Processing dilatation–erosion for raster ", i, " (year ", years[i], ")")
-  dilatation_erosion(rasters_mspa[[i]], seuil = 50)
+  dilatation_erosion(rasters_mspa[[i]], seuil = 30)
 })
 
 # Quick check
