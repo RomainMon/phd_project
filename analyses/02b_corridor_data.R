@@ -28,6 +28,7 @@ for (i in seq_along(rasters_reclass_cons_cat)) {
   cat("Year", years_cons[i], " → raster name:", basename(raster_df_cons$file[i]), "\n")
 }
 plot(rasters_reclass_cons_cat[[21]], col = c("#FF7F00", "#EE30A7", "darkred"))
+names(rasters_reclass_cons_cat) = raster_df_cons$years_cons # Name by year
 
 #### MSPA corridors  -------
 base_path = here("outputs", "data", "MapBiomas", "MSPA", "reclass_w_mspa")
@@ -46,6 +47,7 @@ for (i in seq_along(rasters_mspa)) {
   cat("Year", years[i], " → raster name:", basename(raster_df$file[i]), "\n")
 }
 plot(rasters_mspa[[36]], col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e", "orange"))
+names(rasters_mspa) = raster_df$year # Name by year
 
 #### Patches  -------
 base_path = here("outputs", "data", "patchmetrics")
@@ -65,6 +67,7 @@ for (i in seq_along(patches)) {
 }
 plot(rasters_mspa[[36]], col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e", "orange"))
 plot(sf::st_geometry(patches[[36]]), col=NA, add=TRUE)
+names(patches) = vector_df$year # Name by year
 
 #### GLT locations --------
 regions = sf::st_read(here("data", "geo", "APonchon", "GLT", "RegionsName.shp"))
@@ -75,9 +78,8 @@ regions = sf::st_read(here("data", "geo", "APonchon", "GLT", "RegionsName.shp"))
 # 1) Transform corridors to vectors
 # 2) For a given year, identify the corridors touching/intersecting >1 patches
 # 3) Join patches id to these corridors
-# 4) Append back to patch data (for a given year) corridor id, and connected patch id
 
-### Example -----
+### Corridor-patch (example) -----
 # Patches 2024
 patches_2024 = patches[[36]] %>% 
   dplyr::rename(patch_id = lyr.1)
@@ -132,82 +134,40 @@ patch_corridor_2024_final = patches_2024 %>%
     reconnected = ifelse(is.na(reconnected), 0, reconnected)
   )
 
-### Function -----
-build_patch_connectivity = function(patches_list,
-                                    raster_list,
-                                    corridor_value,
-                                    patch_id_col,
-                                    type) {
+### Function to create corridor connections -----
+build_corridor_connections = function(patches_list,
+                                      raster_list,
+                                      corridor_value,
+                                      patch_id_col) {
   
-  # 1. Define output column names (dynamic by type)
-  # These columns will store:
-  # - whether a patch is reconnected
-  # - which patches it connects to
-  # - which corridor IDs are involved
-  
-  col_reconnected   = paste0("reconnec_", type)
-  col_connected_to  = paste0("connec_to_", type)
-  col_corridor      = paste0("corr_", type)
-  
-  # 2. Extract available years from inputs
   patch_years  = as.numeric(names(patches_list))
   raster_years = as.numeric(names(raster_list))
   
-  # Initialize output list (one element per year)
   out_list = list()
   
-  # 3. Loop over each year
   for (year in patch_years) {
     
     message("Processing year: ", year)
-    
-    # 3.1 Prepare patch dataset for this year
-    # - Standardize patch ID column name
-    # - Convert IDs to character for safe joins
     
     patches_i = patches_list[[as.character(year)]] %>%
       dplyr::rename(patch_id = all_of(patch_id_col)) %>%
       dplyr::mutate(patch_id = as.character(patch_id))
     
-    # 3.2 Skip if no raster exists for this year
-    if (!year %in% raster_years) {
-      patches_i[[col_reconnected]]  = 0
-      patches_i[[col_connected_to]] = NA
-      patches_i[[col_corridor]]     = NA
-      
-      out_list[[as.character(year)]] = patches_i
-      next
-    }
-    
-    # 3.3 Select and filter raster (corridor class)
-    # Keep only pixels corresponding to corridor_value
+    if (!year %in% raster_years) next
     
     r = raster_list[[as.character(year)]]
     r[r != corridor_value] = NA
     
-    # If no corridor pixels remain → skip
-    if (all(is.na(terra::values(r)))) {
-      patches_i[[col_reconnected]]  = 0
-      patches_i[[col_connected_to]] = NA
-      patches_i[[col_corridor]]     = NA
-      
-      out_list[[as.character(year)]] = patches_i
-      next
-    }
+    if (all(is.na(terra::values(r)))) next
     
-    # 3.4 Convert raster corridors to polygons
-    # Identify contiguous corridor patches (8-neighbour connectivity)
-    
-    r_bin   = !is.na(r)
+    # Convert to polygons
     r_patch = landscapemetrics::get_patches(r, class = corridor_value, directions = 8)
     
     corridor_sf = terra::as.polygons(r_patch[[1]][[1]], dissolve = TRUE) %>%
       sf::st_as_sf() %>%
       dplyr::rename(corridor_id = lyr.1)
     
-    # 3.5 Identify intersections between corridors and patches
-    # Each corridor polygon is linked to intersecting patches
-    
+    # Intersections
     connections = sf::st_join(
       corridor_sf,
       patches_i %>% dplyr::select(patch_id),
@@ -215,124 +175,104 @@ build_patch_connectivity = function(patches_list,
       left = FALSE
     )
     
-    # 3.6 Keep only corridors connecting ≥ 2 patches
     connections_long = connections %>%
       sf::st_drop_geometry() %>%
       dplyr::group_by(corridor_id) %>%
       dplyr::filter(dplyr::n() > 1) %>%
       dplyr::ungroup()
     
-    # 3.7 Build patch-to-patch connections
-    if (nrow(connections_long) > 0) {
-      
-      # Create pairwise connections between patches sharing a corridor
-      edges = connections_long %>%
-        dplyr::inner_join(
-          connections_long %>% dplyr::rename(connected_to = patch_id),
-          by = "corridor_id"
-        ) %>%
-        dplyr::filter(patch_id != connected_to) %>%
-        dplyr::distinct()
-      
-      # Summarize connections at patch level
-      patch_summary = edges %>%
-        dplyr::group_by(patch_id) %>%
-        dplyr::summarise(
-          !!col_connected_to := paste(unique(connected_to), collapse = ";"),
-          !!col_corridor     := paste(unique(corridor_id), collapse = ";"),
-          !!col_reconnected  := 1,
-          .groups = "drop"
-        )
-      
-    } else {
-      
-      # No valid connections → create empty summary
-      patch_summary = patches_i %>%
-        sf::st_drop_geometry() %>%
-        dplyr::select(patch_id) %>%
-        dplyr::mutate(
-          !!col_connected_to := NA_character_,
-          !!col_corridor     := NA_character_,
-          !!col_reconnected  := 0
-        )
-    }
+    if (nrow(connections_long) == 0) next
     
-    # 3.8 Join connectivity info back to patches
-    patches_out = patches_i %>%
-      dplyr::left_join(patch_summary, by = "patch_id")
+    # Keep edges instead of summarising
+    edges = connections_long %>%
+      dplyr::inner_join(
+        connections_long %>% dplyr::rename(patch_to = patch_id),
+        by = "corridor_id"
+      ) %>%
+      dplyr::rename(patch_from = patch_id) %>%
+      dplyr::filter(patch_from != patch_to) %>%
+      dplyr::distinct(patch_from, patch_to, corridor_id) %>%
+      dplyr::mutate(year = year)
     
-    # Replace NA in reconnected column with 0
-    patches_out[[col_reconnected]] = ifelse(
-      is.na(patches_out[[col_reconnected]]),
-      0,
-      patches_out[[col_reconnected]]
-    )
+    # Remove duplicate geometries
+    edges = edges %>%
+      dplyr::mutate(
+        pair = purrr::map2_chr(patch_from, patch_to, ~ paste(sort(c(.x, .y)), collapse = "_"))
+      ) %>%
+      dplyr::distinct(pair, corridor_id, .keep_all = TRUE) %>%
+      dplyr::select(-pair)
     
-    # Store result
-    out_list[[as.character(year)]] = patches_out
+    # Attach corridor geometry
+    edges_sf = edges %>%
+      dplyr::left_join(corridor_sf, by = "corridor_id") %>%
+      sf::st_as_sf()
+    
+    out_list[[as.character(year)]] = edges_sf
   }
-  
-  # 4. Return list of patch datasets
   return(out_list)
 }
 
-# Name your lists by year
-names(patches) = vector_df$year
-names(rasters_mspa) = raster_df$year
-names(rasters_reclass_cons_cat) = raster_df_cons$years_cons
-
-# Run the function with MSPA corridors
-patches_mspa = build_patch_connectivity(
+# With MSPA rasters
+corridors_mspa = build_corridor_connections(
   patches_list = patches,
-  raster_list = rasters_mspa,
+  raster_list  = rasters_mspa,
   corridor_value = 33,
-  patch_id_col = "lyr.1",
-  type = "mspa"
-)
-
-# With road overpasses
-patches_overpass = build_patch_connectivity(
-  patches_list = patches,
-  raster_list = rasters_reclass_cons_cat,
-  corridor_value = 52,
-  patch_id_col = "lyr.1",
-  type = "overpass"
+  patch_id_col = "lyr.1"
 )
 
 # With AMLD corridors
-patches_amld = build_patch_connectivity(
+corridors_amld = build_corridor_connections(
   patches_list = patches,
-  raster_list = rasters_reclass_cons_cat,
+  raster_list  = rasters_reclass_cons_cat,
   corridor_value = 51,
-  patch_id_col = "lyr.1",
-  type = "amld"
+  patch_id_col = "lyr.1"
 )
 
-# Bind patches
-patches_all = lapply(names(patches_mspa), function(year) {
+# With road overpasses
+corridors_road = build_corridor_connections(
+  patches_list = patches,
+  raster_list  = rasters_reclass_cons_cat,
+  corridor_value = 52,
+  patch_id_col = "lyr.1"
+)
+
+# Bind corridors by year
+corridors_all = lapply(names(patches), function(y) {
+  # Extract each for the given year
+  mspa = corridors_mspa[[y]]
+  amld = corridors_amld[[y]]
+  road = corridors_road[[y]]
   
-  mspa = patches_mspa[[year]]
-  over = patches_overpass[[year]] %>% sf::st_drop_geometry() %>% dplyr::select(c(patch_id, reconnec_overpass, connec_to_overpass, corr_overpass))
-  amld = patches_amld[[year]] %>% sf::st_drop_geometry() %>% dplyr::select(c(patch_id, reconnec_amld, connec_to_amld, corr_amld))
-  
-  out = mspa %>%
-    dplyr::left_join(over, by = "patch_id") %>%
-    dplyr::left_join(amld, by = "patch_id")
-  
-  return(out)
+  # Helper to safely add type
+  add_type = function(x, type_name) {
+    if (is.null(x) || nrow(x) == 0) return(NULL)
+    x %>%
+      dplyr::mutate(
+        year = as.numeric(y),
+        type = type_name
+      )
+  }
+  # Bind all types
+  dplyr::bind_rows(
+    add_type(mspa, "MSPA"),
+    add_type(amld, "AMLD"),
+    add_type(road, "road")
+  )
 })
-names(patches_all) = names(patches_mspa)
 
-# Export
-base_path = here("outputs", "data", "patchmetrics")
+# Name list by year
+names(corridors_all) = names(patches)
+corridors_all[["2015"]]
 
-for (year in names(patches_all)) {
+### Export --------
+base_path = here("outputs", "data", "corridor")
+for (year in names(corridors_all)) {
   
-  file_name = paste0("patch_corridor_", year, ".gpkg")
+  file_name = paste0("corridor_", year, ".gpkg")
   file_path = file.path(base_path, file_name)
   
   sf::st_write(
-    patches_all[[year]],
+    corridors_all[[year]],
     file_path,
     append = FALSE,
     delete_dsn = TRUE,

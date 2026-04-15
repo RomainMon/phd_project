@@ -72,6 +72,11 @@ bbox_sf = sf::st_as_sf(bbox)
 minbbox = terra::vect(here("data", "geo", "BBOX", "sampling_units_minbbox_buffer5km.shp"))
 minbbox_sf = sf::st_as_sf(minbbox)
 
+# Import pipelines
+pipelines = terra::vect(here("data", "geo", "OSM", "work", "Pipelines_OSM_clean.shp"))
+pipelines_sf = sf::st_as_sf(pipelines)
+plot(rasters_mspa[[36]], col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e", "orange"))
+plot(sf::st_geometry(pipelines_sf), add=TRUE, lwd=1.5)
 
 ### Dilatation-erosion --------
 # Here, we apply dilatation-erosion on habitats (value = 1)
@@ -144,7 +149,7 @@ plot(highway)
 rasters_lf = purrr::map2(rasters_dilate, years, function(r, yr) {
   message("  - Applying linear features for year ", yr)
   r_lin = r
-  # r_lin = apply_linear_feature_single(r_lin, yr, pipelines, buffer_width = 20, value = 2, use_date = TRUE)
+  r_lin = apply_linear_feature_single(r_lin, yr, pipelines, buffer_width = 20, value = 4, use_date = TRUE)
   r_lin = apply_linear_feature_single(r_lin, yr, highway, buffer_width = 20, value = 6, use_date = TRUE)
   r_lin
 })

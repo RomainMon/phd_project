@@ -82,8 +82,15 @@ for (f in farms) {
   readline(prompt = "Press [enter] for next farm")
 }
 
+### Correct column names -----
+regions.csv = regions %>% 
+  sf::st_drop_geometry() %>% 
+  dplyr::rename(Abreviation = Abreviatio,
+                CENTROIDE_X_UTM_SAD69_23S = CENTROIDE_,
+                CENTROIDE_Y_UTM_SAD69_23S = CENTROID_1)
+
+
 ### Export corridors ----------
 base_path = here("data", "geo", "APonchon", "GLT")
 sf::st_write(regions, file.path(base_path, "RegionsName.shp"), append=FALSE, delete_dsn = TRUE, quiet = TRUE)
-regions.csv = regions %>% sf::st_drop_geometry()
 write.csv(regions.csv, file = file.path(base_path, "RegionsName.csv"), row.names = FALSE)
