@@ -260,14 +260,14 @@ r_index = which(mspa_years == year_to_check)
 r_check = rasters_reclass_w_mspa2[[r_index]]
 
 # Subset plantios with the selected IDs
-plantios_selected = plantios[plantios$id %in% 65, ]
+plantios_selected = plantios[plantios$id %in% 29, ]
 
 # Get the extent of the plantios to zoom in
-zoom_extent = terra::ext(plantios_selected)
+zoom_extent = terra::ext(plantios_selected)+500
 
 # Plot the raster zoomed to the plantios extent
 plot(r_check, main = paste("Raster with plantios overlay - Year", year_to_check),
-     col=c("#32a65e", "#FFFFB2", "orange"), ext = zoom_extent)
+     col=c("#32a65e", "#FFFFB2", "blue", "orange"), ext = zoom_extent)
 
 # Overlay the plantios polygons
 plot(plantios_selected, border = "black", add = TRUE)

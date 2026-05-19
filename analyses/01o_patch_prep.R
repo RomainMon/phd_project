@@ -137,7 +137,7 @@ apply_linear_feature_single = function(r, yr, feature, buffer_width, value, use_
   return(r)  # single SpatRaster
 }
 
-##### Step 6 – Apply linear features on top of raster layers -----
+##### Apply linear features on top of raster layers -----
 # First, we distinguish roads based on their nature (primary, secondary, tertiary)
 roads_sf %>% sf::st_drop_geometry() %>%  dplyr::select(highway) %>% dplyr::group_by(highway) %>% dplyr::summarise(n=n())
 highway = roads_sf %>% dplyr::filter(highway == "motorway" | highway == "trunk" | highway == "primary") %>% terra::vect()
@@ -475,7 +475,7 @@ compute_patch_metrics_only = function(r,
   return(patches_metrics_final)
 }
 
-# Loop
+# Loop (the one you prefer depending on the chosen metrics)
 all_years_metrics_simple = purrr::map2(rasters_lf, years,
                                 ~ compute_patch_metrics_only(r = .x,
                                                              year = .y
