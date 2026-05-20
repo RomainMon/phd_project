@@ -260,7 +260,7 @@ r_index = which(mspa_years == year_to_check)
 r_check = rasters_reclass_w_mspa2[[r_index]]
 
 # Subset plantios with the selected IDs
-plantios_selected = plantios[plantios$id %in% 29, ]
+plantios_selected = plantios[plantios$id %in% 67, ]
 
 # Get the extent of the plantios to zoom in
 zoom_extent = terra::ext(plantios_selected)+500

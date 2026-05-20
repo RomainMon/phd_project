@@ -58,7 +58,7 @@ years = stringr::str_extract(basename(vect_files), "(?<!\\d)\\d{4}(?!\\d)")
 # Create a dataframe to link files and years
 vector_df = data.frame(file = vect_files, year = as.numeric(years)) %>%
   dplyr::arrange(year)
-# Load rasters in chronological order
+# Load vectors in chronological order
 patches = lapply(vector_df$file, sf::st_read)
 years = vector_df$year
 # Check
@@ -79,7 +79,7 @@ regions = sf::st_read(here("data", "geo", "APonchon", "GLT", "RegionsName.shp"))
 # 2) For a given year, identify the corridors touching/intersecting >1 patches
 # 3) Join patches id to these corridors
 
-### Corridor-patch (example) -----
+### Example -----
 # Patches 2024
 patches_2024 = patches[[36]] %>% 
   dplyr::rename(patch_id = lyr.1)
@@ -87,7 +87,6 @@ patches_2024 = patches[[36]] %>%
 # Load corridor raster and convert to vector (polygons)
 corridor_raster = rasters_mspa[[36]]
 corridor_raster[corridor_raster != 33] = NA
-plot(corridor_raster)
 corridor_polygons = landscapemetrics::get_patches(corridor_raster, class = 33, directions = 8)
 corridor_sf = sf::st_as_sf(as.polygons(corridor_polygons[[1]][[1]], dissolve = TRUE)) %>% 
   dplyr::rename(corridor_id = lyr.1)  # Assign unique corridor IDs
