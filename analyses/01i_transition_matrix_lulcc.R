@@ -591,7 +591,7 @@ for (i in seq_along(age_rasters_cat)) {
     filename = output_path,
     overwrite = TRUE,
     wopt = list(
-      datatype = "INT2U",                # unsigned integer (0–65535)
+      datatype = "INT2U", # unsigned integer (0–65535)
       gdal = c("COMPRESS=LZW")
     )
   )
