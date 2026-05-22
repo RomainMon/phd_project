@@ -43,34 +43,10 @@ names(patches) = patch_df$year
 
 ### Import corridor datasets ------
 base_path = here("outputs", "data", "corridor")
-
-corridor_files = list.files(
-  base_path,
-  pattern = "\\.gpkg$",
-  full.names = TRUE
+patch_connections_all = readr::read_csv(
+  file.path(base_path, "patch_connections_all.csv"),
+  show_col_types = FALSE
 )
-
-# Extract years
-years_corr = stringr::str_extract(
-  basename(corridor_files),
-  "(?<!\\d)\\d{4}(?!\\d)"
-)
-
-# Create dataframe
-corridor_df = data.frame(
-  file = corridor_files,
-  year = as.numeric(years_corr)
-) %>%
-  dplyr::arrange(year)
-
-# Import corridors
-corridors = purrr::map(
-  corridor_df$file,
-  sf::st_read,
-  quiet = TRUE
-)
-
-names(corridors) = corridor_df$year
 
 ### Compute distance matrix between all patches -------
 distance_tables = purrr::imap(
@@ -94,7 +70,7 @@ distance_tables = purrr::imap(
       dplyr::rename(
         from = Var1,
         to = Var2,
-        distance = Freq
+        distance_ij = Freq
       ) %>%
       dplyr::mutate(
         year = as.numeric(yr)
@@ -103,7 +79,7 @@ distance_tables = purrr::imap(
         year,
         from,
         to,
-        distance
+        distance_ij
       )
     
     return(dm_long)
@@ -114,14 +90,28 @@ distance_tables = purrr::imap(
 distance_tables$`1989`
 
 ### Corridor-patches tables for all years ---------
-
+# Below, the function creates a long-format table (for each year) by joining to patches:
+# - their connections to corridors
+# - if they are connected, to which patches (ids)
+# - the metrics of the connected patches
+# - distance between i and j patches
+# NB: in the output, rows are DUPLICATED if a patch has >1 connections
 patches_long = purrr::imap(
   patches,
   function(patch_sf, yr) {
     
-    # Retrieve corresponding objects
-    corridors_sf = corridors[[yr]]
+    ## Retrieve corresponding objects
     distances_df = distance_tables[[yr]]
+    
+    # Corridor table for current year
+    corridors_year = patch_connections_all %>%
+      dplyr::filter(
+        year == as.numeric(yr)
+      ) %>%
+      dplyr::mutate(
+        patch_from = as.character(patch_from),
+        patch_to = as.character(patch_to)
+      )
     
     ## Base long table
     patches_long_year = patch_sf %>%
@@ -129,13 +119,10 @@ patches_long = purrr::imap(
         lyr.1 = as.character(lyr.1)
       ) %>%
       dplyr::left_join(
-        corridors_sf %>%
-          sf::st_drop_geometry() %>%
-          dplyr::mutate(
-            patch_from = as.character(patch_from),
-            patch_to = as.character(patch_to)
-          ),
-        by = c("lyr.1" = "patch_from")
+        corridors_year,
+        by = c(
+          "lyr.1" = "patch_from"
+        )
       )
     
     ## Destination patch metrics
@@ -143,6 +130,7 @@ patches_long = purrr::imap(
       sf::st_drop_geometry() %>%
       dplyr::select(
         lyr.1,
+        FragName2,
         area_ha
       ) %>%
       dplyr::mutate(
@@ -150,7 +138,8 @@ patches_long = purrr::imap(
       ) %>%
       dplyr::rename(
         patch_to = lyr.1,
-        area_to = area_ha
+        patch_to_name = FragName2,
+        area_to  = area_ha
       )
     
     patches_long_year = patches_long_year %>%
@@ -161,7 +150,9 @@ patches_long = purrr::imap(
     
     ## Join distances
     distances_join = distances_df %>%
-      dplyr::select(-year) %>% 
+      dplyr::select(
+        -year
+      ) %>%
       dplyr::mutate(
         from = as.character(from),
         to = as.character(to)
@@ -179,22 +170,45 @@ patches_long = purrr::imap(
         )
       )
     
-    ## Add year column
+    ## Add year
     patches_long_year = patches_long_year %>%
       dplyr::mutate(
         year = as.numeric(yr)
       )
-    
     return(patches_long_year)
   }
 )
 
-# Names preserved
+# Preserve names
 names(patches_long) = names(patches)
 
-# Combine into one long table
-patches_long_all = dplyr::bind_rows(patches_long, .id = "year_list")
-afetiva = patches_long_all %>% 
+# Combine all years
+patches_long_all = dplyr::bind_rows(
+  patches_long,
+  .id = "year_list"
+) %>% 
   sf::st_drop_geometry() %>% 
-  dplyr::filter(FragName2 == "Afetiva") %>% 
-  dplyr::select(-year_list)
+  dplyr::select(-year_list) %>% 
+  dplyr::mutate(
+    distance_ij = as.numeric(distance_ij)) # Convert distances into numeric format
+
+# Compute binary connected/not connected variable
+patches_long_all = patches_long_all %>% 
+  dplyr::mutate(connected = dplyr::case_when(!is.na(corridor_id) ~ 1,
+                                             TRUE ~ 0))
+
+# Example
+example = patches_long_all %>%
+  dplyr::filter(
+    FragName2 == "Iguape"
+  )
+
+### Export patch history ------
+readr::write_csv(
+  patches_long_all,
+  here(
+    "outputs",
+    "data",
+    "corridor",
+    "patch_connect_history.csv"
+  ))

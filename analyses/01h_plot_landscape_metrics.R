@@ -1098,7 +1098,10 @@ ggplot() +
              color = "black",
              size = 2) +
   scale_fill_manual(values = age_cols, name = "Native forest age") +
-  scale_x_continuous(breaks = seq(min(data$year), max(data$year), by = 2)) +
+  scale_x_continuous(
+    breaks = seq(min(data$year), max(data$year), by = 2),
+    limits = c(min(data$year), 2025)
+  ) +
   labs(
     x = "Year",
     y = "Forest area (ha)",
@@ -1153,7 +1156,7 @@ age_cols = c(
   "21–30 years" = "#138fcf",
   ">30 years"  = "#0b5fa5",
   "Young (<30 years)" = "#9ad9f5",
-  "Old (>30 years)"  = "#0b5fa5"
+  "Old (>30 years)" = "#0b5fa5"
 )
 
 png(here("outputs","plot","01h_lm_forest_age_barplot.png"), width = 2500, height = 1500, res = 300)
@@ -1168,7 +1171,7 @@ ggplot() +
            linewidth = 0.2) +
   ## Last bar: AgeClass composition
   geom_col(data = data_comp,
-           aes(x = year + 0.5, y = ca, fill = AgeClass),
+           aes(x = year + 1.2, y = ca, fill = AgeClass),
            stat = "identity",
            width = 2,
            color = "white",
@@ -1176,11 +1179,11 @@ ggplot() +
            show.legend = FALSE) +
   ## Proportion labels
   geom_text(data = data_comp,
-            aes(x = year + 3.8, y = pos, label = AgeClass),
+            aes(x = year + 4, y = pos, label = AgeClass),
             size = 4,
             family = "Arial Narrow") +
   geom_text(data = data_comp,
-            aes(x = year + 0.5, y = pos, label = paste0(prop, "%")),
+            aes(x = year + 1.2, y = pos, label = paste0(prop, "%")),
             size = 4,
             family = "Arial Narrow") +
   ## Total forest cover line
@@ -1197,7 +1200,10 @@ ggplot() +
     breaks = c("Young (<30 years)", "Old (>30 years)"),
     name = "Native forest age"
   ) +
-  scale_x_continuous(breaks = seq(min(data$year), max(data$year), by = 2)) +
+  scale_x_continuous(
+    breaks = seq(min(data$year), max(data$year), by = 2),
+    limits = c(min(data$year), 2028)
+  ) +
   labs(
     x = "Year",
     y = "Forest area (ha)") +

@@ -79,61 +79,61 @@ regions = sf::st_read(here("data", "geo", "APonchon", "GLT", "RegionsName.shp"))
 # 2) For a given year, identify the corridors touching/intersecting >1 patches
 # 3) Join patches id to these corridors
 
-#### Example -----
-# Patches 2024
-patches_2024 = patches[[36]] %>% 
-  dplyr::rename(patch_id = lyr.1) %>% 
-  dplyr::mutate(patch_id = as.character(patch_id))
-
-
-# Load corridor raster and convert to vector (polygons)
-corridor_raster = rasters_mspa[[36]]
-corridor_raster[corridor_raster != 33] = NA
-corridor_polygons = landscapemetrics::get_patches(corridor_raster, class = 33, directions = 8)
-corridor_sf = sf::st_as_sf(as.polygons(corridor_polygons[[1]][[1]], dissolve = TRUE)) %>% 
-  dplyr::rename(corridor_id = lyr.1)  # Assign unique corridor IDs
-plot(sf::st_geometry(corridor_sf))
-
-# Small buffer to avoid topology issues
-corridor_sf_buff = sf::st_buffer(corridor_sf, 1)
-
-# Assign patch_id to corridors that intersect patches
-connections = corridor_sf_buff %>%
-  sf::st_join(
-    patches_2024 %>% dplyr::select(patch_id),
-    join = st_intersects,  # Includes both intersection and touching
-    left = FALSE  # Keep only patches that intersect/touch corridors
-  ) %>% 
-  sf::st_drop_geometry()
-
-# Keep corridors connecting >1 patch
-connections_long = connections %>% 
-  dplyr::group_by(corridor_id) %>% 
-  dplyr::filter(dplyr::n() > 1) %>%
-  dplyr::ungroup()
-
-# Join back corridor_id to patch data
-# Create pairwise patch connections (Each patch is linked to all other patches in same corridor)
-patch_connections = connections_long %>%
-  dplyr::inner_join(
-    connections_long %>%
-      dplyr::rename(patch_to = patch_id), by = "corridor_id") %>%
-  dplyr::rename(patch_from = patch_id) %>%
-  dplyr::filter(patch_from != patch_to) %>%
-  dplyr::mutate(pair = purrr::map2_chr(
-      patch_from,
-      patch_to,
-      ~ paste(sort(c(.x, .y)), collapse = "_")
-    )) %>%
-  dplyr::distinct(pair, corridor_id, .keep_all = TRUE) %>%
-  dplyr::select(corridor_id, patch_from, patch_to)
-
-# 1. Corridor geometries (sf)
-corridor_geometry = corridor_sf %>%
-  dplyr::select(corridor_id, geometry)
-
-# 2. Long-format connection table (no geometry)
-patch_connections
+# #### Example -----
+# # Patches 2024
+# patches_2024 = patches[[36]] %>% 
+#   dplyr::rename(patch_id = lyr.1) %>% 
+#   dplyr::mutate(patch_id = as.character(patch_id))
+# 
+# 
+# # Load corridor raster and convert to vector (polygons)
+# corridor_raster = rasters_mspa[[36]]
+# corridor_raster[corridor_raster != 33] = NA
+# corridor_polygons = landscapemetrics::get_patches(corridor_raster, class = 33, directions = 8)
+# corridor_sf = sf::st_as_sf(as.polygons(corridor_polygons[[1]][[1]], dissolve = TRUE)) %>% 
+#   dplyr::rename(corridor_id = lyr.1)  # Assign unique corridor IDs
+# plot(sf::st_geometry(corridor_sf))
+# 
+# # Small buffer to avoid topology issues
+# corridor_sf_buff = sf::st_buffer(corridor_sf, 1)
+# 
+# # Assign patch_id to corridors that intersect patches
+# connections = corridor_sf_buff %>%
+#   sf::st_join(
+#     patches_2024 %>% dplyr::select(patch_id),
+#     join = st_intersects,  # Includes both intersection and touching
+#     left = FALSE  # Keep only patches that intersect/touch corridors
+#   ) %>% 
+#   sf::st_drop_geometry()
+# 
+# # Keep corridors connecting >1 patch
+# connections_long = connections %>% 
+#   dplyr::group_by(corridor_id) %>% 
+#   dplyr::filter(dplyr::n() > 1) %>%
+#   dplyr::ungroup()
+# 
+# # Join back corridor_id to patch data
+# # Create pairwise patch connections (Each patch is linked to all other patches in same corridor)
+# patch_connections = connections_long %>%
+#   dplyr::inner_join(
+#     connections_long %>%
+#       dplyr::rename(patch_to = patch_id), by = "corridor_id") %>%
+#   dplyr::rename(patch_from = patch_id) %>%
+#   dplyr::filter(patch_from != patch_to) %>%
+#   dplyr::mutate(pair = purrr::map2_chr(
+#       patch_from,
+#       patch_to,
+#       ~ paste(sort(c(.x, .y)), collapse = "_")
+#     )) %>%
+#   dplyr::distinct(pair, corridor_id, .keep_all = TRUE) %>%
+#   dplyr::select(corridor_id, patch_from, patch_to)
+# 
+# # 1. Corridor geometries (sf)
+# corridor_geometry = corridor_sf %>%
+#   dplyr::select(corridor_id, geometry)
+# 
+# # 2. Long-format connection table (no geometry)
+# patch_connections
 
 #### Function to create corridor connections -----
 # Returns:
@@ -143,9 +143,10 @@ build_corridor_connections = function(patches_list,
                                       raster_list,
                                       corridor_value,
                                       patch_id_col,
-                                      buffer_dist = 1) {
+                                      corridor_type,
+                                      buffer_dist = 5) {
   
-  patch_years  = as.numeric(names(patches_list))
+  patch_years = as.numeric(names(patches_list))
   raster_years = as.numeric(names(raster_list))
   
   # Outputs
@@ -187,7 +188,7 @@ build_corridor_connections = function(patches_list,
         corridor_id = lyr.1
       ) %>%
       dplyr::mutate(
-        corridor_id = paste0(year, "_", corridor_id),
+        corridor_id = paste0(corridor_type, "_", year, "_", corridor_id),
         year = year
       )
     
@@ -224,7 +225,8 @@ build_corridor_connections = function(patches_list,
           dplyr::rename(
             patch_to = patch_id
           ),
-        by = "corridor_id"
+        by = "corridor_id",
+        relationship = "many-to-many"
       ) %>%
       dplyr::rename(
         patch_from = patch_id
@@ -233,19 +235,19 @@ build_corridor_connections = function(patches_list,
         patch_from != patch_to
       ) %>%
       dplyr::mutate(
-        pair = purrr::map2_chr(
-          patch_from,
-          patch_to,
-          ~ paste(sort(c(.x, .y)), collapse = "_")
-        )
+        year = year,
+        corridor_type = corridor_type
       ) %>%
       dplyr::distinct(
-        pair,
         corridor_id,
+        patch_from,
+        patch_to,
         .keep_all = TRUE
       ) %>%
       dplyr::select(
         corridor_id,
+        corridor_type,
+        year,
         patch_from,
         patch_to
       )
@@ -276,7 +278,8 @@ corridors_mspa = build_corridor_connections(
   patches_list = patches,
   raster_list = rasters_mspa,
   corridor_value = 33,
-  patch_id_col = "lyr.1"
+  patch_id_col = "lyr.1",
+  corridor_type = "MSPA"
 )
 
 # Road overpasses
@@ -284,7 +287,8 @@ corridors_road = build_corridor_connections(
   patches_list = patches,
   raster_list = rasters_reclass_cons_cat,
   corridor_value = 52,
-  patch_id_col = "lyr.1"
+  patch_id_col = "lyr.1",
+  corridor_type = "ROAD"
 )
 
 # Merge all corridor geometries
@@ -297,22 +301,7 @@ corridor_geometry_all = dplyr::bind_rows(
 patch_connections_all = dplyr::bind_rows(
   corridors_mspa$patch_connections,
   corridors_road$patch_connections
-) %>%
-  # Remove duplicated links across corridor types
-  dplyr::mutate(
-    pair = purrr::map2_chr(
-      patch_from,
-      patch_to,
-      ~ paste(sort(c(.x, .y)), collapse = "_")
-    )
-  ) %>%
-  dplyr::distinct(
-    pair,
-    .keep_all = TRUE
-  ) %>%
-  dplyr::select(
-    -pair
-  )
+)
 
 
 ### Export --------

@@ -80,47 +80,47 @@ pipelines_sf = sf::st_as_sf(pipelines)
 plot(rasters_mspa[[36]], col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e", "orange"))
 plot(sf::st_geometry(pipelines_sf), add=TRUE, lwd=1.5)
 
-### Dilatation-erosion --------
-# Here, we apply dilatation-erosion on habitats (value = 1)
-# This section is based on Mailys Queru's work
-
-# dilatation_erosion_mailys <- function(raster, seuil) {
-#   habitat <- app(raster, fun = function(v) ifelse(v == 1, 1, NA)) # All cells different than 1 become NA
-#   dist_hab <- terra::distance(habitat)
-#   dist_hab_thresh <- app(dist_hab, fun = function(v) ifelse(v > seuil, 1, NA)) # Threshold distance and set 0 to NA 
-#   dist_nonhab <- terra::distance(dist_hab_thresh) 
-#   dist_nonhab > seuil 
-#   }
-
-# Numeric version (applies mask to original raster)
-dilatation_erosion = function(raster, seuil) { 
-  # Step 1: Habitat mask 
-  habitat = app(raster, fun = function(v) ifelse(v == 1, 1, NA)) 
-  # Step 2: Dilation 
-  dist_hab = terra::distance(habitat) 
-  dilated_mask = app(dist_hab, fun = function(v) ifelse(v > seuil, 1, NA)) 
-  # Step 3: Erosion 
-  dist_nonhab = terra::distance(dilated_mask) 
-  final_mask = app(dist_nonhab, fun = function(v) ifelse(v > seuil, 1, NA)) 
-  # Step 4: Apply mask to original raster 
-  raster[!is.na(final_mask)] = 1 
-  
-  raster 
-}
-
-#### Apply dilatation erosion ------
-# Warning: choose wisely on which raster applying dilatation-erosion (with or without corridors)
-message("Applying dilatation–erosion...")
-rasters_dilate = lapply(seq_along(rasters_mspa), function(i) {
-  message("  - Processing dilatation–erosion for raster ", i, " (year ", years[i], ")")
-  dilatation_erosion(rasters_mspa[[i]], seuil = 30)
-})
-
-# Quick check
-plot(rasters_mspa[[36]], main=paste0("Before dilatation–Erosion ", years[36]), col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e","orange"))
-plot(rasters_dilate[[36]], main=paste0("After dilatation–Erosion ", years[36]), col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e","orange"))
-freq(rasters_mspa[[36]])
-freq(rasters_dilate[[36]])
+# ### Dilatation-erosion --------
+# # Here, we apply dilatation-erosion on habitats (value = 1)
+# # This section is based on Mailys Queru's work
+# 
+# # dilatation_erosion_mailys <- function(raster, seuil) {
+# #   habitat <- app(raster, fun = function(v) ifelse(v == 1, 1, NA)) # All cells different than 1 become NA
+# #   dist_hab <- terra::distance(habitat)
+# #   dist_hab_thresh <- app(dist_hab, fun = function(v) ifelse(v > seuil, 1, NA)) # Threshold distance and set 0 to NA 
+# #   dist_nonhab <- terra::distance(dist_hab_thresh) 
+# #   dist_nonhab > seuil 
+# #   }
+# 
+# # Numeric version (applies mask to original raster)
+# dilatation_erosion = function(raster, seuil) { 
+#   # Step 1: Habitat mask 
+#   habitat = app(raster, fun = function(v) ifelse(v == 1, 1, NA)) 
+#   # Step 2: Dilation 
+#   dist_hab = terra::distance(habitat) 
+#   dilated_mask = app(dist_hab, fun = function(v) ifelse(v > seuil, 1, NA)) 
+#   # Step 3: Erosion 
+#   dist_nonhab = terra::distance(dilated_mask) 
+#   final_mask = app(dist_nonhab, fun = function(v) ifelse(v > seuil, 1, NA)) 
+#   # Step 4: Apply mask to original raster 
+#   raster[!is.na(final_mask)] = 1 
+#   
+#   raster 
+# }
+# 
+# #### Apply dilatation erosion ------
+# # Warning: choose wisely on which raster applying dilatation-erosion (with or without corridors)
+# message("Applying dilatation–erosion...")
+# rasters_dilate = lapply(seq_along(rasters_mspa), function(i) {
+#   message("  - Processing dilatation–erosion for raster ", i, " (year ", years[i], ")")
+#   dilatation_erosion(rasters_mspa[[i]], seuil = 30)
+# })
+# 
+# # Quick check
+# plot(rasters_mspa[[36]], main=paste0("Before dilatation–Erosion ", years[36]), col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e","orange"))
+# plot(rasters_dilate[[36]], main=paste0("After dilatation–Erosion ", years[36]), col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e","orange"))
+# freq(rasters_mspa[[36]])
+# freq(rasters_dilate[[36]])
 
 ### Overlay linear features -----
 # Here, we overlay vector linear features to the rasters using a buffer width and assign the intersected cells a new numeric value
@@ -148,7 +148,7 @@ plot(highway)
 # Second, we apply linear features
 # Main roads take the value "artificial" (6)
 # WARNING: at this resolution (30 x 30 m), a minimum of 20 m is needed for linear features to create continuous linear features (below, some cells are not overwritten, and some raster cells are still connected through their vertices)
-rasters_lf = purrr::map2(rasters_dilate, years, function(r, yr) {
+rasters_lf = purrr::map2(rasters_mspa, years, function(r, yr) {
   message("  - Applying linear features for year ", yr)
   r_lin = r
   r_lin = apply_linear_feature_single(r_lin, yr, pipelines, buffer_width = 20, value = 4, use_date = TRUE)
@@ -536,9 +536,49 @@ patches_names = purrr::map(
   }
 )
 
+#### Patch dilatation-erosion -------
+# Dilatation-erosion on all the raster (as above) may result in connecting close but disconnected patches (see: Boa Esperanca, two close patches but actually connected by a CORRIDOR)
+# Hence, we apply dilatation-erosion afterwards
+# E.g., without dilatation-erosion, Afetiva remains disconnected from its corridor...
+patches_dilat = purrr::map(
+  patches_names,
+  ~ {
+    ## Selected patch with dilatation
+    afetiva = .x %>%
+      dplyr::filter(FragName2 == "Afetiva") %>%
+      sf::st_buffer(30)
+    
+    ## Patches intersecting Afetiva
+    touching = .x[
+      sf::st_intersects(.x, afetiva, sparse = FALSE)[,1],
+    ]
+    
+    ## Merge all touching patches
+    merged = touching %>%
+      sf::st_union() %>%
+      sf::st_as_sf()
+    
+    ## Keep Afetiva attributes
+    merged_patch = afetiva[1, ]
+    sf::st_geometry(merged_patch) = sf::st_geometry(merged)
+    
+    ## Remove old patches
+    remaining = .x[
+      !sf::st_intersects(.x, afetiva, sparse = FALSE)[,1],
+    ]
+    
+    ## Recombine
+    dplyr::bind_rows(
+      remaining,
+      merged_patch
+    ) %>%
+      sf::st_make_valid()
+  }
+)
+
 #### Patch metrics --------
 patches_metrics = purrr::map(
-  patches_names,
+  patches_dilat,
   ~ {
     area_tbl = vm_p_area(.x, patch_col = "lyr.1") %>%
       dplyr::rename(lyr.1 = id) %>%
