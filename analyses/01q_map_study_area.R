@@ -14,6 +14,8 @@ library(ggplot2)
 library(ggspatial)
 library(ggpattern)
 library(sp)
+library(cowplot)
+library(lemon)
 
 ### Import rasters -------
 
@@ -72,6 +74,13 @@ pa_sf = dplyr::bind_rows(
   uniao_sf %>% dplyr::mutate(name = "União")
 )
 
+# Brazil
+brazil = terra::vect(here("data", "geo", "IBGE", "admin", "BR_Pais_2023", "BR_Pais_2023.shp"))
+brazil = terra::project(brazil, "EPSG:31983")
+brazil_sf = st_as_sf(brazil)
+plot(sf::st_geometry(brazil_sf))
+
+
 ### Crop to extent ----
 # Study area (from raster)
 study_area = st_as_sfc(st_bbox(raster_lulc_2024))
@@ -82,6 +91,31 @@ sj_watershed_sf = sf::st_intersection(sj_watershed_sf, study_area)
 pa_sf = sf::st_intersection(pa_sf, study_area)
 
 ### Map -----
+#### Inset map (Brazil) -------
+study_centroid = sf::st_centroid(study_area)
+study_coords = sf::st_coordinates(study_centroid)
+
+inset = ggplot() +
+  geom_sf(data = brazil_sf,
+          fill = "white",
+          color = "black",
+          linewidth = 0.2) +
+  geom_point(
+    aes(x = study_coords[1],
+        y = study_coords[2]),
+    color = "red",
+    size = 2
+  ) +
+  coord_sf(expand = FALSE) +
+  theme_void() +
+  theme(
+    panel.background = element_rect(fill = "grey95"),
+    panel.border = element_rect(color = "black",
+                                fill = NA,
+                                linewidth = 0.4)
+  )
+
+#### Study area -----
 # Raster to dataframe
 lulc_df = as.data.frame(raster_lulc_2024, xy = TRUE, na.rm = TRUE)
 names(lulc_df)[3] = "value"
@@ -115,9 +149,7 @@ line_cols = c(
 )
 
 # Plot
-png(here("outputs","plot","01p_paper1_study_area.png"), width = 3000, height = 1700, res = 300)
-
-ggplot() +
+main = ggplot() +
   geom_raster(data = lulc_df,
               aes(x = x, y = y, fill = value)) +
   scale_fill_manual(values = cols_lulc,
@@ -178,24 +210,115 @@ ggplot() +
   ) +
   
   ggspatial::annotation_scale(
-    location = "bl",
-    style = "ticks",
-    width_hint = 0.15,
-    text_cex = 0.6
+    location = "br",
+    style = "bar",
+    bar_cols = "black",
+    width_hint = 0.18,
+    pad_x = unit(0.3, "cm"),
+    pad_y = unit(0.3, "cm"),
+    text_cex = 0.7,
+    line_width = 0.7
   ) +
   ggspatial::annotation_north_arrow(
-    location = "tl",
+    location = "br",
     which_north = "true",
-    style = ggspatial::north_arrow_fancy_orienteering,
-    height = unit(1, "cm"),
-    width  = unit(1, "cm")
+    style = ggspatial::north_arrow_nautical(),
+    pad_x = unit(0.3, "cm"),
+    pad_y = unit(1.2, "cm"),
+    height = unit(1.8, "cm"),
+    width  = unit(1.8, "cm")
   ) +
-  coord_sf() +
-  theme_minimal(base_family = "Arial Narrow") +
+  coord_sf(expand = FALSE) +
+  theme_bw(base_family = "Arial Narrow") +
   theme(
     axis.title = element_blank(),
-    panel.grid = element_blank(),
-    legend.position = "right"
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    legend.position = "none",
   )
+
+#### Legend --------
+legend_plot = ggplot() +
+  # Land use legend
+  geom_raster(
+    data = lulc_df,
+    aes(x = x, y = y, fill = value)
+  ) +
+  # Protected areas legend
+  geom_sf_pattern(
+    data = pa_sf,
+    aes(pattern = name,
+        pattern_color = name),
+    fill = NA,
+    color = NA,
+    pattern_fill = NA,
+    pattern_density = 0.4,
+    pattern_spacing = 0.025,
+    linewidth = 0.6
+  ) +
+  
+  scale_fill_manual(
+    values = cols_lulc,
+    name = "Land use"
+  ) +
+  
+  scale_pattern_manual(
+    values = c(
+      "São João River Basin APA" = "circle",
+      "Poço das Antas" = "stripe",
+      "Três Picos" = "crosshatch",
+      "União" = "stripe"
+    ),
+    name = "Protected areas"
+  ) +
+  
+  scale_pattern_color_manual(
+    values = cols_pa,
+    name = "Protected areas"
+  ) +
+  theme_void() +
+  theme(
+    legend.position = "bottom",
+    legend.box = "vertical",
+    legend.title = element_text(
+      face = "bold",
+      size = 10
+    ),
+    legend.text = element_text(size = 9)
+  ) +
+  guides(
+    fill = guide_legend(
+      title.position = "top",
+      nrow = 1,
+      order = 1
+    ),
+    pattern = guide_legend(
+      title.position = "top",
+      nrow = 1,
+      order = 2,
+      override.aes = list(fill = "white")
+    ),
+    pattern_color = "none"
+  )
+legend = lemon::g_legend(legend_plot)
+
+#### Combine ------
+combo = ggdraw() +
+  draw_plot(main) +
+  draw_plot(
+    inset,
+    x = 0.155,
+    y = 0.782,
+    width = 0.20,
+    height = 0.20
+  )
+
+### Export ------
+png(here("outputs","plot","01p_paper1_study_area.png"), width = 2500, height = 1500, res = 300)
+
+gridExtra::grid.arrange(combo,
+             legend,
+             nrow=2, 
+             heights=c(1,0.25))
 
 dev.off()
