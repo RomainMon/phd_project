@@ -13,9 +13,13 @@ library(stringr)
 library(ggplot2)
 library(ggspatial)
 library(ggpattern)
+library(extrafont)
 library(sp)
 library(cowplot)
 library(lemon)
+library(magick)
+loadfonts()
+
 
 ### Import rasters -------
 
@@ -131,14 +135,14 @@ lulc_df$value = factor(lulc_df$value,
 
 # LULC colors
 cols_lulc = c("#32a65e", "#ad975a", "#519799",
-              "#FFFFB2", "#0000FF", "#d4271e")
+              "#D1D100", "#0000FF", "#d4271e")
 
 # PA colors
 cols_pa = c(
-  "São João River Basin APA" = "#a6cee3",
-  "Poço das Antas" = "#b2df8a",
-  "Três Picos" = "#fb9a99",
-  "União" = "#fdbf6f"
+  "São João River Basin APA" = "black",
+  "Poço das Antas" = "black",
+  "Três Picos" = "black",
+  "União" = "grey60"
 )
 
 # Colors for line features
@@ -155,17 +159,18 @@ main = ggplot() +
   scale_fill_manual(values = cols_lulc,
                     name = "Land use") +
   
-  # Protected areas
+  # Protected areas parameters (alpha, spacing...)
   geom_sf_pattern(
     data = pa_sf,
     aes(pattern = name,
         pattern_color = name),
     fill = NA,
     color = NA,
+    pattern_alpha = 1,
     pattern_fill = NA,
-    pattern_density = 0.4,
+    pattern_density = 0.2,
     pattern_spacing = 0.025,
-    linewidth = 0.6) +
+    linewidth = 0.3) +
   
   # Watershed
   geom_sf(
@@ -200,7 +205,7 @@ main = ggplot() +
       "São João River Basin APA" = "circle",
       "Poço das Antas" = "stripe",
       "Três Picos" = "crosshatch",
-      "União" = "stripe"
+      "União" = "weave"
     ),
     name = "Protected areas"
   ) +
@@ -251,11 +256,11 @@ legend_plot = ggplot() +
         pattern_color = name),
     fill = NA,
     color = NA,
+    pattern_alpha = 1,
     pattern_fill = NA,
-    pattern_density = 0.4,
+    pattern_density = 0.2,
     pattern_spacing = 0.025,
-    linewidth = 0.6
-  ) +
+    linewidth = 0.3) +
   
   scale_fill_manual(
     values = cols_lulc,
@@ -267,14 +272,13 @@ legend_plot = ggplot() +
       "São João River Basin APA" = "circle",
       "Poço das Antas" = "stripe",
       "Três Picos" = "crosshatch",
-      "União" = "stripe"
+      "União" = "weave"
     ),
     name = "Protected areas"
   ) +
-  
   scale_pattern_color_manual(
     values = cols_pa,
-    name = "Protected areas"
+    guide = "none"
   ) +
   theme_void() +
   theme(
@@ -292,29 +296,32 @@ legend_plot = ggplot() +
       nrow = 1,
       order = 1
     ),
+    
     pattern = guide_legend(
       title.position = "top",
       nrow = 1,
       order = 2,
-      override.aes = list(fill = "white")
-    ),
-    pattern_color = "none"
+      override.aes = list(
+        pattern_colour = c("black", "black", "black", "grey40"),
+        fill = "white"
+      )
+    )
   )
 legend = lemon::g_legend(legend_plot)
 
 #### Combine ------
 combo = ggdraw() +
-  draw_plot(main) +
-  draw_plot(
+  cowplot::draw_plot(main) +
+  cowplot::draw_plot(
     inset,
-    x = 0.155,
-    y = 0.782,
+    x = 0.056,
+    y = 0.779,
     width = 0.20,
     height = 0.20
   )
 
 ### Export ------
-png(here("outputs","plot","01p_paper1_study_area.png"), width = 2500, height = 1500, res = 300)
+png(here("outputs","plot","01p_paper1_study_area.png"), width = 1800, height = 1500, res = 300, type="cairo")
 
 gridExtra::grid.arrange(combo,
              legend,

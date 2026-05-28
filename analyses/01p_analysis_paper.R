@@ -36,10 +36,6 @@ all_lulc_metrics = readr::read_csv(
 forest_class_metrics = readr::read_csv(
   file.path(base_path, "forest_class_metrics_bbox_1989_2024.csv"),
   show_col_types = FALSE)
-# Forest age
-forest_age_metrics = readr::read_csv(
-  file.path(base_path, "forest_age_metrics_bbox_1989_2024.csv"),
-  show_col_types = FALSE)
 
 ## Modeling datasets
 base_path = here("outputs", "data", "MapBiomas", "LULCC_datasets")
@@ -330,23 +326,6 @@ text = data %>%
   dplyr::pull(txt)
 cat(paste0("* ", text, collapse = "\n"), "\n")
 
-#### Forest age ------
-data = forest_age_metrics %>%
-  dplyr::mutate(
-    AgeClass = factor(
-      dplyr::case_when(
-        class == 10 ~ "<=10 years",
-        class == 20 ~ "11–20 years",
-        class == 30 ~ "21–30 years",
-        class == 31 ~ ">30 years"),
-      levels = c("<=10 years", "11–20 years", "21–30 years", ">30 years"))) %>% 
-  dplyr::filter(year == 2024)
-text = data %>%
-  dplyr::mutate(txt = paste0(AgeClass, " covered ", round(ca), " ha (", round(pland,1), "%) in 2024.")) %>%
-  dplyr::pull(txt)
-cat("Forest age in 2024 was as follows:\n")
-cat(paste0("* ", text, collapse="\n"), "\n\n")
-
 ### Figures -------
 # Color palette using the Legend codes provided by MapBiomas
 class_colors = tibble::tibble(
@@ -385,8 +364,8 @@ waffle1989 = ggplot(data_1989, aes(x, y, fill = Description)) +
     labels = setNames(data_1989$pct_label, data_1989$Description),
     name = NULL
   ) +
-  theme_void() +
-  ggtitle("b) LULC in 1989") +
+  theme_void(base_family = "Arial Narrow") +
+  ggtitle("b) 1989") +
   theme(legend.position = "none",
         plot.title = element_text(
           family = "Arial Narrow",
@@ -421,8 +400,8 @@ waffle2024 = ggplot(data_2024, aes(x, y, fill = Description)) +
     labels = setNames(data_2024$pct_label, data_2024$Description),
     name = NULL
   ) +
-  theme_void() +
-  ggtitle("c) LULC in 2024") +
+  theme_void(base_family = "Arial Narrow") +
+  ggtitle("2024") +
   theme(legend.position = "none",
         plot.title = element_text(
           family = "Arial Narrow",
@@ -465,8 +444,8 @@ waffle2100 = ggplot(data_2100, aes(x, y, fill = Description)) +
     labels = setNames(data_2100$pct_label, data_2100$Description),
     name = NULL
   ) +
-  theme_void() +
-  ggtitle("d) Predicted LULC in 2100") +
+  theme_void(base_family = "Arial Narrow") +
+  ggtitle("2100") +
   theme(legend.position = "none",
         plot.title = element_text(
           family = "Arial Narrow",
@@ -630,7 +609,8 @@ lulcc_plot = ggplot() +
 final_plot = lulcc_plot + (waffle1989 + waffle2024 + waffle2100) + plot_layout(ncol=1)
 plot(final_plot)
 
-png(here("outputs","plot","01p_paper1_LULC_1989-2100.png"), width = 3000, height = 2000, res = 300)
+png(here("outputs","plot","01p_paper1_LULC_1989-2100.png"), 
+    width = 2500, height = 1800, res = 300, type="cairo")
 plot(final_plot)
 dev.off()
 
@@ -655,7 +635,8 @@ data = all_lulc_metrics %>%
   dplyr::left_join(class_colors, by = "class")
 
 
-png(here("outputs","plot","01h_lm_pland_barplot0.png"), width = 2500, height = 1500, res = 300)
+png(here("outputs","plot","01h_lm_pland_barplot0.png"), 
+    width = 2500, height = 1800, res = 300, type="cairo")
 
 ggplot(data, aes(x = year, y = delta_ca, group = Description)) +
   geom_col(data = data,aes(x = year, y = delta_ca, fill = Description),
@@ -677,7 +658,7 @@ ggplot(data, aes(x = year, y = delta_ca, group = Description)) +
     fill = "Land use class",
     color = "Land use class",
   ) +
-  theme_classic() +
+  theme_classic(base_family = "Arial Narrow") +
   theme(axis.text.x = element_text(angle = 45, hjust = 1),
         legend.position = "bottom",
         axis.title = element_text(size = 14, family = "Arial Narrow"),
@@ -689,113 +670,6 @@ ggplot(data, aes(x = year, y = delta_ca, group = Description)) +
 
 dev.off()
 
-
-#### Forest age -------
-data = forest_age_metrics %>%
-  dplyr::mutate(
-    AgeClass = factor(
-      dplyr::case_when(
-        class == 10 ~ "<=10 years",
-        class == 20 ~ "11–20 years",
-        class == 30 ~ "21–30 years",
-        class == 31 ~ ">30 years"),
-      levels = c("<=10 years", "11–20 years", "21–30 years", ">30 years")))
-
-total_forest = all_lulc_metrics %>%
-  dplyr::filter(class == 1) %>% 
-  dplyr::filter(year <= 2024) %>% 
-  dplyr::select(year, ca)
-age_cols = c(
-  "<=10 years" = "#9ad9f5",
-  "11–20 years" = "#49b5e7",
-  "21–30 years" = "#138fcf",
-  ">30 years"  = "#0b5fa5"
-)
-total_2024 = total_forest %>%
-  dplyr::filter(year == 2024) %>% 
-  dplyr::pull(ca)
-data_comp = data %>%
-  dplyr::filter(year == 2024) %>%
-  dplyr::mutate(
-    ca = ca,
-    prop = round(100 * ca / total_2024,1))  %>% 
-  dplyr::select(year, AgeClass, ca, prop)
-data_comp = data_comp %>% 
-  dplyr::mutate(pos = dplyr::case_when(AgeClass == "<=10 years" ~ 168000,
-                                       AgeClass == "11–20 years" ~ 162000,
-                                       AgeClass == "21–30 years" ~ 155000,
-                                       AgeClass == ">30 years"~ 100000))
-data_old_young = data %>% 
-  dplyr::mutate(AgeClass = factor(dplyr::case_when(AgeClass %in% c("<=10 years", "11–20 years", "21–30 years") ~ "Young (<30 years)",
-                                                   AgeClass %in% c(">30 years") ~ "Old (>30 years)"), 
-                                  levels = c("Young (<30 years)", "Old (>30 years)"))) %>% 
-  dplyr::group_by(AgeClass, year) %>% 
-  dplyr::summarise(ca = sum(ca), .groups = "drop") %>% 
-  dplyr::filter(year != 2024) %>% 
-  dplyr::ungroup()
-age_cols = c(
-  "<=10 years" = "#9ad9f5",
-  "11–20 years" = "#49b5e7",
-  "21–30 years" = "#138fcf",
-  ">30 years"  = "#0b5fa5",
-  "Young (<30 years)" = "#9ad9f5",
-  "Old (>30 years)"  = "#0b5fa5"
-)
-# Bar + line plot
-png(here("outputs","plot","01h_lm_forest_age_barplot.png"), width = 2500, height = 1500, res = 300)
-ggplot() +
-  ## Stacked bars = forest age structure
-  geom_col(data = data_old_young,
-           aes(x = year, y = ca, fill = AgeClass),
-           width = 0.9,
-           color = "white",
-           linewidth = 0.2) +
-  ## Last bar: AgeClass composition
-  geom_col(data = data_comp,
-           aes(x = year + 0.5, y = ca, fill = AgeClass),
-           stat = "identity",
-           width = 2,
-           color = "white",
-           linewidth = 0.2,
-           show.legend = FALSE) +
-  ## Proportion labels
-  geom_text(data = data_comp,
-            aes(x = year + 3.8, y = pos, label = AgeClass),
-            size = 4,
-            family = "Arial Narrow") +
-  geom_text(data = data_comp,
-            aes(x = year + 0.5, y = pos, label = paste0(prop, "%")),
-            size = 4,
-            family = "Arial Narrow") +
-  ## Total forest cover line
-  geom_line(data = total_forest,
-            aes(x = year, y = ca),
-            color = "black",
-            linewidth = 1) +
-  geom_point(data = total_forest,
-             aes(x = year, y = ca),
-             color = "black",
-             size = 2) +
-  scale_fill_manual(
-    values = age_cols,
-    breaks = c("Young (<30 years)", "Old (>30 years)"),
-    name = "Native forest age"
-  ) +
-  scale_x_continuous(breaks = seq(min(data$year), max(data$year), by = 2)) +
-  labs(
-    x = "Year",
-    y = "Forest area (ha)") +
-  theme_minimal() +
-  theme(
-    axis.title = element_text(size = 14, family = "Arial Narrow"),
-    axis.text  = element_text(size = 12, family = "Arial"),
-    axis.text.x = element_text(size = 10, angle = 45, hjust = 1, family = "Arial"),
-    legend.title = element_text(size = 14, family = "Arial Narrow"),
-    legend.text  = element_text(size = 12),
-    panel.grid.minor = element_blank(),
-    legend.position = "bottom"
-  )
-dev.off()
 
 #### Forest metrics -----
 data = forest_class_metrics %>%
@@ -824,21 +698,22 @@ data$Metric = factor(data$Metric, levels=c("a) Surface area (ha)", "b) Number of
                                            "c) Mean patch size (ha)", "d) Forest Fragmentation Index (FFI)"))
 
 # Plot facets
-png(here("outputs","plot","01h_lm_forest_metrics_lineplot.png"), width = 2000, height = 2000, res = 300)
+png(here("outputs","plot","01h_lm_forest_metrics_lineplot.png"), 
+    width = 1800, height = 1500, res = 300, type="cairo")
 
 ggplot(data, aes(x = year, y = Value)) +
   geom_line(color = "#011809", linewidth = 1) +
-  geom_point(color = "#32a65e", size = 2.4) +
+  geom_point(color = "#32a65e", size = 2) +
   facet_wrap(~Metric, scales = "free_y", ncol = 2) +
   labs(
     x = "Year",
     y = NULL
   ) +
-  theme_minimal() +
+  theme_minimal(base_family = "Arial Narrow") +
   theme(
-    strip.text = element_text(face = "bold", size = 12, family = "Arial Narrow"),
+    strip.text = element_text(face = "bold", size = 10, family = "Arial Narrow"),
     plot.title = element_blank(),
-    axis.title = element_text(size = 12, family = "Arial Narrow"),
+    axis.title = element_text(size = 10, family = "Arial Narrow"),
     axis.text = element_text(size = 10, family = "Arial"),
     panel.grid.minor = element_blank()
   )
@@ -983,23 +858,23 @@ coef_defor = coef_defor %>%
   dplyr::arrange(group, OR) %>%
   dplyr::mutate(term_ordered = factor(term, levels = all_terms_order))
 
-# Forest plot for odds ratios
+#### Forest plot --------
 defor_coeff_plot = ggplot(coef_defor, aes(x = OR, y = term_ordered, color = color)) +
   geom_point(size = 2) +
   geom_errorbar(aes(xmin = OR_low, xmax = OR_high), width = 0.4, linewidth = 0.7) +
   geom_vline(xintercept = 1, linetype = "dashed") +
   scale_color_identity() +
-  theme_minimal() +
+  theme_minimal(base_family = "Arial Narrow") +
   ggtitle('a) Deforestation') +
   labs(x = "Standardized odds ratio (OR)") +
   theme(
     panel.border = element_rect(color="black", fill = NA, linewidth = 0.5),
     text = element_text(family = "Arial Narrow"),
-    plot.title = element_text(family = "Arial Narrow", face = "bold", size = 14, hjust = 0),
+    plot.title = element_text(family = "Arial Narrow", face = "bold", size = 12, hjust = 0),
     axis.title.y = element_blank(),
-    axis.text.y = element_text(hjust = 0, size = 12),
-    axis.title.x = element_text(size = 14),
-    strip.text.y.left = element_text(angle = 90, face = "bold", size = 14),
+    axis.text.y = element_text(hjust = 0, size = 10),
+    axis.title.x = element_text(size = 12),
+    strip.text.y.left = element_text(angle = 90, face = "bold", size = 10),
     strip.placement = "outside"
   ) +
   facet_grid(group ~ ., scales = "free_y", space = "free_y", switch="y")
@@ -1123,21 +998,21 @@ coef_refor = coef_refor %>%
   dplyr::arrange(group, OR) %>%
   dplyr::mutate(term_ordered = factor(term, levels = all_terms_order))
 
-# Forest plot for odds ratios
+#### Forest plot -----
 refor_coeff_plot = ggplot(coef_refor, aes(x = OR, y = term_ordered, color = color)) +
   geom_point(size = 2) +
   geom_errorbar(aes(xmin = OR_low, xmax = OR_high), width = 0.4, linewidth = 0.7) +
   geom_vline(xintercept = 1, linetype = "dashed") +
   scale_color_identity() +
-  theme_minimal() +
+  theme_minimal(base_family = "Arial Narrow") +
   ggtitle('b) Reforestation') +
   labs(x = "Standardized odds ratio (OR)") +
   theme(
     panel.border = element_rect(color="black", fill = NA, linewidth = 0.5),
     text = element_text(family = "Arial Narrow"),
-    plot.title = element_text(family = "Arial Narrow", face = "bold", size = 14, hjust = 0),
+    plot.title = element_text(family = "Arial Narrow", face = "bold", size = 12, hjust = 0),
     legend.position = "none",
-    axis.title.x = element_text(size= 14),
+    axis.title.x = element_text(size= 12),
     axis.text.y = element_blank(),
     axis.title.y = element_blank(),
     axis.ticks.y = element_blank(),
@@ -1151,7 +1026,8 @@ forest_all = defor_coeff_plot + refor_coeff_plot +
   plot_layout(ncol = 2, widths = c(1, 2.5), axis_titles = "collect")
 forest_all
 
-png(here("outputs","plot","01p_paper1_or_pixel.png"), width = 3000, height = 2900, res = 300)
+png(here("outputs","plot","01p_paper1_or_pixel.png"), width = 3000, height = 2800, 
+    res = 300, type="cairo")
 plot(forest_all)
 dev.off()
 
@@ -1308,18 +1184,18 @@ pred_manual = data.frame(
 
 # Plot
 plot_x1 = ggplot() +
-  geom_line(data = pred_manual, aes(x, predicted), linewidth = 1, color="red") +
   geom_jitter(
     data = train_data_car_defor,
     aes(x = car_area_log, y = area_deforest_log),
-    width = 1, size = 2.5, alpha = 0.15, color = "black"
+    width = 1, size = 2.5, alpha = 0.5, color = "#97a6c4"
   ) +
+  geom_line(data = pred_manual, aes(x, predicted), linewidth = 1, color="#384860") +
   geom_ribbon(
     data = pred_manual,
     aes(x, ymin = conf.low, ymax = conf.high),
-    color = NA, alpha = 0.2, fill = "red"
+    color = NA, alpha = 0.5, fill = "#384860"
   ) +
-  theme_bw() +
+  theme_bw(base_family = "Arial Narrow") +
   theme(
     plot.title = element_text(family = "Arial Narrow", face = "bold", size = 14, hjust = 0),
     panel.grid.major = element_blank(),
@@ -1329,7 +1205,7 @@ plot_x1 = ggplot() +
   ) +
   xlab("Log of property size (ha)") +
   ylab("Log of deforested area (ha)") +
-  ggtitle("a) Effect of property size")
+  ggtitle("Property size")
 
 ## X2
 # Predictions (effect of a single variable while holding others at their mean)
@@ -1353,18 +1229,18 @@ pred_manual = data.frame(
 
 # Plot
 plot_x2 = ggplot() +
-  geom_line(data = pred_manual, aes(x, predicted), linewidth = 1, color="red") +
   geom_jitter(
     data = train_data_car_defor,
     aes(x = area_defor_buf100_2024_log, y = area_deforest_log),
-    width = 1, size = 2.5, alpha = 0.15, color = "black"
+    width = 1, size = 2.5, alpha = 0.5, color = "#97a6c4"
   ) +
+  geom_line(data = pred_manual, aes(x, predicted), linewidth = 1, color="#384860") +
   geom_ribbon(
     data = pred_manual,
     aes(x, ymin = conf.low, ymax = conf.high),
-    color = NA, alpha = 0.2, fill = "red"
+    color = NA, alpha = 0.5, fill = "#384860"
   ) +
-  theme_bw() +
+  theme_bw(base_family = "Arial Narrow") +
   theme(
     plot.title = element_text(family = "Arial Narrow", face = "bold", size = 14, hjust = 0),
     panel.grid.major = element_blank(),
@@ -1374,16 +1250,18 @@ plot_x2 = ggplot() +
     text = element_text(family = "Arial Narrow", size=12)
   ) +
   xlab("Log of surrounding deforested area (ha)") +
-  ggtitle("b) Effect of surrounding deforested area")
+  ggtitle("Surrounding deforestation (2024)")
 
 #### Merge figures -----
-plot_defor_mod_car = plot_x1 + plot_x2 +
-  plot_layout(ncol = 2, widths = c(1, 1), axis_titles = "collect")
+plot_defor_mod_car =
+  plot_x1 + plot_x2 +
+  plot_layout(
+    ncol = 2,
+    widths = c(1, 1),
+    axis_titles = "collect"
+  )
 plot_defor_mod_car
 
-png(here("outputs","plot","01p_paper1_effect_property_defor.png"), width = 2300, height = 1700, res = 300)
-plot(plot_defor_mod_car)
-dev.off()
 
 ### Reforestation -------
 rownames(train_data_car_refor) = train_data_car_refor$car_id
@@ -1556,34 +1434,36 @@ pred_manual = data.frame(
 
 # Plot
 plot_x1 = ggplot(pred_manual, aes(x = x, y = predicted, color = Less20For2024, fill = Less20For2024)) +
-  geom_line(linewidth = 1) +
-  geom_ribbon(aes(ymin = conf.low, ymax = conf.high), alpha = 0.2, color = NA) +
   geom_jitter(
     data = train_data_car_refor,
     aes(x = car_area_log, y = area_reforest_log, color = factor(Less20For2024)),
     inherit.aes = FALSE,
-    width = 1, size = 2.5, alpha = 0.15
+    width = 1, size = 2.5, alpha = 0.50
   ) +
+  geom_line(linewidth = 1) +
+  geom_ribbon(aes(ymin = conf.low, ymax = conf.high), alpha = 0.5, color = NA) +
   xlab("Log of property size (ha)") +
   ylab("Log of reforested area (ha)") +
-  ggtitle("a) Effect of property size") +
+  ggtitle("Property size") +
   scale_color_manual(
-    values = c("0" = "#1f77b4", "1" = "#ff7f0e"),
+    values = c("0" = "#5e4c5f", "1" = "#ffbb6f"),
     labels = c("<20% forest cover", ">20% forest cover"),
     name = "Forest cover in 2024"
   ) +
   scale_fill_manual(
-    values = c("0" = "#1f77b4", "1" = "#ff7f0e"),
+    values = c("0" = "#5e4c5f", "1" = "#ffbb6f"),
     labels = c("<20% forest cover", ">20% forest cover"),
     name = "Forest cover in 2024"
   ) +
-  theme_bw() +
+  guides(fill = "none") +
+  theme_bw(base_family = "Arial Narrow") +
   theme(
     plot.title = element_text(family = "Arial Narrow", face = "bold", size = 14, hjust = 0),
     panel.grid.major = element_blank(),
     panel.grid.minor = element_blank(),
-    legend.position = "bottom",
-    text = element_text(family = "Arial Narrow", size = 14)
+    legend.position = "none",
+    legend.text = element_text(family = "Arial Narrow", size = 12),
+    text = element_text(family = "Arial Narrow", size = 12)
   )
 
 ## X2
@@ -1621,33 +1501,35 @@ pred_manual = data.frame(
 
 # Plot
 plot_x2 = ggplot(pred_manual, aes(x = x, y = predicted, color = Less20For2024, fill = Less20For2024)) +
-  geom_line(linewidth = 1) +
-  geom_ribbon(aes(ymin = conf.low, ymax = conf.high), alpha = 0.2, color = NA) +
   geom_jitter(
     data = train_data_car_refor,
     aes(x = area_refor_buf100_2024_log, y = area_reforest_log, color = factor(Less20For2024)),
     inherit.aes = FALSE,
-    width = 1, size = 2.5, alpha = 0.15
+    width = 1, size = 2.5, alpha = 0.50
   ) +
+  geom_line(linewidth = 1) +
+  geom_ribbon(aes(ymin = conf.low, ymax = conf.high), alpha = 0.5, color = NA) +
   xlab("Log of surrounding reforested area (ha)") +
-  ggtitle("b) Effect of surrounding reforested area (2024)") +
+  ggtitle("Surrounding reforestation (2024)") +
   scale_color_manual(
-    values = c("0" = "#1f77b4", "1" = "#ff7f0e"),
+    values = c("0" = "#5e4c5f", "1" = "#ffbb6f"),
     labels = c("<20% forest cover", ">20% forest cover"),
     name = "Forest cover in 2024"
   ) +
   scale_fill_manual(
-    values = c("0" = "#1f77b4", "1" = "#ff7f0e"),
+    values = c("0" = "#5e4c5f", "1" = "#ffbb6f"),
     labels = c("<20% forest cover", ">20% forest cover"),
     name = "Forest cover in 2024"
   ) +
-  theme_bw() +
+  guides(fill = "none") +
+  theme_bw(base_family = "Arial Narrow") +
   theme(
     plot.title = element_text(family = "Arial Narrow", face = "bold", size = 14, hjust = 0),
     panel.grid.major = element_blank(),
     panel.grid.minor = element_blank(),
     legend.position = "none",
     text = element_text(family = "Arial Narrow", size = 12),
+    legend.text = element_text(family = "Arial Narrow", size = 12),
     axis.title.y = element_blank()
   )
 
@@ -1686,43 +1568,70 @@ pred_manual = data.frame(
 
 # Plot
 plot_x3 = ggplot(pred_manual, aes(x = x, y = predicted, color = Less20For2024, fill = Less20For2024)) +
-  geom_line(linewidth = 1) +
-  geom_ribbon(aes(ymin = conf.low, ymax = conf.high), alpha = 0.2, color = NA) +
   geom_jitter(
     data = train_data_car_refor,
     aes(x = area_agri_buf100_1989_log, y = area_reforest_log, color = factor(Less20For2024)),
     inherit.aes = FALSE,
-    width = 1, size = 2.5, alpha = 0.15
+    width = 1, size = 2.5, alpha = 0.50
   ) +
+  geom_line(linewidth = 1) +
+  geom_ribbon(aes(ymin = conf.low, ymax = conf.high), alpha = 0.5, color = NA) +
   xlab("Log of surrounding agricultural area (ha)") +
-  ggtitle("c) Effect of surrounding agricultural area (1989)") +
+  ggtitle("Surrounding agriculture (1989)") +
   scale_color_manual(
-    values = c("0" = "#1f77b4", "1" = "#ff7f0e"),
+    values = c("0" = "#5e4c5f", "1" = "#ffbb6f"),
     labels = c("<20% forest cover", ">20% forest cover"),
     name = "Forest cover in 2024"
   ) +
   scale_fill_manual(
-    values = c("0" = "#1f77b4", "1" = "#ff7f0e"),
+    values = c("0" = "#5e4c5f", "1" = "#ffbb6f"),
     labels = c("<20% forest cover", ">20% forest cover"),
     name = "Forest cover in 2024"
   ) +
-  theme_bw() +
+  guides(fill = "none") +
+  theme_bw(base_family = "Arial Narrow") +
   theme(
     plot.title = element_text(family = "Arial Narrow", face = "bold", size = 14, hjust = 0),
     panel.grid.major = element_blank(),
     panel.grid.minor = element_blank(),
     legend.position = "none",
     text = element_text(family = "Arial Narrow", size = 12),
+    legend.text = element_text(family = "Arial Narrow", size = 12),
     axis.title.y = element_blank()
   )
 
 #### Merge figures -----
-plot_defor_mod_car = plot_x1 + plot_x2 + plot_x3 +
-  plot_layout(ncol = 3, widths = c(1, 1, 1), axis_titles = "collect")
-plot_defor_mod_car
+plot_refor_mod_car =
+  plot_x1 + plot_x2 + plot_x3 +
+  plot_layout(
+    ncol = 3,
+    axis_titles = "collect",
+    guides = "collect"
+  ) &
+  theme(
+    legend.position = "bottom",
+    legend.justification = "center"
+  )
+plot_refor_mod_car
 
-png(here("outputs","plot","01p_paper1_effect_property_refor.png"), width = 3500, height = 1700, res = 300)
-plot(plot_defor_mod_car)
+### Final plot -----
+final_plot =
+  wrap_elements(plot_defor_mod_car) /
+  wrap_elements(plot_refor_mod_car) +
+  plot_annotation(tag_levels = "a",
+                  tag_suffix = ")") &
+  theme(
+    plot.tag = element_text(
+      face = "bold",
+      size = 16,
+      family = "Arial Narrow"
+    )
+  )
+final_plot
+
+png(here("outputs","plot","01p_paper1_effect_property.png"), 
+    width = 3200, height = 2500, res = 300, type="cairo")
+final_plot
 dev.off()
 
 # 3. Hotspots of reforestation and deforestation ----------
