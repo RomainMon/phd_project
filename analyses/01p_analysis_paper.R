@@ -314,7 +314,6 @@ data = forest_class_metrics %>%
   dplyr::select(metric, `1989`, `2024`, change, pct_change) %>% 
   dplyr::mutate(`1989` = round(`1989`,2),
                 `2024` = round(`2024`, 2))
-cat("Forest metrics change from 1989 to 2024:\n")
 text = data %>%
   dplyr::mutate(
     txt = paste0(
@@ -324,6 +323,7 @@ text = data %>%
       sprintf("%+.1f", pct_change), "%)")
   ) %>%
   dplyr::pull(txt)
+cat("Forest metrics change from 1989 to 2024:\n")
 cat(paste0("* ", text, collapse = "\n"), "\n")
 
 ### Figures -------
@@ -1730,51 +1730,79 @@ defor_df$value = factor(defor_df$`2024`,
                                    "Built-up",
                                    "Reforested",
                                    "Deforested"))
-land_use_cols = c("#32a65e", "#ad975a", "#519799", "#FFFFB2",
-                  "#0000FF", "#d4271e", "chartreuse", "pink")
+land_use_cols = c("#32a65e", "#ad975a", "#519799", "#D1D100",
+                  "#0000FF", "#d4271e", "#36F760", "#F736DA")
 
 # Plot
 map_hotspots_defor = ggplot() +
-  geom_raster(data = defor_df,
-              aes(x = x, y = y, fill = value)) +
-  scale_fill_manual(name = "Land use",
-                    values = land_use_cols) +
+  geom_raster(
+    data = defor_df,
+    aes(x = x, y = y, fill = value)
+  ) +
+  scale_fill_manual(
+    values = land_use_cols,
+    name = "Land use"
+  ) +
+  
   ggnewscale::new_scale_fill() +
-  geom_sf(data = hotspots,
-          aes(fill = quadrant),
-          color = "black",
-          alpha = 0.6,
-          size = 0.2) +
+  
+  geom_sf(
+    data = hotspots,
+    aes(fill = quadrant),
+    color = "black",
+    alpha = 0.6,
+    linewidth = 0.2
+  ) +
+  
   scale_fill_manual(
     name = "Cluster type",
     values = cols,
     drop = FALSE
   ) +
-  labs(title = "a) Deforestation clusters",
-       x = NULL, y = NULL) +
-  annotation_scale(
-    location = "tr",
-    text_cex = 0.6,
-    pad_x = unit(1, "cm"),
-    pad_y = unit(0.5, "cm"),
-    style = "ticks",
-    width_hint = 0.15
+  
+  labs(
+    title = "a) Deforestation",
+    x = NULL,
+    y = NULL
   ) +
-  annotation_north_arrow(
+  
+  # Scale bar
+  ggspatial::annotation_scale(
+    location = "br",
+    style = "bar",
+    bar_cols = "black",
+    width_hint = 0.18,
+    pad_x = unit(0.3, "cm"),
+    pad_y = unit(0.3, "cm"),
+    text_cex = 0.7,
+    line_width = 0.7
+  ) +
+  
+  # North arrow
+  ggspatial::annotation_north_arrow(
     location = "br",
     which_north = "true",
-    style = north_arrow_fancy_orienteering(),
-    pad_x = unit(1, "cm"),
-    pad_y = unit(0.5, "cm"),
-    height = unit(1, "cm"),
-    width = unit(1, "cm")
+    style = ggspatial::north_arrow_nautical(),
+    pad_x = unit(0.3, "cm"),
+    pad_y = unit(1.2, "cm"),
+    height = unit(1.8, "cm"),
+    width  = unit(1.8, "cm")
   ) +
-  theme_minimal(base_family = "Arial Narrow") +
+  
+  coord_sf(expand = FALSE) +
+  
+  theme_bw(base_family = "Arial Narrow") +
+  
   theme(
-    legend.position = "none",
-    plot.title = element_text(face = "bold"),
     axis.title = element_blank(),
-    panel.grid = element_blank()
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    legend.position = "none",
+    legend.text = element_text(size = 12),
+    plot.title = element_text(
+      face = "bold",
+      family = "Arial Narrow"
+    )
   )
 
 
@@ -1863,59 +1891,99 @@ refor_df$value = factor(refor_df$`2024`,
                                    "Built-up",
                                    "Reforested",
                                    "Deforested"))
-land_use_cols = c("#32a65e", "#ad975a", "#519799", "#FFFFB2",
-                  "#0000FF", "#d4271e", "chartreuse", "pink")
+land_use_cols = c("#32a65e", "#ad975a", "#519799", "#D1D100",
+                  "#0000FF", "#d4271e", "#36F760", "#F736DA")
 
 # Plot
 map_hotspots_refor = ggplot() +
-  geom_raster(data = refor_df,
-              aes(x = x, y = y, fill = value)) +
-  scale_fill_manual(name = "Land use",
-                    values = land_use_cols) +
+  geom_raster(
+    data = refor_df,
+    aes(x = x, y = y, fill = value)
+  ) +
+  scale_fill_manual(
+    values = land_use_cols,
+    name = "Land use"
+  ) +
+  
   ggnewscale::new_scale_fill() +
-  geom_sf(data = hotspots,
-          aes(fill = quadrant),
-          color = "black",
-          alpha = 0.6,
-          size = 0.2) +
+  
+  geom_sf(
+    data = hotspots,
+    aes(fill = quadrant),
+    color = "black",
+    alpha = 0.6,
+    linewidth = 0.2
+  ) +
+  
   scale_fill_manual(
     name = "Cluster type",
     values = cols,
     drop = FALSE
   ) +
-  labs(title = "b) Reforestation clusters",
-       x = NULL, y = NULL) +
-  annotation_scale(
-    location = "tr",
-    text_cex = 0.6,
-    pad_x = unit(1, "cm"),
-    pad_y = unit(0.5, "cm"),
-    style = "ticks",
-    width_hint = 0.15
+  
+  labs(
+    title = "b) Reforestation",
+    x = NULL,
+    y = NULL
   ) +
-  annotation_north_arrow(
+  
+  # Scale bar
+  ggspatial::annotation_scale(
+    location = "br",
+    style = "bar",
+    bar_cols = "black",
+    width_hint = 0.18,
+    pad_x = unit(0.3, "cm"),
+    pad_y = unit(0.3, "cm"),
+    text_cex = 0.7,
+    line_width = 0.7
+  ) +
+  
+  # North arrow
+  ggspatial::annotation_north_arrow(
     location = "br",
     which_north = "true",
-    style = north_arrow_fancy_orienteering(),
-    pad_x = unit(1, "cm"),
-    pad_y = unit(0.5, "cm"),
-    height = unit(1, "cm"),
-    width = unit(1, "cm")
+    style = ggspatial::north_arrow_nautical(),
+    pad_x = unit(0.3, "cm"),
+    pad_y = unit(1.2, "cm"),
+    height = unit(1.8, "cm"),
+    width  = unit(1.8, "cm")
   ) +
-  theme_minimal(base_family = "Arial Narrow") +
+  
+  coord_sf(expand = FALSE) +
+  
+  theme_bw(base_family = "Arial Narrow") +
+  
   theme(
-    legend.position = "none",
-    plot.title = element_text(face = "bold"),
     axis.title = element_blank(),
-    panel.grid = element_blank()
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    legend.position = "none",
+    legend.text = element_text(size = 12),
+    plot.title = element_text(
+      face = "bold",
+      family = "Arial Narrow"
+    )
   )
 
-## Merge maps
+### Merge maps ------
 hotspots_all = map_hotspots_defor + map_hotspots_refor +
   plot_layout(ncol = 2, guides = "collect") &
-  theme(legend.position = "bottom",
-        legend.text  = element_text(size = 12, family = "Arial Narrow"))
+  theme(
+    legend.position = "bottom",
+    legend.text = element_text(
+      size = 12,
+      family = "Arial Narrow"
+    ),
+    legend.title = element_text(
+      size = 12,
+      face = "bold",
+      family = "Arial Narrow"
+    )
+  )
+hotspots_all
 
-png(here("outputs","plot","01p_paper1_hotspots.png"), width = 3000, height = 1700, res = 300)
+png(here("outputs","plot","01p_paper1_hotspots.png"), 
+    width = 3000, height = 1500, res = 300, type="cairo")
 plot(hotspots_all)
 dev.off()
