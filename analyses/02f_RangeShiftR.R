@@ -48,10 +48,12 @@ s
 #### 1. Simulations ------
 # This module is used to set general simulation parameters (e.g. simulation ID, number of replicates, and number of years to simulate) and to control output types (plus some more specific settings).
 # ?Simulation
-sim = Simulation(Simulation = 2,
-                 Years = 50,
-                 Replicates = 2,
-                 OutIntPop = 50)
+sim = Simulation(Simulation = 0, 
+                 Replicates = 20, 
+                 Years = 9,
+                 OutIntPop = 1,
+                 OutIntOcc = 1,
+                 OutIntRange = 1)
 
 #### 2. Landscape -----
 # To create an artificial landscape
@@ -59,28 +61,38 @@ sim = Simulation(Simulation = 2,
 
 ##### Import a landscape -----
 landsc = terra::rast(file.path(dirpath, "Inputs", "raster_reclass_binary_2005.txt"))
-
-landsc.f = as.factor(landsc)
-# add the land cover classes to the raster attribute table
-rat = levels(landsc.f)[[1]][-2]
-rat[["landcover"]] <- c("sea","matrix","habitat")
-levels(landsc.f) = rat
-plot(landsc.f, axes = F, col=c("white","lightgrey","darkgreen"))
+terra::plot(landsc, col=c("gray","darkgreen","orange"))
+terra::res(landsc)
+terra::unique(landsc)
 
 ##### Patches --------
-patch <- terra::rast(file.path(dirpath, "Inputs", "patches_2005.txt"))
+patch = terra::rast(file.path(dirpath, "Inputs", "patches_2005.txt"))
 # We can have a glimpse at how many cells the different patches contain:
-table(values(patch))
+table(terra::values(patch))
 # Plot the patches in different colours
-plot(patch)
+npatch = max(terra::values(patch), na.rm = TRUE)
+# Create colors: white for background + random colors for patches
+cols = c("gray", rainbow(npatch))
+terra::plot(
+  patch,
+  col = cols,
+  type = "classes",
+  legend = FALSE)
+
+##### Species distribution -----
+patch_w_glt  = terra::rast(file.path(dirpath, "Inputs", "patches_w_glt_2005.txt"))
+terra::plot(patch_w_glt, col=c("gray","darkgreen"))
+terra::unique(patch_w_glt)
 
 ##### Define the landscape -----
 ?ImportedLandscape
 land = ImportedLandscape(LandscapeFile = "raster_reclass_binary_2005.txt",
-                          PatchFile = "patches_2005.txt", 
-                          Resolution = 30,
-                          Nhabitats = 3,
-                          K_or_DensDep = c(0, 0.075, 0))
+                         PatchFile = "patches_2005.txt", 
+                         Resolution = 28.35578,
+                         Nhabitats = 3,
+                         K_or_DensDep = c(0, 0.075, 0),
+                         SpDistFile = "patches_w_glt_2005.txt",
+                         SpDistResolution = 28.35578)
 land
 # K_or_DensDep: determines the demographic density dependence of the modelled species and is given in units of the number of individuals per hectare (defaults to 
 # If HabPercent=FALSE: a vector of length Nhabitats, specifying the respective K_or_DensDep for every habitat code.
@@ -89,46 +101,86 @@ land
 
 #### 3. Demography ------
 # To make a stage-structured model, we have to additionally create a stage-structure sub-module within the Demography module. 
-# Here, we have already defined a Demography object and can use ‘+’ to add the StageStructure sub-module.
-stg = StageStructure(Stages = 3,
-                     TransMatrix = matrix(c(0,1,0,5.7,.5,.4,3.4,0,.9),nrow = 3),
-                     FecDensDep = T,
-                     SurvDensDep = T)
+# We can use ‘+’ to add the StageStructure sub-module.
 
-demo = Demography(StageStruct = stg, ReproductionType = 1, PropMales = 0.45)
+
+##### Female-only model ----
+# Female-only models assume that males are not limiting, and that the population dynamics are driven only by females. 
+# It also means that sexes are not modelled explicitly and it is not possible to account for behaviours like mate-finding in the settlement decisions; females will settle in suitable habitat patches and then will automatically be able to attempt reproduction.
+
+# Change demography settings
+?StageStructure
+mat = matrix(c(0, 0, 2,
+         0.9, 0, 0,
+         0, 0.56, 0.85),
+       nrow=3, byrow=T)
+stg = StageStructure(Stages = 3,
+                     TransMatrix = mat,
+                     MaxAge = 20,
+                     RepSeasons = 1,
+                     SurvSched = 1, # Between reproductive events
+                     FecDensDep = T)
 plotProbs(stg) # plot the rates from the transition matrix
+
+# Female-only model
+demo = Demography(StageStruct = stg,
+                     ReproductionType = 0)
 
 
 #### 4. Dispersal -------
-disp =  Dispersal(Emigration = Emigration(EmigProb = 0.2), 
-                  Transfer   = DispersalKernel(Distances = 50),
-                  Settlement = Settlement() )
-# Plot a dispersal kernel with a stage-dependent mean transfer distance:
-plotProbs(DispersalKernel(Distances = matrix(c(0,1,2,70,50,30),nrow = 3), StageDep = T))
 
-# Update Settlement conditions
-disp =  disp + Settlement(SexDep = T, 
-                          Settle = matrix(c(0,1,1,0), nrow = 2),
-                          FindMate = matrix(c(1,0,F,F), nrow = 2))
+##### Emigration -------
+?Emigration
+emig = Emigration(EmigProb = 0,
+                  StageDep = F,
+                  DensDep = F)
+
+##### Transfer -------
+?Transfer
+?DispersalKernel
+transfer = DispersalKernel(Distances = matrix(c(100),nrow=1),
+                           StageDep = F)
+
+##### Settlement -------
+?Settlement
+# Settle = 0 means 'die when unsuitable' for DispersalKernel and 'always settle when suitable' for Movement process
+settle = Settlement(StageDep = F,
+                    Settle = 0,
+                    FindMate = F,
+                    DensDep = F)
+
+##### Dispersal -----
+?Dispersal
+disp = Dispersal(Emigration = emig,
+          Transfer = transfer,
+          Settlement = settle)
 
 
 #### 5. Genetics -------
 # The genetics module controls the heritability and evolution of traits and is needed if inter-individual variability is enabled (IndVar = TRUE) e.g. for at least one dispersal trait
 
 #### 6. Initialisation ----
-
+?Initialise
+init = Initialise(InitType = 1,  # from loaded species distribution map
+                   SpType = 0,   # All suitable cells within all distribution presence cells
+                   InitDens = 2, # Set the number of individuals per cell/hectare to initialise in IndsHaCell
+                   IndsHaCell = 0.086, # Number of individuals per ha
+                   PropStages = c(0,0.5,0.5), # For StageStructured models only: Proportion of individuals initialised in each stage. Requires a vector of length equal to the number of stages
+                   InitAge = 0)
 
 #### 7. Parameter master -----
+?RSsim
 s = RSsim(simul = sim, 
-           land = land, 
-           demog = demo, 
-           dispersal = disp2, 
-           init = init)
+          land = land, 
+          demog = demo, 
+          dispersal = disp, 
+          init = init)
 
 # Check for parameter conflicts
 validateRSparams(s)
 
 ### Run simulations --------
+dirpath = "data/rangeshifter/"
 RunRS(s, dirpath)
 
 ### Plot results -----
@@ -143,3 +195,11 @@ plotOccupancy(range_df)
 par(mfrow=c(1,2))
 plotAbundance(range_df, sd=T, replicates = F)
 plotOccupancy(range_df, sd=T, replicates = F)
+
+# read population output file into a dataframe
+pop_df = readPop(s, dirpath)
+
+# Make data frame with number of individuals per output year - for only one repetition (Rep==0):
+pop_wide_rep0 = reshape(subset(pop_df,Rep==0)[,c('Year','PatchID','NInd')], 
+                        timevar='Year', v.names=c('NInd'), idvar=c('PatchID'), direction='wide')
+head(pop_wide_rep0)
