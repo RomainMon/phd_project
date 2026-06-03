@@ -121,21 +121,19 @@ patches2005_v = sf::st_join(
 unique(patches2005_v$FragName2)
 
 # Select patches
+# Based on patch name and delimitation
 patches2005_v_select = patches2005_v %>% 
-  dplyr::filter(FragName2 %in% c("Large_frag_North",
-                                 "Sta_Helena",
-                                 "Sta_Helena_I",
-                                 "Poco_das_Antas",
-                                 "Uniao_N",
-                                 "Uniao_S",
-                                 "Sao_Joao",
-                                 "Recanto_Preservar",
-                                 "Boa_Esperanca_II",
+  dplyr::filter(FragName2 %in% c("Afetiva",
                                  "Vendaval",
-                                 "Nova_Esperanca",
-                                 "Afetiva",
+                                 "Rio_Vermelho",
+                                 "Boa_Esperanca_II",
                                  "Large_frag_West",
-                                 "Rio_Vermelho"))
+                                 "Sta_Helana",
+                                 "Sta_Helena_I",
+                                 "2_Irmaos",
+                                 "Igarape_S",
+                                 "Poco_das_Antas",
+                                 "Uniao_N"))
 plot(sf::st_geometry(patches2005_v))
 plot(sf::st_geometry(patches2005_v_select), col="darkgreen", add=TRUE)
 
@@ -162,6 +160,13 @@ patch_w_glt_2005[patch_w_glt_2005 == 0] = 0
 # Restore no-data cells from landscape
 patch_w_glt_2005[r2005 == -999] = -999
 plot(patch_w_glt_2005, col=c("white","gray","darkgreen"))
+
+
+# 2) Based on management units (UMMPs)
+# -> Select patches intersecting UMMPs
+unique(ummps$UMMPs)
+patches2005_v_ummps = patches2005_v %>% 
+  sf::st_intersection(ummps %>% dplyr::select(UMMPs %in% c("Imbaú III", "Pirineus")))
 
 #### Export -------
 ### IMPORTANT: all NAs values must take an integer value (e.g., -999)

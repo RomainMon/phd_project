@@ -13,6 +13,7 @@ library(landscapemetrics)
 library(Makurhini)
 library(sf)
 library(vectormetrics)
+library(progressr)
 # remotes::install_github("r-spatialecology/vectormetrics")
 
 ### Import rasters -------
@@ -65,6 +66,12 @@ regions = terra::project(regions, "EPSG:31983")
 regions_sf = sf::st_as_sf(regions)
 plot(rasters_reclass[[36]], col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e"))
 plot(sf::st_geometry(regions_sf), pch=1, col="yellow", add=TRUE)
+
+# UMMPs
+ummps = sf::st_read(here("data", "geo", "AMLD", "SIG-LGCI_UMMP-13", "SIG-LGCI_UMMP-13.shp"))
+plot(rasters_reclass[[36]], col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e"))
+plot(sf::st_geometry(ummps), col="yellow", add=TRUE)
+
 
 # Import bounding box
 # BBOX
@@ -488,7 +495,6 @@ all_years_metrics_simple = purrr::map2(rasters_lf, years,
 #### Patches ------
 
 # 1) patches = core forest only, class = 1 (i.e., 2 fragments connected by a corridor are considered as 2 patches)
-# On rasters with dilatation-erosion
 forest_patches = purrr::map(rasters_lf, ~ landscapemetrics::get_patches(.x, class = 1, directions = 8))
 patches_sf = purrr::map(forest_patches, ~ sf::st_as_sf(terra::as.polygons(.x[[1]][[1]], dissolve = TRUE)))
 
@@ -496,21 +502,33 @@ patches_sf = purrr::map(forest_patches, ~ sf::st_as_sf(terra::as.polygons(.x[[1]
 plot(rasters_lf[[36]], col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e", "orange"))
 plot(sf::st_geometry(patches_sf[[36]]), col="darkgreen", add=TRUE)
 
-# 2) patches occupied by GLTs
+# 2) patches occupied by GLTs OR intersecting UMMPs
 patch_in = purrr::map(
-  patches_sf, ~ .x[sf::st_intersects(.x, regions_sf, sparse = FALSE) %>% apply(1, any),])
+  patches_sf,
+  ~ {
+    in_region = sf::st_intersects(.x, regions_sf, sparse = FALSE) %>%
+      apply(1, any)
+    
+    in_ummp = sf::st_intersects(.x, ummps, sparse = FALSE) %>%
+      apply(1, any)
+    
+    .x[in_region | in_ummp, ]
+  }
+)
 
 # 3) patches near GLT regions
 regions_buffer = sf::st_buffer(regions_sf, 2500) # Buffer size in m
 patch_near = purrr::map(
   patches_sf, ~ .x[sf::st_intersects(.x, regions_buffer, sparse = FALSE) %>% apply(1, any),])
 
-# 4) final kept patches = in OR near
+# 4) kept patches are a combination of intersecting/near patches but without small patches (stepping stones)
 patches_final = purrr::map2(
   patch_in,
   patch_near,
   ~ dplyr::bind_rows(.x, .y) %>%
-    dplyr::distinct(geometry, .keep_all = TRUE)
+    dplyr::distinct(geometry, .keep_all = TRUE) %>%
+    dplyr::mutate(area_ha = as.numeric(sf::st_area(.)) / 10000) %>%
+    dplyr::filter(area_ha >= 2)
 )
 
 # Plot
@@ -519,21 +537,175 @@ plot(st_geometry(patches_sf[[36]]), col="grey80", border=NA, add=TRUE) # Patches
 plot(st_geometry(patches_final[[36]]), add=TRUE, col="darkgreen", border=NA) # Kept patches
 plot(st_geometry(regions_sf), add=TRUE, col="yellow", lwd=2) # GLT groups
 
+#### Clip patches with UMMPs ------
+# We want to split some patches that intersect several UMMPs
+ummps_split = ummps %>%
+  dplyr::filter(UMMPs %in% c("Aldeia I", "Pirineus")) %>%
+  sf::st_make_valid()
+### to be continued
+# Select continous patches intersecting an UMMP
+# Clip to create multipolygons
+# -> Clip largest patch in the North by Aldeia I and Pirineus
+# -> Clip patch Dourada into two pices
+
 #### Patch name --------
-regions_names = regions_sf %>% dplyr::select(FragName2)
+# Below, we assign patch id based on group location names (RegionsNames)
+# AND on UMMPs names
+# Step 1. Assign region-based names:
+# - Each patch is first checked for spatial intersection with the regions_sf layer.
+# - If a patch intersects a region, it inherits the region name (FragName2) from the first matching region.
+# - This becomes the initial patch_id.
+# Step 2. Assign UMMP-based names to unnamed patches
+# - Patches that did not receive a region name (patch_id = NA) are then processed:
+# - They are spatially joined with ummps
+# - If a patch intersects a UMMP: It is grouped by UMMP; Ordered by decreasing area; Assigned a name like UMMP_name_p1, UMMP_name_p2, etc.
+# - If a patch does not intersect any UMMP: It is assigned a simple sequential ID (p1, p2, …) based on area ranking
+# Step 3. Ensure uniqueness of patch IDs
+# If a name appears multiple times (e.g., Aldeia I), a suffix (_1, _2, …) is appended within each group using row order
+
+regions_names = regions_sf %>%
+  dplyr::select(FragName2)
 patches_names = purrr::map(
   patches_final,
-  ~ {
-    idx = sf::st_intersects(.x, regions_names)
+  function(x){
     
-    .x$FragName2 = purrr::map_chr(
+    # 1. Assign Region names
+    idx = sf::st_intersects(x, regions_names)
+    
+    x$patch_id = purrr::map_chr(
       idx,
-      ~ if(length(.x) == 0) NA_character_
-      else regions_names$FragName2[.x[1]]
+      function(i){
+        
+        if(length(i) == 0){
+          return(NA_character_)
+        }
+        
+        regions_names$FragName2[i[1]]
+        
+      }
     )
     
-    .x
+    # 2. Assign UMMP names to remaining patches
+    unnamed = x %>%
+      dplyr::filter(is.na(patch_id))
+    
+    if(nrow(unnamed) > 0){
+      
+      unnamed = sf::st_join(
+        unnamed,
+        ummps %>% dplyr::select(UMMPs),
+        largest = TRUE
+      ) %>%
+        dplyr::mutate(
+          area_ha = as.numeric(sf::st_area(.))/10000
+        )
+      
+      # Patches intersecting a UMMP
+      inside_ummp = unnamed %>%
+        dplyr::filter(!is.na(UMMPs)) %>%
+        dplyr::group_by(UMMPs) %>%
+        dplyr::arrange(
+          dplyr::desc(area_ha),
+          .by_group = TRUE
+        ) %>%
+        dplyr::mutate(
+          patch_id = paste0(
+            make.names(UMMPs),
+            "_p",
+            dplyr::row_number()
+          )
+        ) %>%
+        dplyr::ungroup()
+      
+      # Patches outside all UMMPs
+      outside_ummp = unnamed %>%
+        dplyr::filter(is.na(UMMPs)) %>%
+        dplyr::arrange(
+          dplyr::desc(area_ha)
+        ) %>%
+        dplyr::mutate(
+          patch_id = paste0(
+            "p",
+            dplyr::row_number()
+          )
+        )
+      
+      unnamed = dplyr::bind_rows(
+        inside_ummp,
+        outside_ummp
+      )
+      
+      x = dplyr::bind_rows(
+        x %>% dplyr::filter(!is.na(patch_id)),
+        unnamed %>% dplyr::select(names(x))
+      )
+      
+    }
+    
+    # 3. Ensure uniqueness of patch_id within year
+    x = x %>%
+      dplyr::mutate(
+        base_id = patch_id %>%
+          stringr::str_replace("_p\\d+$", "") %>%   # optional cleanup from UMMP step
+          stringr::str_replace("_\\d+$", "")
+      ) %>%
+      dplyr::group_by(base_id) %>%
+      dplyr::arrange(area_ha, .by_group = TRUE) %>% 
+      dplyr::mutate(
+        patch_id = dplyr::case_when(
+          is.na(base_id) ~ NA_character_,
+          n() == 1 ~ base_id,
+          TRUE ~ paste0(base_id, "_", dplyr::row_number())
+        )
+      ) %>%
+      dplyr::ungroup() %>%
+      dplyr::select(-c(base_id,area_ha))
+    
+    x
+    
   }
+)
+
+## Checks
+# Check 0s
+purrr::map_int(
+  patches_names,
+  ~ sum(is.na(.x$patch_id))
+)
+
+# Check how many times a given name appears
+purrr::map2_dfr(
+  patches_names,
+  years,
+  ~ .x %>%
+    sf::st_drop_geometry() %>%
+    dplyr::select(patch_id) %>%
+    dplyr::mutate(year = .y)
+) %>%
+  dplyr::count(patch_id)
+
+# Uniqueness across years (should be 0)
+purrr::map2_dfr(
+  patches_names,
+  years,
+  ~ .x %>%
+    sf::st_drop_geometry() %>%
+    dplyr::count(patch_id) %>%
+    dplyr::filter(n > 1) %>%
+    dplyr::mutate(year = .y)
+)
+
+## Remove accents
+patches_names = purrr::map(
+  patches_names,
+  ~ .x %>%
+    dplyr::mutate(
+      patch_id = iconv(
+        patch_id,
+        from = "UTF-8",
+        to = "ASCII//TRANSLIT"
+      )
+    )
 )
 
 #### Patch dilatation-erosion -------
@@ -543,12 +715,12 @@ patches_names = purrr::map(
 patches_dilat = purrr::map(
   patches_names,
   ~ {
-    ## Selected patch with dilatation
+    ## Selected patch to dilate
     afetiva = .x %>%
-      dplyr::filter(FragName2 == "Afetiva") %>%
+      dplyr::filter(patch_id == "Afetiva") %>%
       sf::st_buffer(30)
     
-    ## Patches intersecting Afetiva
+    ## Intersecting patches
     touching = .x[
       sf::st_intersects(.x, afetiva, sparse = FALSE)[,1],
     ]
@@ -577,30 +749,34 @@ patches_dilat = purrr::map(
 )
 
 #### Patch metrics --------
-patches_metrics = purrr::map(
-  patches_dilat,
-  ~ {
-    area_tbl = vm_p_area(.x, patch_col = "lyr.1") %>%
-      dplyr::rename(lyr.1 = id) %>%
-      dplyr::mutate(lyr.1 = as.integer(lyr.1)) %>%
-      dplyr::rename(area_ha = value) %>%
-      dplyr::select(lyr.1, area_ha)
-    
-    shape_tbl = vm_p_shape(.x, patch_col = "lyr.1") %>%
-      dplyr::rename(lyr.1 = id) %>%
-      dplyr::mutate(lyr.1 = as.integer(lyr.1)) %>%
-      dplyr::rename(shape = value) %>%
-      dplyr::select(lyr.1, shape)
-    
-    .x %>%
-      dplyr::left_join(area_tbl, by = "lyr.1") %>%
-      dplyr::left_join(shape_tbl, by = "lyr.1") %>%
-      dplyr::mutate(
-        area_ha = round(area_ha, 2),
-        shape = round(shape, 2)
-      )
-  }
-)
+patches_metrics = progressr::with_progress({
+  p = progressr::progressor(along = patches_dilat)
+  
+  purrr::map(
+    patches_dilat,
+    ~ {
+      p()  # <- updates progress
+      
+      area_tbl = vm_p_area(.x, patch_col = "patch_id") %>%
+        dplyr::rename(patch_id = id) %>%
+        dplyr::rename(area_ha = value) %>%
+        dplyr::select(patch_id, area_ha)
+      
+      shape_tbl = vm_p_shape(.x, patch_col = "patch_id") %>%
+        dplyr::rename(patch_id = id) %>%
+        dplyr::rename(shape = value) %>%
+        dplyr::select(patch_id, shape)
+      
+      .x %>%
+        dplyr::left_join(area_tbl, by = "patch_id") %>%
+        dplyr::left_join(shape_tbl, by = "patch_id") %>%
+        dplyr::mutate(
+          area_ha = round(area_ha, 2),
+          shape = round(shape, 2)
+        )
+    }
+  )
+})
 
 ### Export patch metrics ----------
 base_path = here("outputs", "data", "patchmetrics")
