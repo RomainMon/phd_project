@@ -50,7 +50,7 @@ plot(rasters_mspa[[36]], col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#000
 names(rasters_mspa) = raster_df$year # Name by year
 
 #### Patches  -------
-base_path = here("outputs", "data", "patchmetrics")
+base_path = here("outputs", "data", "patches")
 vect_files = list.files(base_path, pattern = "\\.gpkg$", full.names = TRUE)
 
 # Extract years
@@ -79,7 +79,7 @@ regions = sf::st_read(here("data", "geo", "APonchon", "GLT", "RegionsName.shp"))
 # 2) For a given year, identify the corridors touching/intersecting >1 patches
 # 3) Join patches id to these corridors
 
-# #### Example -----
+#### Example -----
 # # Patches 2024
 # patches_2024 = patches[[36]] %>% 
 #   dplyr::rename(patch_id = lyr.1) %>% 
@@ -278,7 +278,7 @@ corridors_mspa = build_corridor_connections(
   patches_list = patches,
   raster_list = rasters_mspa,
   corridor_value = 33,
-  patch_id_col = "lyr.1",
+  patch_id_col = "patch_id",
   corridor_type = "MSPA"
 )
 
@@ -287,7 +287,7 @@ corridors_road = build_corridor_connections(
   patches_list = patches,
   raster_list = rasters_reclass_cons_cat,
   corridor_value = 52,
-  patch_id_col = "lyr.1",
+  patch_id_col = "patch_id",
   corridor_type = "ROAD"
 )
 

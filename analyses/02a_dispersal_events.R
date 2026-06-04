@@ -18,8 +18,11 @@ load(here("data", "glt", "APonchon", "data_clean_long_final.RData"))
 
 # Group locations
 regions = sf::st_read(here("data", "geo", "APonchon", "GLT", "RegionsName.shp"))
-regions.csv = read.table(here("data", "geo", "APonchon", "GLT", "RegionsName.csv"),
-                header=T,sep=",")
+regions_csv = readr::read_csv2(
+  here::here("data", "geo", "APonchon", "GLT", "RegionsName.csv"),
+  locale = readr::locale(encoding = "ISO-8859-1"),
+  na = ""
+)
 
 # LULC
 raster_lulc_2024 = terra::rast(here("outputs", "data", "MapBiomas", "Rasters_reclass", "raster_reclass_2024.tif"))
@@ -43,7 +46,7 @@ for (i in seq_along(corridors)) {
 names(corridors) = vector_df$year # Name by year
 
 # Patches
-base_path = here("outputs", "data", "patchmetrics")
+base_path = here("outputs", "data", "patches")
 vect_files = list.files(base_path, pattern = "\\.gpkg$", full.names = TRUE)
 
 # Extract years
@@ -121,8 +124,8 @@ valid_groups = data.disp %>%
 # Filter to keep only rows where both FromGroup and ToGroup are known locations
 data.disp.filter.grp = data.disp %>%
   dplyr::filter(
-    FromGroup %in% regions.csv$Abreviation,
-    ToGroup %in% regions.csv$Abreviation
+    FromGroup %in% regions_csv$Abreviation,
+    ToGroup %in% regions_csv$Abreviation
   )
 
 ### Summary statistics -----
@@ -178,7 +181,7 @@ data.disp.filter.grp %>%
 ### Join spatial information ------
 ## Based on group location (regions file)
 # Reformat regions
-grp.loc = regions.csv %>% 
+grp.loc = regions_csv %>% 
   dplyr::rename(Long=CENTROIDE_X_UTM_SAD69_23S,
                 Lat=CENTROIDE_Y_UTM_SAD69_23S,
                 Group=Abreviation) %>% 
@@ -234,13 +237,13 @@ join_patch_by_year = function(df, patches, patch_col = "patch_id") {
 data.disp.from.sf = join_patch_by_year(
   data.disp.from.sf,
   patches,
-  patch_col = "lyr.1") %>%
+  patch_col = "patch_id") %>%
   dplyr::rename(patch_from = patch_id)
 # Apply to destinations
 data.disp.to.sf = join_patch_by_year(
   data.disp.to.sf,
   patches,
-  patch_col = "lyr.1") %>%
+  patch_col = "patch_id") %>%
   dplyr::rename(patch_to = patch_id)
 
 # Flag NAs
@@ -249,7 +252,7 @@ sum(is.na(data.disp.to.sf$patch_to))
 
 ### To lines -----
 # Create LINESTRING geometries
-disp.lines = rbind(data.disp.from, data.disp.to) # Duplicated rows for creating dispersal lines
+disp.lines = rbind(data.disp.from, data.disp.to) # We duplicate rows to create dispersal lines
 disp.lines = disp.lines %>% 
   sf::st_as_sf(coords = c("Long", "Lat"), na.fail = FALSE, crs=crs(regions)) %>% 
   dplyr::group_by(disp_id) %>% 
@@ -278,32 +281,22 @@ table(disp.final$intra_patch)
 
 # Join GLT information
 disp.final.glt = disp.final %>% 
-  dplyr::left_join(data.disp.filter.grp %>% dplyr::select(c(Year,DateObs,GLT,Tattoo,disp_id,SexOK,IdadeOK)), by=c("disp_id"))
+  dplyr::left_join(data.disp.filter.grp %>% 
+                     dplyr::select(c(Year,DateObs,GLT,Tattoo,disp_id,SexOK,IdadeOK)), 
+                   by=c("disp_id"))
 
-# Join corridor info
-# Bind all corridors into one large dataset
-corridor_all = do.call(rbind, corridors) %>%
-  dplyr::mutate(
-    corridor_id = as.character(corridor_id),
-    year = as.numeric(year)
-  )
-# Create pairs of patches
-corridor_all = corridor_all %>%
-  dplyr::mutate(
-    patch_pair = purrr::map2_chr(patch_from, patch_to,
-                           ~ paste(sort(c(.x, .y)), collapse = "_"))
-  )
-disp.final.glt = disp.final.glt %>%
-  dplyr::mutate(patch_from = as.character(patch_from),
-                patch_to   = as.character(patch_to),
-                patch_pair = purrr::map2_chr(patch_from, patch_to,
-                         ~ paste(sort(c(.x, .y)), collapse = "_"))
+# Statistics
+disp.final.glt %>% 
+  sf::st_drop_geometry() %>% 
+  dplyr::group_by(patch_from, patch_to) %>% 
+  dplyr::count() %>%
+  dplyr::arrange(dplyr::desc(n)) %>% 
+  print(n=80)
+
+### Export dispersal lines ---------
+sf::st_write(
+  disp.final.glt,
+  dsn = here::here("outputs", "data", "dispersal", "disp_lines.gpkg"),
+  layer = "disp_lines",
+  delete_dsn = TRUE
 )
-# Join corridors to data
-disp.final.glt.corr = disp.final.glt %>%
-  dplyr::left_join(
-    corridor_all %>%
-      sf::st_drop_geometry() %>% 
-      dplyr::select(corridor_id, year, patch_pair, type),
-    by = c("Year" = "year", "patch_pair")
-  )

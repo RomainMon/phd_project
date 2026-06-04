@@ -54,7 +54,7 @@ distance_tables = purrr::imap(
   function(patch_sf, yr) {
     
     # Real patch IDs
-    ids = as.character(patch_sf$lyr.1)
+    ids = as.character(patch_sf$patch_id)
     
     # Compute pairwise distances
     dm = sf::st_distance(patch_sf)
@@ -115,13 +115,10 @@ patches_long = purrr::imap(
     
     ## Base long table
     patches_long_year = patch_sf %>%
-      dplyr::mutate(
-        lyr.1 = as.character(lyr.1)
-      ) %>%
       dplyr::left_join(
         corridors_year,
         by = c(
-          "lyr.1" = "patch_from"
+          "patch_id" = "patch_from"
         )
       )
     
@@ -129,17 +126,12 @@ patches_long = purrr::imap(
     patch_metrics_to = patch_sf %>%
       sf::st_drop_geometry() %>%
       dplyr::select(
-        lyr.1,
-        FragName2,
+        patch_id,
         area_ha
       ) %>%
-      dplyr::mutate(
-        lyr.1 = as.character(lyr.1)
-      ) %>%
       dplyr::rename(
-        patch_to = lyr.1,
-        patch_to_name = FragName2,
-        area_to  = area_ha
+        patch_to = patch_id,
+        area_to = area_ha
       )
     
     patches_long_year = patches_long_year %>%
@@ -165,7 +157,7 @@ patches_long = purrr::imap(
       dplyr::left_join(
         distances_join,
         by = c(
-          "lyr.1" = "from",
+          "patch_id" = "from",
           "patch_to" = "to"
         )
       )
@@ -200,7 +192,7 @@ patches_long_all = patches_long_all %>%
 # Example
 example = patches_long_all %>%
   dplyr::filter(
-    FragName2 == "Iguape"
+    patch_id == "Iguape"
   )
 
 ### Export patch history ------
