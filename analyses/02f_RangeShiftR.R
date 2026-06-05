@@ -50,28 +50,37 @@ s
 # ?Simulation
 sim = Simulation(Simulation = 0, 
                  Replicates = 20, 
-                 Years = 9,
+                 Years = 19,
                  OutIntPop = 1,
                  OutIntOcc = 1,
                  OutIntRange = 1)
 
 #### 2. Landscape -----
-# To create an artificial landscape
-# land = ArtificialLandscape()
+##### Artificial landscape -------
+?ArtificialLandscape()
+# Create a null landscape of 100m x 100m (= 1 ha)
+artif_land = ArtificialLandscape(propSuit = 1,
+                           K_or_DensDep = 700,
+                           Resolution = 100,
+                           dimX = 1,
+                           dimY = 1,
+                           fractal = FALSE)
+artif_land
 
-##### Import a landscape -----
+##### Imported landscape -----
+## Import a landscape
 landsc = terra::rast(file.path(dirpath, "Inputs", "raster_reclass_binary_2005.txt"))
 terra::plot(landsc, col=c("gray","darkgreen","orange"))
 terra::res(landsc)
 terra::unique(landsc)
 
-##### Patches --------
+## Patches
 patch = terra::rast(file.path(dirpath, "Inputs", "patches_2005.txt"))
 # We can have a glimpse at how many cells the different patches contain:
 table(terra::values(patch))
 # Plot the patches in different colours
 npatch = max(terra::values(patch), na.rm = TRUE)
-# Create colors: white for background + random colors for patches
+# Create colors: gray for background + random colors for patches
 cols = c("gray", rainbow(npatch))
 terra::plot(
   patch,
@@ -79,21 +88,21 @@ terra::plot(
   type = "classes",
   legend = FALSE)
 
-##### Species distribution -----
+## Species distribution
 patch_w_glt  = terra::rast(file.path(dirpath, "Inputs", "patches_w_glt_2005.txt"))
 terra::plot(patch_w_glt, col=c("gray","darkgreen"))
 terra::unique(patch_w_glt)
 
-##### Define the landscape -----
+## Define the landscape
 ?ImportedLandscape
-land = ImportedLandscape(LandscapeFile = "raster_reclass_binary_2005.txt",
+real_land = ImportedLandscape(LandscapeFile = "raster_reclass_binary_2005.txt",
                          PatchFile = "patches_2005.txt", 
                          Resolution = 28.35578,
                          Nhabitats = 3,
-                         K_or_DensDep = c(0, 0.075, 0),
+                         K_or_DensDep = c(0, 50, 0),
                          SpDistFile = "patches_w_glt_2005.txt",
                          SpDistResolution = 28.35578)
-land
+real_land
 # K_or_DensDep: determines the demographic density dependence of the modelled species and is given in units of the number of individuals per hectare (defaults to 
 # If HabPercent=FALSE: a vector of length Nhabitats, specifying the respective K_or_DensDep for every habitat code.
 # SpDistFile: Filename of the species initial distribution map which shall be imported (*.txt). Default is NULL.
@@ -112,7 +121,7 @@ land
 ?StageStructure
 mat = matrix(c(0, 0, 2,
          0.9, 0, 0,
-         0, 0.56, 0.85),
+         0, 0.56, 0.91),
        nrow=3, byrow=T)
 stg = StageStructure(Stages = 3,
                      TransMatrix = mat,
@@ -126,6 +135,22 @@ plotProbs(stg) # plot the rates from the transition matrix
 demo = Demography(StageStruct = stg,
                      ReproductionType = 0)
 
+##### Determine 1/b -------
+# To explore the potential effect of b on equilibrium population sizes before running the simulation, use getLocalisedEquilPop(). 
+# This allows a better understanding of reasonable values of 1/b for the different land types. 
+# getLocalisedEquilPop() runs a quick simulation of a closed and localised population (i.e. without dispersal and in a single idealised patch) for a given vector of potential 1/b values (argument DensDep_values) and based on our defined Demography() module.
+# The getLocalisedEquilPop() function uses absolute values of individuals in the local population (since there is not spatial extent).
+# WHILE what we need are relative values of 1/b as individuals per hectare.
+# We choose to simulate a hypothetical patch of our landscape, and want to determine the value of 1/b that is needed to observe e.g. 100 individuals (e.g., our empirical observation of how many individuals were maximally observed in woodland patches)
+#  Thus, we aim to find the 1/b parameter that would yield a maximum local population abundance of 100 individuals. 
+# We can now assess the localised equilibrium population size for different values of 1/b and see how the density dependence plays out.
+
+# Maximum individuals observed in a forest patch (see: Ruiz-Miranda et al. 2019)
+?getLocalisedEquilPop
+par(mfrow=c(1,1))
+eq_pop = getLocalisedEquilPop(demog = demo, DensDep_values = seq(50,400,50)) #  absolute values of individuals
+# Select the value that reaches the desired threshold
+colSums(eq_pop)
 
 #### 4. Dispersal -------
 
@@ -161,17 +186,32 @@ disp = Dispersal(Emigration = emig,
 
 #### 6. Initialisation ----
 ?Initialise
+
+##### From artificial landscape --------
+init = Initialise(InitType = 0,
+                  FreeType = 0,
+                  NrCells = 1,
+                  InitDens = 0, # Set the number of individuals per cell/hectare to initialise in IndsHaCell
+                  PropStages = c(0,0.5,0.5), # For StageStructured models only: Proportion of individuals initialised in each stage. Requires a vector of length equal to the number of stages
+                  InitAge = 0)
+
+##### From species distribution map --------
+# calculate proportion of all stages excluding the new-born juvenile (stage 0) population, 
+# which can't be initialised:
+eq_pop = getLocalisedEquilPop(demog = demo, DensDep_values = 250, plot=F)
+prop_stgs = eq_pop[-1]/sum(eq_pop[-1])
+prop_stgs
 init = Initialise(InitType = 1,  # from loaded species distribution map
-                   SpType = 0,   # All suitable cells within all distribution presence cells
-                   InitDens = 2, # Set the number of individuals per cell/hectare to initialise in IndsHaCell
-                   IndsHaCell = 0.086, # Number of individuals per ha
-                   PropStages = c(0,0.5,0.5), # For StageStructured models only: Proportion of individuals initialised in each stage. Requires a vector of length equal to the number of stages
-                   InitAge = 0)
+                  SpType = 0,   # All suitable cells within all distribution presence cells
+                  InitDens = 2, # Set the number of individuals per cell/hectare to initialise in IndsHaCell
+                  IndsHaCell = 0.086, # Initial density in inds/ha
+                  PropStages = c(0,prop_stgs), # For StageStructured models only: Proportion of individuals initialised in each stage. Requires a vector of length equal to the number of stages
+                  InitAge = 2)
 
 #### 7. Parameter master -----
 ?RSsim
 s = RSsim(simul = sim, 
-          land = land, 
+          land = real_land, 
           demog = demo, 
           dispersal = disp, 
           init = init)

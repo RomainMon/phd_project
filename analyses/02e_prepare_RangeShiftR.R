@@ -30,19 +30,106 @@ names(rasters_reclass_mspa) = years
 plot(rasters_reclass_mspa[['2024']], col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e", "orange"))
 
 #### GLT distribution ----
+# 2013-2018
 glt_2013_2018 = sf::st_read(here("data", "glt", "JDietz", "glt_distrib_2013_2018.shp"))
 plot(glt_2013_2018)
 crs(glt_2013_2018)
+# 2023
+glt_2022 = sf::st_read(here("data", "glt", "JDietz", "glt_distrib_2013_2018_2022.shp"))
+plot(glt_2022)
+crs(glt_2022)
 
-#### Patches names ----
-patch_name = sf::st_read(here("data", "geo", "APonchon", "GLT", "RegionsName.shp"))
-crs(patch_name)
+#### Patches  -------
+base_path = here("outputs", "data", "patches")
+vect_files = list.files(base_path, pattern = "\\.gpkg$", full.names = TRUE)
+
+# Extract years
+years = stringr::str_extract(basename(vect_files), "(?<!\\d)\\d{4}(?!\\d)")
+# Create a dataframe to link files and years
+vector_df = data.frame(file = vect_files, year = as.numeric(years)) %>%
+  dplyr::arrange(year)
+# Load vectors in chronological order
+patches = lapply(vector_df$file, sf::st_read)
+years = vector_df$year
+# Check
+for (i in seq_along(patches)) {
+  cat("Year", years[i], " → raster name:", basename(vector_df$file[i]), "\n")
+}
+plot(rasters_reclass_mspa[[36]], col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e", "orange"))
+plot(sf::st_geometry(patches[[36]]), col=NA, add=TRUE)
+names(patches) = vector_df$year # Name by year
 
 ### Maps -----
 
-#### Rasters with habitat, matrix, corridor --------
-# IMPORTANT : the basis landscape should have integer values (with matrix = 1, NAs = -999)
+#### Patches --------
+# IMPORTANT : patches should have an integer value corresponding to patch id, and background must be set to 0
 
+# Rasterize patches
+patch_rasters = vector("list", length(patches))
+names(patch_rasters) = names(patches)
+
+for (yr in names(patches)) {
+  
+  cat("Rasterizing patches:", yr, "\n")
+  
+  # Template raster
+  r_template = rasters_reclass_mspa[[yr]]
+  
+  # Create unique patch IDs
+  patches_i = patches[[yr]] %>%
+    dplyr::mutate(unique_id = dplyr::row_number()) # Important if some ids are duplicated
+  
+  # Convert to SpatVector
+  p = terra::vect(patches_i)
+  
+  # Rasterize using unique patch IDs
+  r_patch = terra::rasterize(
+    p,
+    r_template,
+    field = "unique_id",
+    background = 0
+  )
+  
+  # Preserve nodata cells from template
+  r_patch[is.na(r_template)] = -999
+  
+  patch_rasters[[yr]] = r_patch
+}
+
+# Example
+patches2005_r = patch_rasters[['2005']]
+plot(patches2005_r)
+
+#### Rasters with habitat, matrix, corridor --------
+
+## Overlay rasters with GLT patches
+# Important step if patches are different from base raster (e.g., due to dilatation-erosion)
+# Any patch cell becomes habitat (=1)
+
+rasters_w_patches= vector("list", length(rasters_reclass_mspa))
+names(rasters_w_patches) = names(rasters_reclass_mspa)
+
+for (yr in names(rasters_reclass_mspa)) {
+  
+  cat("Processing", yr, "\n")
+  
+  r = rasters_reclass_mspa[[yr]]
+  p = patch_rasters[[yr]]
+  
+  r_out = r
+  
+  # Cells belonging to a patch
+  r_out[p > 0] = 1
+  
+  # Preserve NoData
+  r_out[p == -999] = -999
+  
+  rasters_w_patches[[yr]] = r_out
+}
+plot(rasters_w_patches[['2005']])
+
+## Reclass rasters
+# IMPORTANT : the basis landscape should have integer values (with matrix = 1, NAs = -999)
 reclass <- function(xx) {
   habitat <- 1
   corridor <- 33
@@ -67,30 +154,9 @@ reclass <- function(xx) {
 }
 
 ## Apply to all rasters
-rasters_binary = lapply(rasters_reclass_mspa, reclass)
-plot(rasters_binary[['2005']], col=c("white", "gray", "darkgreen", "orange"))
-r2005 = rasters_binary[['2005']]
-
-#### Patches --------
-# IMPORTANT : patches should have an integer value corresponding to patch id, and background must be set to 0
-
-# Identify contiguous habitat patches
-# Keep only habitat
-patches2005 = r2005
-# Habitat = 1, everything else = 0
-habitat = ifel(r2005 == 2, 1, 0)
-
-# Identify patches
-patches2005 = terra::patches(
-  habitat,
-  directions = 8,
-  zeroAsNA = TRUE
-)
-
-# For patches, we need to convert background NAs to 0
-patches2005[is.na(patches2005)] = 0
-patches2005[r2005 == -999] = -999
-plot(patches2005)
+rasters_rshifter = lapply(rasters_w_patches, reclass)
+plot(rasters_rshifter[['2005']], col=c("white", "gray", "darkgreen", "orange"))
+r2005 = rasters_rshifter[['2005']]
 
 #### Species distribution --------
 # IMPORTANT : species distribution file should only contain either 0 (species absent) or 1 (species present)
@@ -100,53 +166,33 @@ plot(patches2005)
 # -999 = no data
 
 ##### 2005 -------
-# Create polygons from original patch raster
-patches2005_poly = patches2005
-
-# Remove matrix and nodata
-patches2005_poly[patches2005_poly <= 0] = NA
-
-patches2005_v = sf::st_as_sf(
-  as.polygons(patches2005_poly, dissolve = TRUE)
-)
-plot(patches2005_v)
-
-# Join patch name
-patches2005_v = sf::st_join(
-  patches2005_v,
-  patch_name,
-  join = st_intersects,
-  largest = TRUE
-)
-unique(patches2005_v$FragName2)
+patches2005 = patches[['2005']]
 
 # Select patches
 # Based on patch name and delimitation
-patches2005_v_select = patches2005_v %>% 
-  dplyr::filter(FragName2 %in% c("Afetiva",
-                                 "Vendaval",
-                                 "Rio_Vermelho",
-                                 "Boa_Esperanca_II",
-                                 "Large_frag_West",
-                                 "Sta_Helana",
-                                 "Sta_Helena_I",
-                                 "2_Irmaos",
-                                 "Igarape_S",
-                                 "Poco_das_Antas",
-                                 "Uniao_N"))
-plot(sf::st_geometry(patches2005_v))
-plot(sf::st_geometry(patches2005_v_select), col="darkgreen", add=TRUE)
+patches2005_select = patches2005 %>% 
+  dplyr::filter(patch_id %in% c("Aldeia_I_1",
+                                "Aldeia_I_2",
+                                "Sta_Helena",
+                                "Imbau_I_2",
+                                "Afetiva",
+                                "Nova_Esperanca_2",
+                                "Pirineus_111",
+                                "Poco_das_Antas",
+                                "Rio_Vermelho",
+                                "Uniao_N_2"))
+plot(sf::st_geometry(patches2005))
+plot(sf::st_geometry(patches2005_select), col="darkgreen", add=TRUE)
 
-# To raster
+## To raster
 # Reference raster
-template = rasters_binary[['2005']]
+template = r2005
 # Create a 0-valued raster with same geometry
-patches_raster = template
-values(patches_raster) = 0
+values(template) = 0
 # Rasterize selected patches as 1
 patch_w_glt_2005 = terra::rasterize(
-  terra::vect(patches2005_v_select),
-  patches_raster,
+  terra::vect(patches2005_select),
+  template,
   field = 1,
   background = 0
 )
@@ -162,12 +208,6 @@ patch_w_glt_2005[r2005 == -999] = -999
 plot(patch_w_glt_2005, col=c("white","gray","darkgreen"))
 
 
-# 2) Based on management units (UMMPs)
-# -> Select patches intersecting UMMPs
-unique(ummps$UMMPs)
-patches2005_v_ummps = patches2005_v %>% 
-  sf::st_intersection(ummps %>% dplyr::select(UMMPs %in% c("Imbaú III", "Pirineus")))
-
 #### Export -------
 ### IMPORTANT: all NAs values must take an integer value (e.g., -999)
 ### When you open the ASCII .txt file, you should see: NODATA_value -999
@@ -177,6 +217,8 @@ patches2005_v_ummps = patches2005_v %>%
 # Binary rasters as ASCII file
 output_dir = here("data", "rangeshifter", "Inputs")
 
+# Landscape
+plot(r2005)
 writeRaster(
   r2005,
   filename = file.path(output_dir, "raster_reclass_binary_2005.txt"),
@@ -186,8 +228,10 @@ writeRaster(
   NAflag = -999
 )
 
+# Patches
+plot(patches2005_r)
 writeRaster(
-  patches2005,
+  patches2005_r,
   filename = file.path(output_dir, "patches_2005.txt"),
   filetype = "AAIGrid",
   overwrite = TRUE,
@@ -195,6 +239,8 @@ writeRaster(
   NAflag = -999
 )
 
+# Species distribution
+plot(patch_w_glt_2005)
 writeRaster(
   patch_w_glt_2005,
   filename = file.path(output_dir, "patches_w_glt_2005.txt"),

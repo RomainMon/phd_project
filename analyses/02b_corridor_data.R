@@ -72,6 +72,14 @@ names(patches) = vector_df$year # Name by year
 #### GLT locations --------
 regions = sf::st_read(here("data", "geo", "APonchon", "GLT", "RegionsName.shp"))
 
+#### AMLD corridors --------
+amld_corridors = sf::st_read(here("data", "geo", "AMLD", "plantios", "work", "plantios_clean.shp"))
+amld_corridors = amld_corridors %>% 
+  dplyr::filter(Ecologia == "Corredor" & !is.na(date_refor))
+
+#### Road overpasses --------
+road_overpass = sf::st_read(here("data", "geo", "AMLD", "Passagens_ARTERIS", "work", "road_overpasses_clean.shp"))
+
 ### Flag connected patches ---------
 # -> Here, we identify corridors connecting two distinct patches
 # Steps: 
@@ -303,6 +311,36 @@ patch_connections_all = dplyr::bind_rows(
   corridors_road$patch_connections
 )
 
+### Mutate corridor type -----
+# Initialize
+corridor_geometry_all = corridor_geometry_all %>%
+  dplyr::mutate(corridor_type = "MSPA")
+
+# Road overpass
+road_idx = lengths(
+  sf::st_intersects(corridor_geometry_all, road_overpass)
+) > 0
+
+corridor_geometry_all$corridor_type[road_idx] = "road_overpass"
+
+# AMLD corridor
+amld_idx = lengths(
+  sf::st_intersects(corridor_geometry_all, amld_corridors)
+) > 0
+
+corridor_geometry_all$corridor_type[
+  !road_idx & amld_idx
+] = "amld_corr"
+
+# Propagate to patch connections
+patch_connections_all = patch_connections_all %>%
+  dplyr::select(-corridor_type) %>%
+  dplyr::left_join(
+    corridor_geometry_all %>%
+      sf::st_drop_geometry() %>%
+      dplyr::select(corridor_id, corridor_type),
+    by = "corridor_id"
+  )
 
 ### Export --------
 
