@@ -46,13 +46,21 @@ library(readxl)
 # 9) Heatmaps (if SMS)
 
 ### Check the functions -----
-?ImportedLandscape
-?ArtificialLandscape
-?StageStructure
-?Emigration
-?Transfer
-?DispersalKernel
-?Initialise
+# ?ImportedLandscape
+# ?ArtificialLandscape
+# ?StageStructure
+# ?Emigration
+# ?Transfer
+# ?DispersalKernel
+# ?Initialise
+
+### Director path ----
+
+dirpath = "data/rangeshifter/tests/test_densdep_preYF_1/" # UPDATE HERE
+## Create the RS folder structure, if it doesn’t yet exist
+# dir.create(file.path(dirpath, "Inputs"), showWarnings = TRUE)
+# dir.create(file.path(dirpath, "Outputs"), showWarnings = TRUE)
+# dir.create(file.path(dirpath, "Output_Maps"), showWarnings = TRUE)
 
 ### Check the landscape -----
 ## Import a landscape
@@ -91,6 +99,24 @@ terra::unique(patch_w_glt)
 # Thus, we aim to find the 1/b parameter that would yield a maximum local population abundance of 100 individuals. 
 # We can now assess the localised equilibrium population size for different values of 1/b and see how the density dependence plays out.
 
+# Pop. matrix
+mat = matrix(c(0, 0, 2,
+               0.9, 0, 0,
+               0, 0.56, 0.85),
+             nrow=3, byrow=T)
+# Stage structure
+stg = StageStructure(Stages = 3,
+                     TransMatrix = mat,
+                     MaxAge = 20,
+                     RepSeasons = 1,
+                     SurvSched = 1, # Between reproductive events
+                     FecDensDep = T,
+                     DevDensDep = F,
+                     SurvDensDep = F)
+# Demography module
+demo = Demography(StageStruct = stg,
+                  ReproductionType = 0)
+
 # Maximum individuals observed in a forest patch (see: Ruiz-Miranda et al. 2019)
 ?getLocalisedEquilPop
 par(mfrow=c(1,1))
@@ -102,12 +128,6 @@ colSums(eq_pop)
 ### SENSITIVITY ANALYSIS ----
 # Run simulations for several values for given parameters
 
-dirpath = "data/rangeshifter/test_densdep/" # UPDATE HERE
-## Create the RS folder structure, if it doesn’t yet exist
-# dir.create(file.path(dirpath, "Inputs"), showWarnings = TRUE)
-# dir.create(file.path(dirpath, "Outputs"), showWarnings = TRUE)
-# dir.create(file.path(dirpath, "Output_Maps"), showWarnings = TRUE)
-
 #### Validation dataset ----
 real_data = read_excel(here("data", "glt", "JDietz", "GLT_POP_2005_2023.xlsx"), na="NA")
 real_data %>%
@@ -116,14 +136,17 @@ real_data %>%
 
 #### Parameters file ----
 metadata = read_excel(here("data", "rangeshifter", 
-                           "test_densdep", "test_parameters.xlsx"),
-                      sheet="test3")
+                           "tests", "test_densdep_preYF_1",
+                           "test_parameters.xlsx"),
+                      sheet="test1")
 
 #### Loop -----
 for(i in 1:nrow(metadata)) {
   
   densdep = metadata$DensDep[i]
   indshacell = metadata$IndsHaCell[i]
+  ad_survival = metadata$Ad_survival[i]
+  juv_survival = metadata$Juv_survival[i]
   id_simulation = metadata$Id_simul[i]
   
   # Print progression
@@ -161,8 +184,8 @@ for(i in 1:nrow(metadata)) {
   # To make a stage-structured model, we have to additionally create a stage-structure sub-module within the Demography module. 
   # We can use ‘+’ to add the StageStructure sub-module.
   mat = matrix(c(0, 0, 2,
-                 0.9, 0, 0,
-                 0, 0.56, 0.85),
+                 juv_survival, 0, 0,
+                 0, 0.56, ad_survival),
                nrow=3, byrow=T)
   
   # Stage structure
@@ -240,7 +263,7 @@ for(i in 1:nrow(metadata)) {
 #### Population -----
 # stack all files
 pop_files = list.files(
-  here("data","rangeshifter","test_densdep","Outputs"),
+  here("data","rangeshifter","tests","test_densdep_preYF_1","Outputs"),
   pattern = "_Pop\\.txt$",
   full.names = TRUE
 )
@@ -288,9 +311,10 @@ ggplot(pop_time, aes(Year, MeanN, colour = factor(DensDep))) +
 # Export plot
 png(here("data",
          "rangeshifter",
-         "test_densdep",
+         "tests",
+         "test_densdep_preYF_1",
          "plot",
-         "test_densdep_3.png"), 
+         "test_densdep_preYF_1.png"), 
     width = 2500, height = 2000, res = 300, type="cairo")
 ggplot(pop_time, aes(Year, MeanN, colour = factor(DensDep))) +
   geom_line(linewidth = 0.8) +
@@ -309,7 +333,7 @@ initial_pop = pop_time %>%
   dplyr::filter(abs(MeanN - initial_popsize) < 50)  # Adjust tolerance
 final_pop = pop_time %>%
   dplyr::filter(Year == max(pop_time$Year)) %>%
-  dplyr::filter(abs(MeanN - final_popsize) < 300)  # Adjust tolerance
+  dplyr::filter(abs(MeanN - final_popsize) < 1200)  # Adjust tolerance
 
 # Get the parameter combinations for initial and final populations
 initial_params = initial_pop %>%
