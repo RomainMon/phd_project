@@ -3,6 +3,8 @@
 # Objective: Running RangeShiftR simulations
 #------------------------------------------------#
 
+### BEFORE RUNNING EACH SIMULATION, UPDATE DIRPATH
+
 ### Load packages ------
 library(RangeShiftR)
 library(here)
@@ -56,7 +58,7 @@ library(readxl)
 
 ### Director path ----
 
-dirpath = "data/rangeshifter/tests/test_densdep_preYF_1/" # UPDATE HERE
+dirpath = "data/rangeshifter/tests/test_densdep_preYF_5/" # UPDATE HERE !!!
 ## Create the RS folder structure, if it doesn’t yet exist
 # dir.create(file.path(dirpath, "Inputs"), showWarnings = TRUE)
 # dir.create(file.path(dirpath, "Outputs"), showWarnings = TRUE)
@@ -101,8 +103,8 @@ terra::unique(patch_w_glt)
 
 # Pop. matrix
 mat = matrix(c(0, 0, 2,
-               0.9, 0, 0,
-               0, 0.56, 0.85),
+               1, 0, 0,
+               0, 0.56, 0.92),
              nrow=3, byrow=T)
 # Stage structure
 stg = StageStructure(Stages = 3,
@@ -133,10 +135,20 @@ real_data = read_excel(here("data", "glt", "JDietz", "GLT_POP_2005_2023.xlsx"), 
 real_data %>%
   dplyr::summarise(dplyr::across(where(is.numeric), \(x) sum(x, na.rm = TRUE)))
 
+#### Correspondence table ----
+patch_corres_id = readr::read_csv(here("data", 
+                                     "rangeshifter", 
+                                     "tests", 
+                                     "test_densdep_preYF_5", # UPDATE HERE
+                                     "Inputs", 
+                                     "patch_corres_id_2005.csv"),
+                                col_types = readr::cols(unique_id = readr::col_integer()))
 
 #### Parameters file ----
-metadata = read_excel(here("data", "rangeshifter", 
-                           "tests", "test_densdep_preYF_1",
+metadata = read_excel(here("data", 
+                           "rangeshifter", 
+                           "tests", 
+                           "test_densdep_preYF_5",  # UPDATE HERE !!!
                            "test_parameters.xlsx"),
                       sheet="test1")
 
@@ -153,18 +165,18 @@ for(i in 1:nrow(metadata)) {
   cat("\n========================================\n")
   cat(sprintf("Simulation %d/%d (ID: %d)\n",
               i, nrow(metadata), id_simulation))
-  cat(sprintf("  DensDep = %.3f | IndsHaCell = %.3f\n",
-              densdep, indshacell))
+  cat(sprintf("  DensDep = %.3f | Juv suvival = %.3f | Adult suvival = %.3f | IndsHaCell = %.3f\n",
+              densdep, juv_survival, ad_survival, indshacell))
   cat("========================================\n\n")
   
   ##### 1) Simulation -----
   # This module is used to set general simulation parameters (e.g. simulation ID, number of replicates, and number of years to simulate) and to control output types (plus some more specific settings).
   sim = Simulation(Simulation = id_simulation, # Update simulation id
-                   Replicates = 10, 
-                   Years = 18,
-                   OutIntPop = 1,
-                   OutIntOcc = 0,
-                   OutIntRange = 0)
+                   Replicates = 20, # Number of replicates
+                   Years = 95, # Number of years
+                   OutIntPop = 1, # Whether to export population files 
+                   OutIntOcc = 1, # Whether to export occupancy files
+                   OutIntRange = 0) # Whether to export range files
   
   ##### 2) Landscape -----
   # K_or_DensDep: determines the demographic density dependence of the modelled species and is given in units of the number of individuals per hectare (defaults to 
@@ -261,9 +273,15 @@ for(i in 1:nrow(metadata)) {
 ### Results -----
 
 #### Population -----
+
+##### Files -------
 # stack all files
 pop_files = list.files(
-  here("data","rangeshifter","tests","test_densdep_preYF_1","Outputs"),
+  here("data",
+       "rangeshifter",
+       "tests",
+       "test_densdep_preYF_5", # UPDATE HERE
+       "Outputs"),
   pattern = "_Pop\\.txt$",
   full.names = TRUE
 )
@@ -293,54 +311,292 @@ pop_all = dplyr::left_join(
   by = "Id_simul"
 )
 
+##### Line plot ------
 ### Plot
 pop_total = pop_all %>%
-  dplyr::group_by(Id_simul, DensDep, IndsHaCell, Rep, Year) %>%
-  dplyr::summarise(NInd = sum(NInd), .groups = "drop") %>% 
-  dplyr::filter(!is.na(DensDep))
+  dplyr::group_by(Id_simul, DensDep, IndsHaCell, Juv_survival, Ad_survival, Rep, Year) %>%
+  dplyr::summarise(NInd = sum(NInd), .groups = "drop")
 pop_time = pop_total %>%
-  dplyr::group_by(DensDep, IndsHaCell, Year) %>%
+  dplyr::group_by(DensDep, IndsHaCell, Juv_survival, Ad_survival, Year) %>%
   dplyr::summarise(MeanN = mean(NInd),.groups = "drop")
 ggplot(pop_time, aes(Year, MeanN, colour = factor(DensDep))) +
   geom_line(linewidth = 1) +
-  facet_wrap(~ IndsHaCell,scales="free") +
+  facet_grid(
+    rows = vars(Ad_survival), # Parameter that varies
+    cols = vars(Juv_survival), # Other parameter that varies
+    scales = "free_y") +
   theme_bw() +
   labs(colour = "DensDep",
        y = "Mean population size")
 
-# Export plot
+## Export plot
 png(here("data",
          "rangeshifter",
          "tests",
-         "test_densdep_preYF_1",
+         "test_densdep_preYF_5", # UPDATE HERE
          "plot",
-         "test_densdep_preYF_1.png"), 
-    width = 2500, height = 2000, res = 300, type="cairo")
+         "evol_pop.png"), # UPDATE HERE
+    width = 4000, height = 2000, res = 300, type="cairo")
 ggplot(pop_time, aes(Year, MeanN, colour = factor(DensDep))) +
-  geom_line(linewidth = 0.8) +
-  facet_wrap(~ IndsHaCell,scales="free") +
+  geom_line(linewidth = 1) +
+  facet_grid(
+    rows = vars(Ad_survival), # Parameter that varies
+    cols = vars(Juv_survival), # Other parameter that varies
+    scales = "free_y") +
   theme_bw() +
   labs(colour = "DensDep",
        y = "Mean population size")
 dev.off()
 
-### Identify good parameters
-# Identify parameters that provide the same initial and final pop. size
+##### Comparison with long-term data -----
+### Identify good parameters by comparing with real pop
+## Identify parameters that provide the same initial and final pop. size
 initial_popsize = 1600 # Adjust
 final_popsize = 4869 # Adjust
 initial_pop = pop_time %>%
   dplyr::filter(Year == min(pop_time$Year)) %>%
-  dplyr::filter(abs(MeanN - initial_popsize) < 50)  # Adjust tolerance
+  dplyr::filter(abs(MeanN - initial_popsize) < 30)  # Adjust tolerance
 final_pop = pop_time %>%
-  dplyr::filter(Year == max(pop_time$Year)) %>%
-  dplyr::filter(abs(MeanN - final_popsize) < 1200)  # Adjust tolerance
+  dplyr::filter(Year == 18) %>% # 2023
+  dplyr::filter(abs(MeanN - final_popsize) < 100)  # Adjust tolerance
 
 # Get the parameter combinations for initial and final populations
 initial_params = initial_pop %>%
-  dplyr::select(DensDep, IndsHaCell) %>%
+  dplyr::select(DensDep, IndsHaCell, Ad_survival, Juv_survival) %>%
   dplyr::distinct()
 final_params = final_pop %>%
-  dplyr::select(DensDep, IndsHaCell) %>%
+  dplyr::select(DensDep, IndsHaCell, Ad_survival, Juv_survival) %>%
   dplyr::distinct()
 # Find the intersection
 dplyr::inner_join(initial_params, final_params)
+
+## Heatmap plot
+fit_score = pop_time %>%
+  dplyr::group_by(Ad_survival, Juv_survival) %>%
+  dplyr::summarise(
+    InitialN = MeanN[Year == min(Year)],
+    FinalN = MeanN[Year == 18],
+    .groups = "drop"
+  ) %>%
+  dplyr::mutate(
+    Error_initial = abs(InitialN - initial_popsize),
+    Error_final = abs(FinalN - final_popsize),
+    # total distance from observed values
+    Total_error = Error_initial + Error_final
+  )
+# Plot
+ggplot(fit_score, aes(x = Ad_survival, y = Juv_survival, fill = Total_error)) +
+  geom_tile() +
+  # facet_wrap(~Ad_survival) +
+  scale_fill_viridis_c(
+    option = "C",
+    direction = -1
+  ) +
+  theme_bw()
+
+## Export plot
+png(here("data",
+         "rangeshifter",
+         "tests",
+         "test_densdep_preYF_5", # UPDATE HERE
+         "plot",
+         "heatmap.png"),
+    width = 2000, height = 1000, res = 300, type="cairo")
+ggplot(fit_score, aes(x = Ad_survival, y = Juv_survival, fill = Total_error)) +
+  geom_tile() +
+  # facet_wrap(~Ad_survival) +
+  scale_fill_viridis_c(
+    option = "C",
+    direction = -1
+  ) +
+  theme_bw()
+dev.off()
+
+## RMSE
+fit_score = pop_time %>%
+  dplyr::group_by(
+    DensDep,
+    IndsHaCell,
+    Ad_survival,
+    Juv_survival
+  ) %>%
+  dplyr::summarise(
+    N0 = MeanN[Year == 0],
+    N18 = MeanN[Year == 18],
+    .groups = "drop"
+  ) %>%
+  dplyr::mutate(
+    RMSE = sqrt(((N0 - initial_popsize)^2 + (N18 - final_popsize)^2) / 2))
+# heatmap RMSE
+ggplot(fit_score, aes(x = DensDep,
+                      y = IndsHaCell,
+                      fill = RMSE)) +
+  geom_tile() +
+  facet_grid(Juv_survival ~ Ad_survival) +
+  scale_fill_viridis_c(
+    option = "C",
+    direction = -1) +
+  theme_bw()
+# Rank the best options
+fit_score %>%
+  dplyr::arrange(RMSE) %>%
+  dplyr::slice(1:5)
+
+
+##### Patch abundance -----
+pop_patch = pop_all %>%
+  dplyr::group_by(PatchID, DensDep, IndsHaCell, Juv_survival, Ad_survival, Year) %>%
+  dplyr::summarise(MeanN = mean(NInd),.groups = "drop")
+# Join patch name
+pop_patch = pop_patch %>% 
+  dplyr::left_join(patch_corres_id, by=c("PatchID" = "unique_id")) %>% 
+  dplyr::rename(patch_name = patch_id) %>% 
+  dplyr::filter(!is.na(patch_name))
+
+# Plot
+pop_patch %>%
+  ggplot(
+    aes(
+      x = Year,
+      y = MeanN,
+      group = patch_name,
+      colour = patch_name
+    )
+  ) +
+  geom_line(linewidth = 0.8) +
+  facet_grid(
+    rows = vars(Ad_survival),
+    cols = vars(Juv_survival)
+  ) +
+  theme_bw() +
+  labs(
+    x = "Year",
+    y = "Mean patch abundance",
+    colour = "Patch"
+  )
+
+### Compare with patch abundance over time
+# Select parameters and years
+sim_sel = pop_patch %>%
+  dplyr::filter(
+    DensDep == 0.088,
+    IndsHaCell == 0.065,
+    Ad_survival == 0.89,
+    Juv_survival == 1,
+    Year %in% c(0, 8, 13, 18) # Years of interest
+  )
+
+# Remove suffixes from patches ids
+sim_sel = sim_sel %>%
+  dplyr::mutate(
+    FragName = stringr::str_remove(
+      patch_name,
+      "_\\d+$"
+    )
+  )
+
+# Aggregate patches sharing the same fragment name
+# Example: since Aldeia_I_1 and Aldeia_I_2 correspond to the same monitored UMMP, we sum their abundances
+sim_frag = sim_sel %>%
+  group_by(FragName, Year) %>%
+  summarise(
+    SimN = sum(MeanN),
+    .groups = "drop"
+  )
+
+# Reshape the real census data
+real_long = real_data %>%
+  tidyr::pivot_longer(
+    starts_with("n_glt"),
+    names_to = "Survey",
+    values_to = "RealN"
+  ) %>%
+  dplyr::mutate(
+    Year = dplyr::case_when(
+      Survey == "n_glt_2005" ~ 0,
+      Survey == "n_glt_2014" ~ 8,
+      Survey == "n_glt_2018" ~ 13,
+      Survey == "n_glt_2023" ~ 18
+    )
+  ) %>% 
+  dplyr::filter(!is.na(FragName))
+
+# Join
+sort(unique(sim_frag$FragName))
+sort(unique(real_long$FragName))
+comparison = sim_frag %>%
+  dplyr::left_join(
+    real_long,
+    by = c(
+      "FragName" = "FragName",
+      "Year"
+    )
+  ) %>% 
+  dplyr::filter(!is.na(RealN)) %>% 
+  dplyr::filter(Survey != "n_glt_2018") # Remove YF data
+
+# Correlation
+cor(comparison$SimN, comparison$RealN)
+
+# Plot
+png(here("data",
+         "rangeshifter",
+         "tests",
+         "test_densdep_preYF_5", # UPDATE HERE
+         "plot",
+         "corr_patch_simvsreal.png"),
+    width = 2000, height = 1000, res = 300, type="cairo")
+ggplot(
+  comparison,
+  aes(x = RealN, y = SimN)
+) +
+  geom_point(size = 1) +
+  geom_abline(
+    slope = 1,
+    intercept = 0,
+    linetype = 2
+  ) +
+  facet_wrap(~Year) +
+  theme_bw() +
+  labs(
+    x = "Observed population",
+    y = "Simulated population"
+  )
+dev.off()
+
+# Comparison (in long format)
+comparison_long = comparison %>%
+  dplyr::select(
+    FragName,
+    Year,
+    RealN,
+    SimN
+  ) %>%
+  tidyr::pivot_longer(
+    c(RealN, SimN),
+    names_to = "Source",
+    values_to = "N"
+  )
+# Plot
+png(here("data",
+         "rangeshifter",
+         "tests",
+         "test_densdep_preYF_5", # UPDATE HERE
+         "plot",
+         "corr_patch_simvsreal2.png"),
+    width = 2000, height = 1000, res = 300, type="cairo")
+ggplot(
+  comparison_long,
+  aes(
+    Year,
+    N,
+    colour = Source
+  )) +
+  geom_line() +
+  geom_point() +
+  facet_wrap(
+    ~FragName,
+    scales = "free_y"
+  ) +
+  theme_bw()
+dev.off()

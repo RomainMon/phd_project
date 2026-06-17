@@ -64,6 +64,14 @@ names(patches) = vector_df$year # Name by year
 #### Patches --------
 # IMPORTANT : patches should have an integer value corresponding to patch id, and background must be set to 0
 
+# Create a permanent numeric ID
+patches = lapply(patches, function(x){
+  x %>%
+    mutate(unique_id = row_number())
+})
+anyDuplicated(patches[['2005']]$lyr.1) # Duplicated ids
+anyDuplicated(patches[['2005']]$unique_id) # ALL GOOD
+
 # Rasterize patches
 patch_rasters = vector("list", length(patches))
 names(patch_rasters) = names(patches)
@@ -75,12 +83,8 @@ for (yr in names(patches)) {
   # Template raster
   r_template = rasters_reclass_mspa[[yr]]
   
-  # Create unique patch IDs
-  patches_i = patches[[yr]] %>%
-    dplyr::mutate(unique_id = dplyr::row_number()) # Important if some ids are duplicated
-  
   # Convert to SpatVector
-  p = terra::vect(patches_i)
+  p = terra::vect(patches[[yr]])
   
   # Rasterize using unique patch IDs
   r_patch = terra::rasterize(
@@ -168,6 +172,11 @@ r2005 = rasters_rshifter[['2005']]
 ##### 2005 -------
 patches2005 = patches[['2005']]
 
+### Correspondence table between patch name and id
+patch_corres_id = patches2005 %>%
+  sf::st_drop_geometry() %>%
+  dplyr::select(patch_id, unique_id)
+
 # Select patches
 # Based on patch name and delimitation
 patches2005_select = patches2005 %>% 
@@ -215,7 +224,7 @@ plot(patch_w_glt_2005, col=c("white","gray","darkgreen"))
 ### Use INT2S = signed 16-bit integer
 
 # Binary rasters as ASCII file
-output_dir = here("data", "rangeshifter", "Inputs")
+output_dir = here("data", "rangeshifter", "tests")
 
 # Landscape
 plot(r2005)
@@ -248,4 +257,11 @@ writeRaster(
   overwrite = TRUE,
   datatype = "INT2S",
   NAflag = -999
+)
+
+# Correspondence table
+write.csv(
+  patch_corres_id,
+  file.path(output_dir, "patch_corres_id_2005.csv"),
+  row.names = FALSE
 )
