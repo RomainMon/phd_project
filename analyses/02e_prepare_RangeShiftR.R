@@ -149,7 +149,7 @@ reclass <- function(xx) {
   xx[v == habitat] <- 2
   
   ## Assign corridor
-  xx[v == corridor] <- 3
+  xx[v == corridor] <- 2
   
   # Then assign background
   xx[v %in% background] <- 1
@@ -159,7 +159,7 @@ reclass <- function(xx) {
 
 ## Apply to all rasters
 rasters_rshifter = lapply(rasters_w_patches, reclass)
-plot(rasters_rshifter[['2005']], col=c("white", "gray", "darkgreen", "orange"))
+plot(rasters_rshifter[['2005']], col=c("white", "gray", "darkgreen"))
 r2005 = rasters_rshifter[['2005']]
 
 #### Species distribution --------
@@ -224,7 +224,11 @@ plot(patch_w_glt_2005, col=c("white","gray","darkgreen"))
 ### Use INT2S = signed 16-bit integer
 
 # Binary rasters as ASCII file
-output_dir = here("data", "rangeshifter", "tests")
+output_dir = here("data", 
+                  "rangeshifter", 
+                  "tests", 
+                  "test_disp_1", 
+                  "Inputs")
 
 # Landscape
 plot(r2005)
