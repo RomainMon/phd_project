@@ -14,6 +14,7 @@ library(Makurhini)
 library(sf)
 library(vectormetrics)
 library(progressr)
+library(RColorBrewer)
 # remotes::install_github("r-spatialecology/vectormetrics")
 
 ### Import rasters -------
@@ -67,18 +68,28 @@ regions_sf = sf::st_as_sf(regions)
 plot(rasters_reclass[[36]], col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e"))
 plot(sf::st_geometry(regions_sf), pch=1, col="yellow", add=TRUE)
 
-# UMMPs
+# Import UMMPs
 ummps = sf::st_read(here("data", "geo", "AMLD", "SIG-LGCI_UMMP-13", "SIG-LGCI_UMMP-13.shp"))
 plot(rasters_reclass[[36]], col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e"))
 plot(sf::st_geometry(ummps), col="yellow", add=TRUE)
 
-# Import bounding box
-# BBOX
-bbox = terra::vect(here("data", "geo", "BBOX", "sampling_units_bbox_31983.shp"))
-bbox_sf = sf::st_as_sf(bbox)
-# Min bbox
-minbbox = terra::vect(here("data", "geo", "BBOX", "sampling_units_minbbox_buffer5km.shp"))
-minbbox_sf = sf::st_as_sf(minbbox)
+# Import census
+census = terra::vect(here("data", "glt", "JDietz", "glt_distrib_2013_2018_2022.shp"))
+census = terra::project(census, "EPSG:31983")
+census_sf = sf::st_as_sf(census)
+plot(rasters_reclass[[36]], col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e"))
+plot(sf::st_geometry(census_sf), pch=1, col="coral", add=TRUE)
+
+# Occupied patches (following census: Ruiz-Miranda et al. 2019, Dietz et al. 2024)
+census_occ = census_sf %>%
+  dplyr::filter(
+    Detect2013 == "P" |
+      Detect2018 == "P" |
+      Detect2022 == "P"
+  )
+plot(rasters_reclass[[36]], col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e"))
+plot(sf::st_geometry(census_sf), pch=1, col="coral", add=TRUE)
+plot(sf::st_geometry(census_occ), pch=1, col="darkslategray1", add=TRUE)
 
 # Import pipelines
 pipelines = terra::vect(here("data", "geo", "OSM", "work", "Pipelines_OSM_clean.shp"))
@@ -145,7 +156,6 @@ apply_linear_feature_single = function(r, yr, feature, buffer_width, value, use_
   return(r)  # single SpatRaster
 }
 
-##### Apply linear features on top of raster layers -----
 # First, we distinguish roads based on their nature (primary, secondary, tertiary)
 roads_sf %>% sf::st_drop_geometry() %>%  dplyr::select(highway) %>% dplyr::group_by(highway) %>% dplyr::summarise(n=n())
 highway = roads_sf %>% dplyr::filter(highway == "motorway" | highway == "trunk" | highway == "primary") %>% terra::vect()
@@ -154,7 +164,7 @@ plot(highway)
 # Second, we apply linear features
 # Main roads take the value "artificial" (6)
 # WARNING: at this resolution (30 x 30 m), a minimum of 20 m is needed for linear features to create continuous linear features (below, some cells are not overwritten, and some raster cells are still connected through their vertices)
-rasters_lf = purrr::map2(rasters_mspa, years, function(r, yr) {
+rasters_lf = purrr::map2(rasters_reclass, years, function(r, yr) {
   message("  - Applying linear features for year ", yr)
   r_lin = r
   r_lin = apply_linear_feature_single(r_lin, yr, pipelines, buffer_width = 20, value = 4, use_date = TRUE)
@@ -285,159 +295,306 @@ rasters_lf = purrr::map2(rasters_mspa, years, function(r, yr) {
 #   dplyr::mutate(area = round(area,2))
 
 ##### Loop -----
-# Patch area, connectivity (centroid + resistance-based)
-compute_patch_metrics_tot = function(r, 
-                                 year,
-                                 sample_loc, 
-                                 buf_around_loc, 
-                                 minbbox,
-                                 buffer_patch){
-  
-  message("Processing year: ", year)
-  
-  # PATCH SELECTION
-  
-  forest_patches = landscapemetrics::get_patches(r, class = 1, directions = 8)
-  patches_sf = sf::st_as_sf(as.polygons(forest_patches[[1]][[1]], dissolve = TRUE))
-  
-  patch_in = patches_sf[sf::st_intersects(patches_sf, sample_loc, sparse=FALSE) %>% apply(1, any),]
-  patch_near = patches_sf[sf::st_intersects(patches_sf, buf_around_loc, sparse=FALSE) %>% apply(1, any),]
-  
-  patches_final = dplyr::bind_rows(patch_in, patch_near) %>% 
-    dplyr::distinct(geometry, .keep_all=TRUE)
-  
-  # LANDSCAPE METRICS
-  mask_rast = terra::rasterize(patches_final, r, field = 1)
-  patch_lm = landscapemetrics::spatialize_lsm(mask_rast,
-                                              what = c("lsm_p_area"),
-                                              directions=8)
-  
-  patch_area = sf::st_as_sf(terra::extract(patch_lm$layer_1$lsm_p_area, patches_final, fun=unique, bind=TRUE)) %>% dplyr::rename(area=value)
+# # Patch area, connectivity (centroid + resistance-based)
+# compute_patch_metrics_tot = function(r, 
+#                                  year,
+#                                  sample_loc, 
+#                                  buf_around_loc, 
+#                                  minbbox,
+#                                  buffer_patch){
+#   
+#   message("Processing year: ", year)
+#   
+#   # PATCH SELECTION
+#   
+#   forest_patches = landscapemetrics::get_patches(r, class = 1, directions = 8)
+#   patches_sf = sf::st_as_sf(as.polygons(forest_patches[[1]][[1]], dissolve = TRUE))
+#   
+#   patch_in = patches_sf[sf::st_intersects(patches_sf, sample_loc, sparse=FALSE) %>% apply(1, any),]
+#   patch_near = patches_sf[sf::st_intersects(patches_sf, buf_around_loc, sparse=FALSE) %>% apply(1, any),]
+#   
+#   patches_final = dplyr::bind_rows(patch_in, patch_near) %>% 
+#     dplyr::distinct(geometry, .keep_all=TRUE)
+#   
+#   # LANDSCAPE METRICS
+#   mask_rast = terra::rasterize(patches_final, r, field = 1)
+#   patch_lm = landscapemetrics::spatialize_lsm(mask_rast,
+#                                               what = c("lsm_p_area"),
+#                                               directions=8)
+#   
+#   patch_area = sf::st_as_sf(terra::extract(patch_lm$layer_1$lsm_p_area, patches_final, fun=unique, bind=TRUE)) %>% dplyr::rename(area=value)
+# 
+#   # CONNECTIVITY
+#   PC_centroid = MK_dPCIIC(nodes = patches_final,
+#                           distance = list(type="centroid"),
+#                           metric = "PC",
+#                           probability = 0.05,
+#                           distance_thresholds = 2000)
+#   
+#   # buffer patches 1 km
+#   patches_buf1km = terra::buffer(terra::vect(patches_final), width=1000) %>% terra::aggregate()
+#   
+#   # extend bbox
+#   minbbox_expanded = terra::union(minbbox, patches_buf1km)
+#   
+#   # crop r
+#   r_crop = terra::crop(r, minbbox_expanded) %>% terra::mask(minbbox_expanded)
+#   
+#   resist1 = terra::ifel(r_crop==1, 1,
+#                         terra::ifel(r_crop==33,1,100))
+#   
+#   PC_LC1 = MK_dPCIIC(nodes=patches_final,
+#                      distance=list(type="least-cost", resistance=resist1),
+#                      metric="PC",
+#                      probability=0.05,
+#                      distance_thresholds=2000)
+#   
+#   PCc2000 = rename_pc(PC_centroid, "PCc2km_")
+#   PCrm2000 = rename_pc(PC_LC1, "PCrm2km_")
+# 
+#   patches_metrics_final =
+#     patches_final %>%
+#     dplyr::left_join(st_drop_geometry(patch_area), by="lyr.1") %>%
+#     dplyr::left_join(st_drop_geometry(PCc2000), by="lyr.1") %>%
+#     dplyr::left_join(st_drop_geometry(PCrm2000), by="lyr.1") %>% 
+#     dplyr::mutate(area = round(area,2), year = year)
+#   
+#   return(patches_metrics_final)
+# }
+# 
+# # Parameters
+# regions_buffer = sf::st_buffer(regions_sf, 500)
+# minbbox2000 = terra::buffer(minbbox, width=2000)
+# # Loop
+# all_years_metrics = purrr::map2(rasters_dilate, years,
+#                                 ~ compute_patch_metrics_tot(r = .x,
+#                                                         year = .y,
+#                                                         sample_loc = regions_sf,
+#                                                         buf_around_loc = regions_buffer,
+#                                                         minbbox = minbbox2000,
+#                                                         buffer_patch = 500))
 
-  # CONNECTIVITY
-  PC_centroid = MK_dPCIIC(nodes = patches_final,
-                          distance = list(type="centroid"),
-                          metric = "PC",
-                          probability = 0.05,
-                          distance_thresholds = 2000)
-  
-  # buffer patches 1 km
-  patches_buf1km = terra::buffer(terra::vect(patches_final), width=1000) %>% terra::aggregate()
-  
-  # extend bbox
-  minbbox_expanded = terra::union(minbbox, patches_buf1km)
-  
-  # crop r
-  r_crop = terra::crop(r, minbbox_expanded) %>% terra::mask(minbbox_expanded)
-  
-  resist1 = terra::ifel(r_crop==1, 1,
-                        terra::ifel(r_crop==33,1,100))
-  
-  PC_LC1 = MK_dPCIIC(nodes=patches_final,
-                     distance=list(type="least-cost", resistance=resist1),
-                     metric="PC",
-                     probability=0.05,
-                     distance_thresholds=2000)
-  
-  PCc2000 = rename_pc(PC_centroid, "PCc2km_")
-  PCrm2000 = rename_pc(PC_LC1, "PCrm2km_")
-
-  patches_metrics_final =
-    patches_final %>%
-    dplyr::left_join(st_drop_geometry(patch_area), by="lyr.1") %>%
-    dplyr::left_join(st_drop_geometry(PCc2000), by="lyr.1") %>%
-    dplyr::left_join(st_drop_geometry(PCrm2000), by="lyr.1") %>% 
-    dplyr::mutate(area = round(area,2), year = year)
-  
-  return(patches_metrics_final)
-}
-
-# Parameters
-regions_buffer = sf::st_buffer(regions_sf, 500)
-minbbox2000 = terra::buffer(minbbox, width=2000)
-# Loop
-all_years_metrics = purrr::map2(rasters_dilate, years,
-                                ~ compute_patch_metrics_tot(r = .x,
-                                                        year = .y,
-                                                        sample_loc = regions_sf,
-                                                        buf_around_loc = regions_buffer,
-                                                        minbbox = minbbox2000,
-                                                        buffer_patch = 500))
 
 ### OPTION 2 - Vector metrics -----
 
-#### Delineate patches ------
+#### Get patches ------
 
 # patches = core forest only, class = 1 (i.e., 2 fragments connected by a corridor are considered as 2 patches)
 forest_patches = purrr::map(rasters_lf, ~ landscapemetrics::get_patches(.x, class = 1, directions = 8))
 patches_sf = purrr::map(forest_patches, ~ sf::st_as_sf(terra::as.polygons(.x[[1]][[1]], dissolve = TRUE)))
 
 # visualize
-plot(rasters_lf[[36]], col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e", "orange"))
+plot(rasters_lf[[36]], col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e"))
 plot(sf::st_geometry(patches_sf[[36]]), col="darkgreen", add=TRUE)
 
-#### Clip patches with UMMPs ------
-# We want to split some patches that intersect several UMMPs
-# Select patches intersecting several UMMPs
-# Clip to create multipolygons
+#### Dissolve by UMMP ------
+# Clip forest patches by UMMPs
+# Dissolve all intersecting patches inside each UMMP
+# Result: 1 (or more) polygons per UMMP representing “core managed patch”
 
-aldeia = ummps %>% dplyr::filter(UMMPs == "Aldeia I")
-pirineus = ummps %>% dplyr::filter(UMMPs == "Pirineus")
-
-split_patch = function(patches, aldeia, pirineus) {
-  
-  ranges = sf::st_union(aldeia, pirineus)
-  
-  idx = which(
-    lengths(sf::st_intersects(patches, aldeia)) > 0 &
-      lengths(sf::st_intersects(patches, pirineus)) > 0
-  )
-  
-  if (length(idx) != 1)
-    stop("Expected exactly one patch intersecting both ranges")
-  
-  target_patch = patches[idx, ]
-  
-  patch_aldeia = sf::st_intersection(target_patch, aldeia) |>
-    dplyr::mutate(part = "aldeia")
-  
-  patch_pirineus = sf::st_intersection(target_patch, pirineus) |>
-    dplyr::mutate(part = "pirineus")
-  
-  patch_rest = sf::st_difference(target_patch, ranges) |>
-    sf::st_as_sf() %>% 
-    dplyr::mutate(part = "rest")
-  
-  dplyr::bind_rows(
-    patches[-idx, ],   # keep all other patches
-    patch_aldeia,
-    patch_pirineus,
-    patch_rest
-  )
-}
-
-patches_split = purrr::map(
-  patches_sf,
-  split_patch,
-  aldeia = aldeia,
-  pirineus = pirineus
-)
+# First, disjoint UMMPs (some are overlapping)
+# i.e., cut so that resulting output = patches without overlaps
+ummp_split = sf::st_intersection(ummps) %>% dplyr::filter(n.overlaps < 2)
 
 # Check
-plot(sf::st_geometry(patches_split[[36]]),
-     col = ifelse(
-       is.na(patches_split[[36]]$part),
-       "darkgreen",
-       c(aldeia = "red",
-         pirineus = "blue",
-         rest = "grey")[patches_split[[36]]$part]
-     ))
-
-# Remove columns
-patches_split = purrr::map(
-  patches_split,
-  ~ dplyr::select(.x, lyr.1)
+pt = st_sfc(
+  sf::st_point(c(758881.6, 7499332.7)),
+  crs = st_crs(ummp_split)
 )
+buf = st_buffer(pt, dist = 500)
+r_crop = crop(rasters_reclass[[36]], buf)
+plot(
+  r_crop,
+  col = c("#32a65e", "#FFFFB2"),
+)
+
+plot(
+  st_geometry(ummp_split),
+  col = adjustcolor("grey", alpha.f = 0.6),
+  border = NA,
+  add = TRUE
+)
+plot(pt, col = "red", pch = 20, add = TRUE)
+
+
+# Clip with UMMPs
+with_progress({
+  p = progressor(steps = length(patches_sf))
+  
+  patches_ummps = lapply(seq_along(patches_sf), function(i) {
+    
+    p()
+    
+    patches = sf::st_make_valid(patches_sf[[i]])
+    
+    # Patches clipped by UMMPs
+    inside = sf::st_intersection(
+      patches,
+      ummp_split
+    )
+    
+    # Dissolve by UMMPs
+    inside_dissolved = inside %>%
+      dplyr::group_by(UMMPs) %>%
+      dplyr::summarise(
+        geometry = sf::st_union(geometry),
+        .groups = "drop"
+      )
+    
+    # Patches outside UMMPs
+    outside = sf::st_difference(
+      patches,
+      sf::st_union(ummp_split)
+    )
+    
+    # Add UMMP column
+    outside$UMMPs = NA
+    
+    # Result = combined
+    combined = dplyr::bind_rows(
+      inside_dissolved,
+      outside
+    )
+    combined
+  })
+})
+
+### Verification
+# Extract combined result
+x = patches_ummps[[36]]
+
+# Split into inside vs outside
+inside = x[!is.na(x$UMMPs), ]
+outside = x[is.na(x$UMMPs), ]
+
+# Create consistent color palette for UMMPs
+ummp_ids = sort(unique(inside$UMMPs))
+ummp_cols = setNames(
+  rainbow(length(ummp_ids), alpha = 0.7),
+  ummp_ids
+)
+
+# Plot base raster
+plot(
+  rasters_lf[[36]],
+  col = c("#32a65e", "#ad975a", "#519799", "#FFFFB2",
+          "#0000FF", "#d4271e")
+)
+
+# 1. Plot outside fragments in gray
+plot(
+  st_geometry(outside),
+  add = TRUE,
+  col = "grey80",
+  border = "grey50",
+  lwd = 0.5
+)
+
+# 2. Plot UMMP fragments colored by UMMP
+plot(
+  st_geometry(inside),
+  add = TRUE,
+  col = ummp_cols[inside$UMMPs],
+  border = "black",
+  lwd = 0.5
+)
+
+
+#### Select relevant patches ------
+# 1) Reconnect isolated forest pieces falling outside UMMPs
+# TO COMPLETE
+
+
+
+
+# 2) Keep patches occupied by GLTs (regions, census) OR intersecting UMMPs
+# Filter
+patch_in = purrr::map(
+  patches_dilat,
+  ~ {
+    in_region = sf::st_intersects(.x, regions_sf, sparse = FALSE) %>%
+      apply(1, any)
+    
+    in_ummp = sf::st_intersects(.x, ummps, sparse = FALSE) %>%
+      apply(1, any)
+    
+    in_census = sf::st_intersects(.x, census_occ, sparse = FALSE) %>%
+      apply(1, any)
+    
+    .x[in_region | in_ummp | in_census, ]
+  }
+)
+
+# 3) Keep patches near GLT regions
+regions_buffer = sf::st_buffer(regions_sf, 2000) # Buffer size in m
+patch_near = purrr::map(
+  patches_dilat, ~ .x[sf::st_intersects(.x, regions_buffer, sparse = FALSE) %>% 
+                        apply(1, any),])
+
+# 4) Combine patches
+patches_all = purrr::map2(
+  patch_in,
+  patch_near,
+  ~ dplyr::bind_rows(.x, .y) %>%
+    dplyr::distinct(geometry, .keep_all = TRUE) %>%
+    dplyr::mutate(area_ha = as.numeric(sf::st_area(.)) / 10000)
+)
+
+# 4) Remove very small patches (stepping stones)
+smallest_patches_regions = purrr::map2_dfr(
+  patches_all,
+  years,
+  ~ {
+    
+    intersects_region = sf::st_intersects(
+      .x,
+      regions_sf,
+      sparse = FALSE
+    ) %>%
+      apply(1, any)
+    
+    .x %>%
+      dplyr::filter(intersects_region) %>%
+      sf::st_drop_geometry() %>%
+      dplyr::select(patch_id, area_ha) %>%
+      dplyr::arrange(area_ha) %>%
+      dplyr::mutate(year = .y)
+    
+  }
+)
+
+# Small patches across years
+smallest_patches_regions %>% 
+  dplyr::arrange(area_ha) %>% 
+  print(n=50)
+
+# Distinct patches names < 5 ha
+smallest_patches_regions %>%
+  dplyr::filter(area_ha < 5) %>%
+  dplyr::distinct(patch_id) %>%
+  dplyr::arrange(patch_id)
+
+# Remove small patches (while keeping tiny occupied patches)
+patches_final = purrr::map(
+  patches_all,
+  ~ .x %>%
+    dplyr::filter(
+      area_ha >= 5 |
+        patch_id %in% c(
+          "Imbau_I_1",
+          "Nova_Esperanca_1",
+          "Poco_das_Antas_1"
+        )
+    )
+)
+
+# Plot
+plot(rasters_lf[[36]], col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e", "orange"))
+plot(st_geometry(patches_dilat[[36]]), col="grey80", border=NA, add=TRUE) # Patches (without borders)
+plot(st_geometry(patches_final[[36]]), add=TRUE, col="darkgreen", border=NA) # Kept patches
+plot(st_geometry(regions_sf), add=TRUE, col="yellow", lwd=2) # GLT groups
+
+
 
 #### Patch name --------
 # Below, we assign patch id based on group location names (RegionsNames)
@@ -570,7 +727,8 @@ purrr::map2_dfr(
     dplyr::select(patch_id) %>%
     dplyr::mutate(year = .y)
 ) %>%
-  dplyr::count(patch_id)
+  dplyr::count(patch_id) %>% 
+  dplyr::arrange(dplyr::desc(n))
 
 # Uniqueness across years (should be 0)
 purrr::map2_dfr(
@@ -600,79 +758,45 @@ patches_names = purrr::map(
 # Dilatation-erosion on all the raster (as above) may result in connecting close but disconnected patches (see: Boa Esperanca, two close patches but actually connected by a CORRIDOR)
 # Hence, we apply dilatation-erosion afterwards
 # E.g., without dilatation-erosion, Afetiva remains disconnected from its corridor...
+targets = c("Afetiva", "Rio_Vermelho")
+
 patches_dilat = purrr::map(
   patches_names,
   ~ {
-    ## Selected patch to dilate
-    afetiva = .x %>%
-      dplyr::filter(patch_id == "Afetiva") %>%
-      sf::st_buffer(30)
     
-    ## Intersecting patches
-    touching = .x[
-      sf::st_intersects(.x, afetiva, sparse = FALSE)[,1],
+    x = .x
+    
+    ## 1. Select target patches
+    target = x %>%
+      dplyr::filter(patch_id %in% targets) %>%
+      sf::st_buffer(50)
+    
+    if (nrow(target) == 0) return(x)
+    
+    ## 2. Find all patches touching ANY target
+    touching = x[
+      sf::st_intersects(x, target, sparse = FALSE)[, 1],
     ]
     
-    ## Merge all touching patches
-    merged = touching %>%
+    ## 3. Merge them all into one geometry
+    merged_geom = touching %>%
       sf::st_union() %>%
       sf::st_as_sf()
     
-    ## Keep Afetiva attributes
-    merged_patch = afetiva[1, ]
-    sf::st_geometry(merged_patch) = sf::st_geometry(merged)
+    ## 4. Keep attributes from first target (or customise)
+    merged_patch = target[1, ]
+    sf::st_geometry(merged_patch) = sf::st_geometry(merged_geom)
     
-    ## Remove old patches
-    remaining = .x[
-      !sf::st_intersects(.x, afetiva, sparse = FALSE)[,1],
+    ## 5. Remove original affected patches
+    remaining = x[
+      !sf::st_intersects(x, target, sparse = FALSE)[, 1],
     ]
     
-    ## Recombine
-    dplyr::bind_rows(
-      remaining,
-      merged_patch
-    ) %>%
+    ## 6. Recombine
+    dplyr::bind_rows(remaining, merged_patch) %>%
       sf::st_make_valid()
   }
 )
-
-#### Filter patches ------
-# patches occupied by GLTs OR intersecting UMMPs
-patch_in = purrr::map(
-  patches_dilat,
-  ~ {
-    in_region = sf::st_intersects(.x, regions_sf, sparse = FALSE) %>%
-      apply(1, any)
-    
-    in_ummp = sf::st_intersects(.x, ummps, sparse = FALSE) %>%
-      apply(1, any)
-    
-    .x[in_region | in_ummp, ]
-  }
-)
-
-# patches near GLT regions
-regions_buffer = sf::st_buffer(regions_sf, 2500) # Buffer size in m
-patch_near = purrr::map(
-  patches_dilat, ~ .x[sf::st_intersects(.x, regions_buffer, sparse = FALSE) %>% 
-                        apply(1, any),])
-
-# kept patches are a combination of intersecting/near patches but without small patches (stepping stones)
-patches_final = purrr::map2(
-  patch_in,
-  patch_near,
-  ~ dplyr::bind_rows(.x, .y) %>%
-    dplyr::distinct(geometry, .keep_all = TRUE) %>%
-    dplyr::mutate(area_ha = as.numeric(sf::st_area(.)) / 10000) %>%
-    dplyr::filter(area_ha >= 2)
-)
-
-# Plot
-plot(rasters_lf[[36]], col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e", "orange"))
-plot(st_geometry(patches_dilat[[36]]), col="grey80", border=NA, add=TRUE) # Patches (without borders)
-plot(st_geometry(patches_final[[36]]), add=TRUE, col="darkgreen", border=NA) # Kept patches
-plot(st_geometry(regions_sf), add=TRUE, col="yellow", lwd=2) # GLT groups
-
 
 #### Patch metrics --------
 patches_metrics = progressr::with_progress({
@@ -688,17 +812,40 @@ patches_metrics = progressr::with_progress({
         dplyr::rename(shape = value) %>%
         dplyr::select(patch_id, shape)
       
+      enn_tbl = vm_p_enn(.x, patch_col = "patch_id") %>% 
+        dplyr::rename(patch_id = id) %>%
+        dplyr::rename(enn = value) %>%
+        dplyr::select(patch_id, enn)
+      
       .x %>%
         dplyr::left_join(shape_tbl, by = "patch_id") %>%
+        dplyr::left_join(enn_tbl, by = "patch_id") %>%
         dplyr::mutate(
           area_ha = round(area_ha, 2),
-          shape = round(shape, 2)
+          shape = round(shape, 2),
+          enn = round(enn, 2),
         )
     }
   )
 })
 
-#### Patch connectivity -------
+# Reorder the table
+patches_metrics = purrr::map(
+  patches_metrics,
+  ~ .x %>%
+    dplyr::select(
+      patch_id,
+      lyr.1,
+      area_ha,
+      shape,
+      enn,
+      geometry
+    )
+)
+
+#### Patch connectivity (Makurhini) -------
+# See: Godínez-Gómez, O., Correa-Ayram, C., Goicolea, T. & Saura, S. Makurhini: An R package for comprehensive analysis of landscape fragmentation and connectivity. Environmental Modelling & Software 201, 106981 (2026).
+
 ### Example
 patches2024 = patches_metrics[[36]]
 lu2024 = rasters_mspa[[36]]
@@ -790,7 +937,7 @@ purrr::walk2(
 )
 
 # Patch metrics
-base_path = here("outputs", "data", "dispersal")
+base_path = here("outputs", "data", "patchmetrics")
 purrr::walk2(
   patches_metrics,
   years,

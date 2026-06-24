@@ -58,7 +58,7 @@ library(readxl)
 
 ### Director path ----
 
-dirpath = "data/rangeshifter/tests/test_disp_3/" # UPDATE HERE !!!
+dirpath = "data/rangeshifter/tests/test_disp_4/" # UPDATE HERE !!!
 ## Create the RS folder structure, if it doesn’t yet exist
 # dir.create(file.path(dirpath, "Inputs"), showWarnings = TRUE)
 # dir.create(file.path(dirpath, "Outputs"), showWarnings = TRUE)
@@ -139,7 +139,7 @@ real_data %>%
 patch_corres_id = readr::read_csv(here("data", 
                                        "rangeshifter", 
                                        "tests", 
-                                       "test_disp_3", # UPDATE HERE
+                                       "test_disp_4", # UPDATE HERE
                                        "Inputs", 
                                        "patch_corres_id_2005.csv"),
                                 col_types = readr::cols(unique_id = readr::col_integer()))
@@ -148,12 +148,12 @@ patch_corres_id = readr::read_csv(here("data",
 metadata = read_excel(here("data", 
                            "rangeshifter", 
                            "tests", 
-                           "test_disp_3",  # UPDATE HERE !!!
+                           "test_disp_4",  # UPDATE HERE !!!
                            "test_parameters.xlsx"),
                       sheet="test1")
 unique(metadata$DensDep)
 unique(metadata$Emig_prob)
-unique(metadata$IndsHaCell)
+unique(metadata$PR)
 
 #### Loop -----
 for(i in 1:nrow(metadata)) {
@@ -328,7 +328,7 @@ pop_files = list.files(
   here("data",
        "rangeshifter",
        "tests",
-       "test_disp_2", # UPDATE HERE
+       "test_disp_4", # UPDATE HERE
        "Outputs"),
   pattern = "_Pop\\.txt$",
   full.names = TRUE
@@ -367,7 +367,7 @@ pop_total = pop_all %>%
 pop_time = pop_total %>%
   dplyr::group_by(DensDep, Emig_prob, PR, Year) %>%
   dplyr::summarise(MeanN = mean(NInd),.groups = "drop")
-ggplot(pop_time, aes(Year, MeanN, colour = factor(DensDep))) +
+ggplot(pop_time, aes(Year, MeanN, colour = factor(DensDep))) + # Parameter that varies as colour
   geom_line(linewidth = 1) +
   # Faceting
   facet_grid(
@@ -385,18 +385,17 @@ ggplot(pop_time, aes(Year, MeanN, colour = factor(DensDep))) +
   annotate("text", x = 0,  y = 1600, label = "2005", vjust = -1) +
   annotate("text", x = 17, y = 4869, label = "2022", vjust = -1) +
   theme_bw() +
-  labs(colour = "DensDep",
-       y = "Mean population size")
+  labs(y = "Mean population size")
 
 ## Export plot
 png(here("data",
          "rangeshifter",
          "tests",
-         "test_disp_2", # UPDATE HERE
+         "test_disp_4", # UPDATE HERE
          "plot",
          "evol_pop.png"), # UPDATE HERE
-    width = 6000, height = 2000, res = 300, type="cairo")
-ggplot(pop_time, aes(Year, MeanN, colour = factor(DensDep))) +
+    width = 3000, height = 3000, res = 300, type="cairo")
+ggplot(pop_time, aes(Year, MeanN, colour = factor(DensDep))) + # Parameter that varies as colour
   geom_line(linewidth = 1) +
   # Faceting
   facet_grid(
@@ -414,8 +413,7 @@ ggplot(pop_time, aes(Year, MeanN, colour = factor(DensDep))) +
   annotate("text", x = 0,  y = 1600, label = "2005", vjust = -1) +
   annotate("text", x = 17, y = 4869, label = "2022", vjust = -1) +
   theme_bw() +
-  labs(colour = "DensDep",
-       y = "Mean population size")
+  labs(y = "Mean population size")
 dev.off()
 
 ##### Comparison with long-term data -----
@@ -425,10 +423,10 @@ initial_popsize = 1600 # Adjust
 final_popsize = 4869 # Adjust
 initial_pop = pop_time %>%
   dplyr::filter(Year == min(pop_time$Year)) %>%
-  dplyr::filter(abs(MeanN - initial_popsize) < 30)  # Adjust tolerance
+  dplyr::filter(abs(MeanN - initial_popsize) < 20)  # Adjust tolerance
 final_pop = pop_time %>%
   dplyr::filter(Year == 17) %>% # 2022
-  dplyr::filter(abs(MeanN - final_popsize) < 1500)  # Adjust tolerance
+  dplyr::filter(abs(MeanN - final_popsize) < 250)  # Adjust tolerance
 
 # Get the parameter combinations for initial and final populations
 initial_params = initial_pop %>%
@@ -468,7 +466,7 @@ ggplot(fit_score, aes(x = Emig_prob, y = PR, fill = Total_error)) +
 png(here("data",
          "rangeshifter",
          "tests",
-         "test_disp_2", # UPDATE HERE
+         "test_disp_4", # UPDATE HERE
          "plot",
          "heatmap.png"),
     width = 2000, height = 1000, res = 300, type="cairo")
@@ -509,7 +507,7 @@ ggplot(fit_score, aes(x = Emig_prob,
 # Rank the best options
 fit_score %>%
   dplyr::arrange(RMSE) %>%
-  dplyr::slice(1:5)
+  dplyr::slice(1:10)
 
 
 ##### Patch abundance -----
@@ -537,8 +535,8 @@ pop_patch = pop_patch %>%
 # Select parameters and years
 sim_sel = pop_patch %>%
   dplyr::filter(
-    DensDep == 0.08,
-    Emig_prob == 0.01,
+    DensDep == 0.06,
+    Emig_prob == 0.02,
     PR == 5,
     Year %in% c(0, 8, 13, 17) # Years of interest
   )
@@ -599,7 +597,7 @@ cor(comparison$SimN, comparison$RealN)
 png(here("data",
          "rangeshifter",
          "tests",
-         "test_disp_2", # UPDATE HERE
+         "test_disp_4", # UPDATE HERE
          "plot",
          "corr_patch_simvsreal.png"),
     width = 2000, height = 1000, res = 300, type="cairo")
@@ -638,7 +636,7 @@ comparison_long = comparison %>%
 png(here("data",
          "rangeshifter",
          "tests",
-         "test_disp_2", # UPDATE HERE
+         "test_disp_4", # UPDATE HERE
          "plot",
          "corr_patch_simvsreal2.png"),
     width = 2000, height = 1000, res = 300, type="cairo")
