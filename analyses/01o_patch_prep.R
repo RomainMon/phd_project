@@ -453,6 +453,83 @@ patches_dilat = purrr::map(
 plot(rasters_lf[[36]], col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e", "orange"))
 plot(sf::st_geometry(patches_dilat[[36]]), col="darkgreen", add=TRUE)
 
+#### Patch selection ------
+# 1) Filter patches occupied by GLTs (regions, census)
+# Filter
+patch_in = purrr::map(
+  patches_dilat,
+  ~ {
+    in_region = sf::st_intersects(.x, regions_sf, sparse = FALSE) %>%
+      apply(1, any)
+    
+    in_census = sf::st_intersects(.x, census_occ, sparse = FALSE) %>%
+      apply(1, any)
+    
+    .x[in_region | in_census, ]
+  }
+)
+
+# 2) Keep patches near GLT regions
+regions_buffer = sf::st_buffer(regions_sf, 2000) # Buffer size in m
+patch_near = purrr::map(
+  patches_dilat, ~ .x[sf::st_intersects(.x, regions_buffer, sparse = FALSE) %>%
+                        apply(1, any),])
+
+# 3) Remove very small patches (stepping stones)
+smallest_patches_regions = purrr::map2_dfr(
+  patches_in,
+  years,
+  ~ {
+    
+    intersects_region = sf::st_intersects(
+      .x,
+      regions_sf,
+      sparse = FALSE
+    ) %>%
+      apply(1, any)
+    
+    .x %>%
+      dplyr::filter(intersects_region) %>%
+      sf::st_drop_geometry() %>%
+      dplyr::select(patch_id, area_ha) %>%
+      dplyr::arrange(area_ha) %>%
+      dplyr::mutate(year = .y)
+    
+  }
+)
+
+# Small patches across years
+smallest_patches_regions %>%
+  dplyr::arrange(area_ha) %>%
+  print(n=50)
+
+# Distinct patches names < 5 ha
+smallest_patches_regions %>%
+  dplyr::filter(area_ha < 5) %>%
+  dplyr::distinct(patch_id) %>%
+  dplyr::arrange(patch_id)
+
+# Remove small patches (while keeping tiny occupied patches)
+patches_final = purrr::map(
+  patches_all,
+  ~ .x %>%
+    dplyr::filter(
+      area_ha >= 5 |
+        patch_id %in% c(
+          "Imbau_I_1",
+          "Nova_Esperanca_1",
+          "Poco_das_Antas_1"
+        )
+    )
+)
+
+# Plot
+plot(rasters_lf[[36]], col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e"))
+plot(st_geometry(patches_sf[[36]]), col="grey80", border=NA, add=TRUE) # Patches (without borders)
+plot(st_geometry(patches_final[[36]]), add=TRUE, col="darkgreen", border=NA) # Kept patches
+plot(st_geometry(regions_sf), add=TRUE, col="yellow", lwd=2) # GLT groups
+
+
 #### Export patches ----------
 base_path = here("outputs", "data", "patches")
 purrr::walk2(
@@ -532,87 +609,145 @@ plot(r_crop, col = c("#32a65e", "#FFFFB2"))
 plot(st_geometry(ummp_split), col = adjustcolor("grey", alpha.f = 0.6), add = TRUE)
 plot(pt, col = "red", pch = 20, add = TRUE)
 
-# Clip with UMMPs
+### Clip with UMMPs
 with_progress({
   
   p = progressr::progressor(steps = length(patches_sf))
   
   patches_ummps = lapply(seq_along(patches_sf), function(i) {
     
-    p()  # <- updates progress
+    p()
     
     patches = sf::st_make_valid(patches_sf[[i]])
     
     # 1. Clip patches by UMMPs
-    
     inside = sf::st_intersection(patches, ummp_split)
     
     # 2. Dissolve by UMMP
-    
     inside_dissolved = inside %>%
       dplyr::group_by(UMMPs) %>%
       dplyr::summarise(
         geometry = sf::st_union(geometry),
-        .groups = "drop")
+        .groups = "drop"
+      )
     
     # 3. Outside fragments
+    outside = sf::st_difference(
+      patches,
+      sf::st_union(ummp_split)
+    ) %>%
+      sf::st_collection_extract("POLYGON") %>%
+      sf::st_cast("POLYGON")
     
-    outside = sf::st_difference(patches, sf::st_union(ummp_split))
-    outside$UMMPs = NA_character_ # Put NA in UMMPs column
+    outside$UMMPs = NA_character_
     
-    # 4. Reassign fragments based on topology AND area
-    # touching exactly one UMMP
-    # AND sufficiently small
-    
-    if (nrow(outside) > 0 && nrow(inside_dissolved) > 0) {
+    # Skip if nothing to assign
+    if (nrow(outside) == 0 || nrow(inside_dissolved) == 0) {
       
-      # Intersections between patches outside UMMPs and inside UMMPs
-      rel = sf::st_intersects(outside, inside_dissolved, sparse = TRUE)
+      combined = dplyr::bind_rows(inside_dissolved, outside)
       
-      single_match = lengths(rel) == 1
-      
-      # If outside fragments touch ONE UMMP ONLY
-      if (any(single_match)) {
-        
-        # Area of outside fragments
-        outside_area = as.numeric(sf::st_area(outside[single_match, ])/10000)
-        
-        # Index of touched UMMP patch
-        touched_idx = vapply(rel[single_match], function(x) x[1], integer(1))
-        
-        # Size criterion
-        small_enough = outside_area < 500 # Fragment size must be less than X ha
-        
-        rows_to_assign = which(single_match)[small_enough]
-        
-        outside$UMMPs[rows_to_assign] = inside_dissolved$UMMPs[touched_idx[small_enough]]
-      }
+      return(
+        combined %>%
+          dplyr::filter(!is.na(UMMPs)) %>%
+          dplyr::group_by(UMMPs) %>%
+          dplyr::summarise(
+            geometry = sf::st_union(geometry),
+            .groups = "drop"
+          ) %>%
+          dplyr::bind_rows(
+            combined %>% dplyr::filter(is.na(UMMPs))
+          )
+      )
     }
     
-    # 5. Merge everything
+    # 4. REASSIGNMENT
+    # 1) Tiny portions reaffected to UMMPs they touch (1 intersection)
+    # 2) For pieces touching several UMMPs: we buffer them and reaffect them to the UMMP they share the largest area with
+    # 3) Size criterion (small patches affected only because large patches are more likely to touch several UMMPs)
     
+    # PARAMETERS
+    buf_dist = 30  # meters
+    
+    # buffer once (CRITICAL for speed)
+    outside_buf = sf::st_buffer(outside, dist = buf_dist)
+    
+    frag_area = as.numeric(sf::st_area(outside_buf))
+    
+    # compute intersections in vectorised way (faster than per-fragment loops)
+    rel = sf::st_intersects(outside_buf, inside_dissolved, sparse = TRUE)
+    
+    has_match = lengths(rel) > 0
+    
+    if (any(has_match)) {
+      
+      frag_ids = which(has_match)
+      
+      candidates_list = lapply(frag_ids, function(i) {
+        
+        ummp_ids = rel[[i]]
+        
+        if (length(ummp_ids) == 0) return(NULL)
+        
+        buf_geom = outside_buf[i, ]
+        
+        # compute intersection areas with each UMMP
+        inter_areas = sapply(ummp_ids, function(j) {
+          
+          inter = sf::st_intersection(
+            buf_geom,
+            inside_dissolved[j, ]
+          )
+          
+          if (length(inter) == 0) return(0)
+          
+          as.numeric(sf::st_area(inter))
+        })
+        
+        data.frame(
+          frag_id = i,
+          ummp = inside_dissolved$UMMPs[ummp_ids],
+          share = inter_areas / frag_area[i]
+        )
+      })
+      
+      candidates = dplyr::bind_rows(candidates_list)
+      
+      # optional: size filter (your original rule)
+      frag_area_orig = as.numeric(sf::st_area(outside) / 10000)
+      
+      candidates$area_orig = frag_area_orig[candidates$frag_id]
+      
+      candidates = candidates %>%
+        dplyr::filter(area_orig < 500)
+      
+      # assign best UMMP by max buffered share
+      best_match = candidates %>%
+        dplyr::group_by(frag_id) %>%
+        dplyr::slice_max(order_by = share, n = 1, with_ties = FALSE) %>%
+        dplyr::ungroup()
+      
+      outside$UMMPs[best_match$frag_id] = best_match$ummp
+    }
+    
+    # 5. MERGE
     combined = dplyr::bind_rows(inside_dissolved, outside)
     
-    # 6. Final dissolve
-    # only for assigned UMMPs (keeping other fragments as several unities)
-    
+    # 6. FINAL DISSOLVE
     assigned = combined %>%
       dplyr::filter(!is.na(UMMPs)) %>%
       dplyr::group_by(UMMPs) %>%
       dplyr::summarise(
         geometry = sf::st_union(geometry),
-        .groups = "drop")
+        .groups = "drop"
+      )
     
     unassigned = combined %>%
       dplyr::filter(is.na(UMMPs))
     
-    combined_final = dplyr::bind_rows(assigned, unassigned)
-    
-    combined_final
-    
+    dplyr::bind_rows(assigned, unassigned)
   })
-  
 })
+
 
 ### Verification
 # Extract combined result
@@ -628,109 +763,306 @@ ummp_cols = setNames(rainbow(length(ummp_ids), alpha = 0.7),
                      ummp_ids)
 
 # Plot base raster
-plot(rasters_lf[[36]],col = c("#32a65e", "#ad975a", "#519799", "#FFFFB2","#0000FF", "#d4271e"))
+plot(rasters_lf[[36]], col = c("#32a65e", "#ad975a", "#519799", "#FFFFB2","#0000FF", "#d4271e"))
 
 # 1. Plot outside fragments in gray
-plot(st_geometry(outside),add = TRUE,col = "grey80",border = "grey50",lwd = 0.5)
+plot(st_geometry(outside), add = TRUE, col = "grey80", border = "grey50", lwd = 0.5)
 
 # 2. Plot UMMP fragments colored by UMMP
-plot(st_geometry(inside),add = TRUE,col = ummp_cols[inside$UMMPs],border = "black",lwd = 0.5)
+plot(st_geometry(inside), add = TRUE, col = ummp_cols[inside$UMMPs], border = "black", lwd = 0.5)
 
 
+#### Patch name ------
+# UMMP name was joined before
+# Add to this column a patch name based on regions (when UMMP is NA)
 
-#### Select relevant patches -----
-# to complete...
+# Regions file
+# -> We combine it with a small buffer for 4_Irmaos (the point is outside patches)
+regions_keep = regions_sf %>%
+  dplyr::filter(FragName2 != "4_Irmaos")
 
+# Special treatment for 4_Irmaos 
+irmaos = regions_sf %>%
+  dplyr::filter(FragName2 == "4_Irmaos") %>% 
+  sf::st_buffer(dist = 100) # Buffer
 
+# Selection layer
+selection_geom = dplyr::bind_rows(
+  regions_keep,
+  irmaos) %>% 
+  dplyr::select(FragName2)
 
-# 1) Keep patches occupied by GLTs (regions, census) OR intersecting UMMPs
-# Filter
-patch_in = purrr::map(
-  patches_dilat,
-  ~ {
-    in_region = sf::st_intersects(.x, regions_sf, sparse = FALSE) %>%
-      apply(1, any)
+with_progress({
+  
+  p = progressr::progressor(steps = length(patches_sf))
+  
+  patches_named = purrr::map(patches_ummps, function(x){
     
-    in_ummp = sf::st_intersects(.x, ummps, sparse = FALSE) %>%
-      apply(1, any)
+    p()
     
-    in_census = sf::st_intersects(.x, census_occ, sparse = FALSE) %>%
-      apply(1, any)
+    x = x %>%
+      dplyr::mutate(
+        area_ha = as.numeric(sf::st_area(.))/10000
+      )
     
-    .x[in_region | in_ummp | in_census, ]
-  }
-)
-
-# 2) Keep patches near GLT regions
-regions_buffer = sf::st_buffer(regions_sf, 2000) # Buffer size in m
-patch_near = purrr::map(
-  patches_dilat, ~ .x[sf::st_intersects(.x, regions_buffer, sparse = FALSE) %>% 
-                        apply(1, any),])
-
-# 3) Combine patches
-patches_all = purrr::map2(
-  patch_in,
-  patch_near,
-  ~ dplyr::bind_rows(.x, .y) %>%
-    dplyr::distinct(geometry, .keep_all = TRUE) %>%
-    dplyr::mutate(area_ha = as.numeric(sf::st_area(.)) / 10000)
-)
-
-# 4) Remove very small patches (stepping stones)
-smallest_patches_regions = purrr::map2_dfr(
-  patches_all,
-  years,
-  ~ {
+    x$patch_id = NA_character_
     
-    intersects_region = sf::st_intersects(
-      .x,
-      regions_sf,
-      sparse = FALSE
-    ) %>%
-      apply(1, any)
+    # 1. UMMP patches
+    x$patch_id[!is.na(x$UMMPs)] =
+      make.names(x$UMMPs[!is.na(x$UMMPs)])
     
-    .x %>%
-      dplyr::filter(intersects_region) %>%
-      sf::st_drop_geometry() %>%
-      dplyr::select(patch_id, area_ha) %>%
-      dplyr::arrange(area_ha) %>%
-      dplyr::mutate(year = .y)
+    # 2. Remaining patches:
+    # region names
+    orphan_idx = which(is.na(x$UMMPs))
     
-  }
-)
-
-# Small patches across years
-smallest_patches_regions %>% 
-  dplyr::arrange(area_ha) %>% 
-  print(n=50)
-
-# Distinct patches names < 5 ha
-smallest_patches_regions %>%
-  dplyr::filter(area_ha < 5) %>%
-  dplyr::distinct(patch_id) %>%
-  dplyr::arrange(patch_id)
-
-# Remove small patches (while keeping tiny occupied patches)
-patches_final = purrr::map(
-  patches_all,
-  ~ .x %>%
-    dplyr::filter(
-      area_ha >= 5 |
-        patch_id %in% c(
-          "Imbau_I_1",
-          "Nova_Esperanca_1",
-          "Poco_das_Antas_1"
+    if(length(orphan_idx) > 0){
+      
+      rel = sf::st_intersects(
+        x[orphan_idx, ],
+        selection_geom
+      )
+      
+      selection_geom = purrr::map_chr(
+        rel,
+        function(i){
+          
+          if(length(i) == 0){
+            return(NA_character_)
+          }
+          
+          selection_geom$FragName2[i[1]]
+          
+        }
+      )
+      
+      x$patch_id[orphan_idx] = selection_geom
+      
+    }
+    
+    # 3. Orphans without region
+    # Order by area before naming
+    still_na = which(is.na(x$patch_id))
+    
+    if(length(still_na) > 0){
+      
+      ord = still_na[
+        order(
+          x$area_ha[still_na],
+          decreasing = TRUE
         )
+      ]
+      
+      x$patch_id[ord] =
+        paste0(
+          "p_",
+          seq_along(ord)
+        )
+      
+    }
+    
+    # 4. Ensure uniqueness
+    x = x %>%
+      dplyr::group_by(patch_id) %>%
+      dplyr::mutate(
+        patch_id = dplyr::case_when(
+          dplyr::n() == 1 ~ patch_id,
+          TRUE ~ paste0(
+            patch_id,
+            "_",
+            dplyr::row_number()
+          )
+        )
+      ) %>%
+      dplyr::ungroup() %>%
+      dplyr::select(-area_ha)
+    
+    x
+    })
+})
+
+## Checks
+# Check how many times a given name appears
+purrr::map2_dfr(
+  patches_named,
+  years,
+  ~ .x %>%
+    sf::st_drop_geometry() %>%
+    dplyr::select(patch_id) %>%
+    dplyr::mutate(year = .y)
+) %>%
+  dplyr::count(patch_id) %>% 
+  dplyr::arrange(dplyr::desc(n))
+
+# Uniqueness across years (should be 0)
+purrr::map2_dfr(
+  patches_named,
+  years,
+  ~ .x %>%
+    sf::st_drop_geometry() %>%
+    dplyr::count(patch_id) %>%
+    dplyr::filter(n > 1) %>%
+    dplyr::mutate(year = .y)
+)
+
+## Remove accents
+patches_named = purrr::map(
+  patches_named,
+  ~ .x %>%
+    dplyr::mutate(
+      patch_id = iconv(
+        patch_id,
+        from = "UTF-8",
+        to = "ASCII//TRANSLIT"
+      )
     )
 )
 
-# Plot
-plot(rasters_lf[[36]], col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e", "orange"))
-plot(st_geometry(patches_dilat[[36]]), col="grey80", border=NA, add=TRUE) # Patches (without borders)
-plot(st_geometry(patches_final[[36]]), add=TRUE, col="darkgreen", border=NA) # Kept patches
-plot(st_geometry(regions_sf), add=TRUE, col="yellow", lwd=2) # GLT groups
+#### Add other regions -----
+
+# Keep:
+# all UMMP patches;
+# non-UMMP patches intersecting a region;
+# non-UMMP patches intersecting an occupied census point;
+# for 4_Irmaos, patches intersecting the 100 m buffer.
+# patches > 0.5 ha
+with_progress({
+  
+  p = progressr::progressor(steps = length(patches_sf))
+  
+  patches_selected = purrr::map(patches_named, function(x){
+  
+    p()
+    
+    # Compute area
+    x = x %>%
+      dplyr::mutate(
+        area_ha = as.numeric(sf::st_area(.)) / 10000
+      )
+    
+    keep_ummp = !is.na(x$UMMPs)
+    
+    non_ummp = is.na(x$UMMPs)
+    
+    keep_region =
+      lengths(
+        sf::st_intersects(
+          x,
+          selection_geom
+        )
+      ) > 0
+    
+    keep_census =
+      lengths(
+        sf::st_intersects(
+          x,
+          census_occ
+        )
+      ) > 0
+    
+    keep_topology =
+      keep_ummp |
+      (non_ummp & (keep_region | keep_census))
+    
+    # area filter
+    keep_size = x$area_ha > 0.5
+    
+    # final filter
+    x[keep_topology & keep_size, ]
+    
+  })
+})
+
+## Check
+# GLOBAL VIEW
+# Create consistent color palette for UMMPs
+ummp_ids = sort(unique(patches_selected[[36]]$patch_id))
+ummp_cols = setNames(rainbow(length(ummp_ids), alpha = 0.7),
+                     ummp_ids)
+# Plot base raster
+plot(rasters_lf[[36]],col = c("#32a65e", "#ad975a", "#519799", "#FFFFB2","#0000FF", "#d4271e"))
+# All patches in gray
+plot(st_geometry(patches_sf[[36]]), add = TRUE, col = "grey80",border = "grey50",lwd = 0.5)
+# Selected patches
+plot(st_geometry(patches_selected[[36]]), add = TRUE, col = ummp_cols[patches_selected[[36]]$patch_id], border = "black", lwd = 0.5)
+
+# ONE PLOT PER PATCH
+# Year to inspect
+yr = 36
+
+# Selected patches
+x = patches_selected[[yr]]
+
+# Color palette
+patch_cols = setNames(
+  rainbow(length(unique(x$patch_id)), alpha = 0.7),
+  unique(x$patch_id)
+)
+
+# Loop over patches
+for(i in seq_len(nrow(x))){
+  
+  patch = x[i, ]
+  
+  # Bounding box + buffer
+  bb = sf::st_bbox(
+    sf::st_buffer(patch, dist = 1000)
+  )
+  
+  # Crop raster
+  r_crop = terra::crop(
+    rasters_lf[[yr]],
+    terra::ext(
+      bb["xmin"],
+      bb["xmax"],
+      bb["ymin"],
+      bb["ymax"]
+    )
+  )
+  
+  # Plot
+  plot(
+    r_crop,
+    main = patch$patch_id,
+    col = c(
+      "#32a65e",
+      "#ad975a",
+      "#519799",
+      "#FFFFB2",
+      "#0000FF",
+      "#d4271e"
+    )
+  )
+  
+  # Other selected patches
+  plot(
+    sf::st_geometry(x[-i, ]),
+    add = TRUE,
+    col = "grey80",
+    border = "grey50",
+    lwd = 0.5
+  )
+  
+  # Focal patch
+  plot(
+    sf::st_geometry(patch),
+    add = TRUE,
+    col = patch_cols[patch$patch_id],
+    border = "black",
+    lwd = 0.5
+  )
+  
+  # Regions
+  plot(
+    sf::st_geometry(regions_sf),
+    add = TRUE,
+    col = "yellow"
+  )
+  
+}
+
 
 #### Patch metrics --------
+# TO RUN NOW
 patches_metrics = progressr::with_progress({
   p = progressr::progressor(along = patches_final)
   
@@ -857,12 +1189,12 @@ PC_list = purrr::map2(
 
 #### Export patches ----------
 # Patch metrics
-base_path = here("outputs", "data", "patchmetrics")
+base_path = here("outputs", "data", "patches_ummps")
 purrr::walk2(
-  patches_metrics,
+  patches_selected,
   years,
   ~ {
-    output_path = file.path(base_path, paste0("patches_metrics_", .y, ".gpkg"))
+    output_path = file.path(base_path, paste0("patches_ummps_", .y, ".gpkg"))
     sf::st_write(.x, output_path, layer = "patches", append=FALSE, delete_dsn = TRUE, quiet = TRUE)
     message("Exported: ", output_path)
   }
