@@ -597,6 +597,7 @@ plot(sf::st_geometry(patches_sf[[36]]), col="darkgreen", add=TRUE)
 # First, disjoint UMMPs (some are overlapping)
 # i.e., cut so that resulting output = patches without overlaps
 ummp_split = sf::st_intersection(ummps) %>% dplyr::filter(n.overlaps < 2)
+ummp_union = sf::st_union(ummp_split)
 
 # Check
 pt = st_sfc(
@@ -610,6 +611,7 @@ plot(st_geometry(ummp_split), col = adjustcolor("grey", alpha.f = 0.6), add = TR
 plot(pt, col = "red", pch = 20, add = TRUE)
 
 ### Clip with UMMPs
+### Clip with UMMPs
 with_progress({
   
   p = progressr::progressor(steps = length(patches_sf))
@@ -620,10 +622,13 @@ with_progress({
     
     patches = sf::st_make_valid(patches_sf[[i]])
     
-    # 1. Clip patches by UMMPs
-    inside = sf::st_intersection(patches, ummp_split)
+    # 1. CLIP PATCHES BY UMMP
+    inside = sf::st_intersection(
+      patches,
+      ummp_split
+    )
     
-    # 2. Dissolve by UMMP
+    # 2. DISSOLVE BY UMMP
     inside_dissolved = inside %>%
       dplyr::group_by(UMMPs) %>%
       dplyr::summarise(
@@ -631,7 +636,7 @@ with_progress({
         .groups = "drop"
       )
     
-    # 3. Outside fragments
+    # 3. OUTSIDE FRAGMENTS
     outside = sf::st_difference(
       patches,
       sf::st_union(ummp_split)
@@ -641,10 +646,14 @@ with_progress({
     
     outside$UMMPs = NA_character_
     
-    # Skip if nothing to assign
+
+    # NOTHING TO ASSIGN
     if (nrow(outside) == 0 || nrow(inside_dissolved) == 0) {
       
-      combined = dplyr::bind_rows(inside_dissolved, outside)
+      combined = dplyr::bind_rows(
+        inside_dissolved,
+        outside
+      )
       
       return(
         combined %>%
@@ -655,82 +664,97 @@ with_progress({
             .groups = "drop"
           ) %>%
           dplyr::bind_rows(
-            combined %>% dplyr::filter(is.na(UMMPs))
+            combined %>%
+              dplyr::filter(is.na(UMMPs))
           )
       )
     }
     
     # 4. REASSIGNMENT
-    # 1) Tiny portions reaffected to UMMPs they touch (1 intersection)
-    # 2) For pieces touching several UMMPs: we buffer them and reaffect them to the UMMP they share the largest area with
-    # 3) Size criterion (small patches affected only because large patches are more likely to touch several UMMPs)
+    rel = sf::st_intersects(
+      outside,
+      inside_dissolved,
+      sparse = TRUE
+    )
     
-    # PARAMETERS
-    buf_dist = 30  # meters
+    frag_area_ha =
+      as.numeric(sf::st_area(outside)) / 10000
     
-    # buffer once (CRITICAL for speed)
-    outside_buf = sf::st_buffer(outside, dist = buf_dist)
+    # SINGLE TOUCH
+    single_touch = which(lengths(rel) == 1)
     
-    frag_area = as.numeric(sf::st_area(outside_buf))
-    
-    # compute intersections in vectorised way (faster than per-fragment loops)
-    rel = sf::st_intersects(outside_buf, inside_dissolved, sparse = TRUE)
-    
-    has_match = lengths(rel) > 0
-    
-    if (any(has_match)) {
+    if (length(single_touch) > 0) {
       
-      frag_ids = which(has_match)
+      for (frag_id in single_touch) {
+        
+        # apply size criterion here
+        if (frag_area_ha[frag_id] >= 500)
+          next
+        
+        outside$UMMPs[frag_id] =
+          inside_dissolved$UMMPs[
+            rel[[frag_id]][1]
+          ]
+      }
+    }
+    
+    # TWO UMMPS: BUFFER RULE
+    two_touch = which(
+      lengths(rel) == 2 &
+        frag_area_ha < 500
+    )
+    
+    if (length(two_touch) > 0) {
       
-      candidates_list = lapply(frag_ids, function(i) {
+      for (frag_id in two_touch) {
         
-        ummp_ids = rel[[i]]
+        candidate_ids = rel[[frag_id]]
         
-        if (length(ummp_ids) == 0) return(NULL)
+        # 1 m buffer
+        frag_buf = sf::st_buffer(
+          outside[frag_id, ],
+          dist = 1
+        )
         
-        buf_geom = outside_buf[i, ]
+        buf_area = as.numeric(
+          sf::st_area(frag_buf)
+        )
         
-        # compute intersection areas with each UMMP
-        inter_areas = sapply(ummp_ids, function(j) {
+        shares = sapply(candidate_ids, function(j) {
           
-          inter = sf::st_intersection(
-            buf_geom,
-            inside_dissolved[j, ]
+          inter = suppressWarnings(
+            sf::st_intersection(
+              frag_buf,
+              inside_dissolved[j, ]
+            )
           )
           
-          if (length(inter) == 0) return(0)
+          if (nrow(inter) == 0)
+            return(0)
           
-          as.numeric(sf::st_area(inter))
+          sum(
+            as.numeric(sf::st_area(inter)),
+            na.rm = TRUE
+          ) / buf_area
         })
         
-        data.frame(
-          frag_id = i,
-          ummp = inside_dissolved$UMMPs[ummp_ids],
-          share = inter_areas / frag_area[i]
-        )
-      })
-      
-      candidates = dplyr::bind_rows(candidates_list)
-      
-      # optional: size filter (your original rule)
-      frag_area_orig = as.numeric(sf::st_area(outside) / 10000)
-      
-      candidates$area_orig = frag_area_orig[candidates$frag_id]
-      
-      candidates = candidates %>%
-        dplyr::filter(area_orig < 500)
-      
-      # assign best UMMP by max buffered share
-      best_match = candidates %>%
-        dplyr::group_by(frag_id) %>%
-        dplyr::slice_max(order_by = share, n = 1, with_ties = FALSE) %>%
-        dplyr::ungroup()
-      
-      outside$UMMPs[best_match$frag_id] = best_match$ummp
+        best_candidate =
+          candidate_ids[
+            which.max(shares)
+          ]
+        
+        outside$UMMPs[frag_id] =
+          inside_dissolved$UMMPs[
+            best_candidate
+          ]
+      }
     }
     
     # 5. MERGE
-    combined = dplyr::bind_rows(inside_dissolved, outside)
+    combined = dplyr::bind_rows(
+      inside_dissolved,
+      outside
+    )
     
     # 6. FINAL DISSOLVE
     assigned = combined %>%
@@ -744,10 +768,14 @@ with_progress({
     unassigned = combined %>%
       dplyr::filter(is.na(UMMPs))
     
-    dplyr::bind_rows(assigned, unassigned)
+    dplyr::bind_rows(
+      assigned,
+      unassigned
+    )
+    
   })
+  
 })
-
 
 ### Verification
 # Extract combined result
