@@ -591,7 +591,7 @@ plot(sf::st_geometry(patches_sf[[36]]), col="darkgreen", add=TRUE)
 #### Dissolve by UMMP ------
 # Clip forest patches by UMMPs
 # Dissolve all intersecting patches inside each UMMP
-# Assign isolated pieces (clipped by UMMPs) to their patches
+# Assign isolated pieces (clipped by UMMPs) to the patches they touch (intersection or buffer)
 # Result: 1 (or more) polygons per UMMP representing “core managed patch”
 
 # First, disjoint UMMPs (some are overlapping)
@@ -610,7 +610,6 @@ plot(r_crop, col = c("#32a65e", "#FFFFB2"))
 plot(st_geometry(ummp_split), col = adjustcolor("grey", alpha.f = 0.6), add = TRUE)
 plot(pt, col = "red", pch = 20, add = TRUE)
 
-### Clip with UMMPs
 ### Clip with UMMPs
 with_progress({
   
@@ -646,7 +645,7 @@ with_progress({
     
     outside$UMMPs = NA_character_
     
-
+    
     # NOTHING TO ASSIGN
     if (nrow(outside) == 0 || nrow(inside_dissolved) == 0) {
       
@@ -777,6 +776,7 @@ with_progress({
   
 })
 
+
 ### Verification
 # Extract combined result
 x = patches_ummps[[36]]
@@ -799,6 +799,58 @@ plot(st_geometry(outside), add = TRUE, col = "grey80", border = "grey50", lwd = 
 # 2. Plot UMMP fragments colored by UMMP
 plot(st_geometry(inside), add = TRUE, col = ummp_cols[inside$UMMPs], border = "black", lwd = 0.5)
 
+
+### Check geometry
+# Check if there are multiple types of geometry
+table(
+  unlist(
+    lapply(
+      patches_ummps,
+      sf::st_geometry_type
+    )
+  )
+)
+
+# Correct geometry
+with_progress({
+  
+  p = progressr::progressor(steps = length(patches_ummps))
+  
+  patches_ummps_clean = lapply(seq_along(patches_ummps), function(i) {
+    
+    p()
+    
+    x = patches_ummps[[i]]
+    
+    gc_idx = sf::st_geometry_type(x) == "GEOMETRYCOLLECTION"
+    
+    if (!any(gc_idx)) return(x)
+    
+    # split dataset
+    x_gc = x[gc_idx, ]
+    x_ok = x[!gc_idx, ]
+    
+    # fix only GEOMETRYCOLLECTIONs
+    x_gc_fixed <- x_gc %>%
+      sf::st_make_valid() %>%
+      sf::st_collection_extract("POLYGON", warn = FALSE)
+    
+    # recombine safely
+    dplyr::bind_rows(x_ok, x_gc_fixed)
+    
+  })
+  
+})
+
+# Verification
+table(
+  unlist(
+    lapply(
+      patches_ummps_clean,
+      sf::st_geometry_type
+    )
+  )
+)
 
 #### Patch name ------
 # UMMP name was joined before
@@ -1089,8 +1141,121 @@ for(i in seq_len(nrow(x))){
 }
 
 
+#### Filter patches -------
+# Remove some patches
+patches_selected_final = lapply(patches_selected, function(x) {
+  
+  x %>%
+    dplyr::filter(!stringr::str_starts(patch_id, "p_"))
+  
+})
+
+# Aggregate patches according to their location (create new "sets of polygons" similar to UMMPs)
+patches_selected_final = lapply(patches_selected_final, function(x) {
+  
+  x %>%
+    
+    # rules
+    dplyr::mutate(
+      patch_id = dplyr::case_when(
+        stringr::str_detect(patch_id, "4_Irmaos") ~ "4_Irmaos",
+        
+        patch_id %in% c("Vendaval", "Boa_Esperanca_I", 
+                        "Boa_Esperanca_II", "Sao_Joao_II") ~ "Boa_Esperanca",
+        
+        TRUE ~ patch_id
+      )
+    ) %>%
+    
+    # dissolve by new group
+    dplyr::group_by(patch_id) %>%
+    dplyr::summarise(
+      geometry = sf::st_union(geometry),
+      .groups = "drop"
+    ) %>%
+    
+    # optional cleanup
+    sf::st_make_valid()
+  
+})
+
+# Check
+# BEFORE
+patches_selected[[36]] %>%
+  sf::st_drop_geometry() %>%
+  dplyr::count(patch_id)
+# AFTER
+patches_selected_final[[36]] %>%
+  sf::st_drop_geometry() %>%
+  dplyr::count(patch_id)
+
+#### Correct geometry ------
+# Check if there are multiple types of geometry
+table(
+  unlist(
+    lapply(
+      patches_selected_final,
+      sf::st_geometry_type
+    )
+  )
+)
+
+# Fix
+with_progress({
+  
+  p = progressr::progressor(steps = length(patches_selected_final))
+  
+  patches_final= lapply(seq_along(patches_selected_final), function(i) {
+    
+    p()
+    
+    x = patches_selected_final[[i]]
+    
+    gc_idx = sf::st_geometry_type(x) == "GEOMETRYCOLLECTION"
+    
+    if (!any(gc_idx)) return(x)
+    
+    # split dataset
+    x_gc = x[gc_idx, ]
+    x_ok = x[!gc_idx, ]
+    
+    # fix only GEOMETRYCOLLECTIONs
+    x_gc_fixed = x_gc %>%
+      sf::st_make_valid() %>%
+      sf::st_collection_extract("POLYGON", warn = FALSE)
+    
+    # recombine safely
+    dplyr::bind_rows(x_ok, x_gc_fixed)
+    
+  })
+  
+})
+
+# Dissolve back
+patches_final = lapply(patches_final, function(x) {
+  
+  x %>%
+    dplyr::group_by(patch_id) %>%
+    dplyr::summarise(
+      geometry = sf::st_union(geometry),
+      .groups = "drop"
+    ) %>%
+    sf::st_make_valid()
+  
+})
+
+# Verification
+table(
+  unlist(
+    lapply(
+      patches_final,
+      sf::st_geometry_type
+    )
+  )
+)
+
+
 #### Patch metrics --------
-# TO RUN NOW
 patches_metrics = progressr::with_progress({
   p = progressr::progressor(along = patches_final)
   
@@ -1099,10 +1264,10 @@ patches_metrics = progressr::with_progress({
     ~ {
       p()  # <- updates progress
       
-      shape_tbl = vm_p_shape(.x, patch_col = "patch_id") %>%
+      area_tbl = vm_p_area(.x, patch_col = "patch_id") %>%
         dplyr::rename(patch_id = id) %>%
-        dplyr::rename(shape = value) %>%
-        dplyr::select(patch_id, shape)
+        dplyr::rename(area_ha = value) %>%
+        dplyr::select(patch_id, area_ha)
       
       enn_tbl = vm_p_enn(.x, patch_col = "patch_id") %>% 
         dplyr::rename(patch_id = id) %>%
@@ -1110,30 +1275,15 @@ patches_metrics = progressr::with_progress({
         dplyr::select(patch_id, enn)
       
       .x %>%
-        dplyr::left_join(shape_tbl, by = "patch_id") %>%
+        dplyr::left_join(area_tbl, by = "patch_id") %>%
         dplyr::left_join(enn_tbl, by = "patch_id") %>%
         dplyr::mutate(
           area_ha = round(area_ha, 2),
-          shape = round(shape, 2),
           enn = round(enn, 2),
         )
     }
   )
 })
-
-# Reorder the table
-patches_metrics = purrr::map(
-  patches_metrics,
-  ~ .x %>%
-    dplyr::select(
-      patch_id,
-      lyr.1,
-      area_ha,
-      shape,
-      enn,
-      geometry
-    )
-)
 
 #### Patch connectivity (Makurhini) -------
 # See: Godínez-Gómez, O., Correa-Ayram, C., Goicolea, T. & Saura, S. Makurhini: An R package for comprehensive analysis of landscape fragmentation and connectivity. Environmental Modelling & Software 201, 106981 (2026).
@@ -1209,20 +1359,114 @@ compute_connectivity = function(patches, r) {
   PC_res
 }
 
+# Apply on the list of patches
 PC_list = purrr::map2(
   patches_metrics,
   rasters_mspa,
   compute_connectivity
 )
 
+# Plot
+PC_long = purrr::map_dfr(
+  seq_along(PC_list),
+  ~ PC_list[[.x]] %>%
+    sf::st_drop_geometry() %>%
+    dplyr::mutate(year = .x)
+)
+
+# Area
+ggplot(
+  PC_long,
+  aes(
+    x = year,
+    y = area_ha,
+    color = patch_id,
+    group = patch_id
+  )
+) +
+  geom_line() +
+  geom_point(size = 1) +
+  theme_bw() +
+  labs(
+    x = "Year",
+    y = "Area (ha)",
+    color = "Patch"
+  )
+
+# ENN
+ggplot(
+  PC_long,
+  aes(
+    x = year,
+    y = enn,
+    color = patch_id,
+    group = patch_id
+  )
+) +
+  geom_line() +
+  geom_point(size = 1) +
+  theme_bw() +
+  labs(
+    x = "Year",
+    y = "ENN",
+    color = "Patch"
+  )
+
+# Connectivity
+ggplot(
+  PC_long,
+  aes(
+    x = year,
+    y = dIIC,
+    color = patch_id,
+    group = patch_id
+  )
+) +
+  geom_line() +
+  geom_point(size = 1) +
+  theme_bw() +
+  labs(
+    x = "Year",
+    y = "dIIC",
+    color = "Patch"
+  )
+
+# One panel per patch
+PC_long %>%
+  dplyr::select(
+    year,
+    patch_id,
+    area_ha,
+    enn,
+    dIIC
+  ) %>%
+  tidyr::pivot_longer(
+    cols = c(area_ha, enn, dIIC),
+    names_to = "metric",
+    values_to = "value"
+  ) %>%
+  ggplot(
+    aes(
+      year,
+      value
+    )
+  ) +
+  geom_line() +
+  facet_grid(
+    metric ~ patch_id,
+    scales = "free_y"
+  ) +
+  theme_bw()
+
+
 #### Export patches ----------
 # Patch metrics
-base_path = here("outputs", "data", "patches_ummps")
+base_path = here("outputs", "data", "patchmetrics")
 purrr::walk2(
-  patches_selected,
+  PC_list,
   years,
   ~ {
-    output_path = file.path(base_path, paste0("patches_ummps_", .y, ".gpkg"))
+    output_path = file.path(base_path, paste0("patches_ummps_metrics_", .y, ".gpkg"))
     sf::st_write(.x, output_path, layer = "patches", append=FALSE, delete_dsn = TRUE, quiet = TRUE)
     message("Exported: ", output_path)
   }
