@@ -605,7 +605,6 @@ lulcc_plot = ggplot() +
     inherit.aes = FALSE)
 
 # Combine plots
-
 final_plot = lulcc_plot + (waffle1989 + waffle2024 + waffle2100) + plot_layout(ncol=1)
 plot(final_plot)
 
@@ -613,6 +612,89 @@ png(here("outputs","plot","01p_paper1_LULC_1989-2100.png"),
     width = 2500, height = 1800, res = 300, type="cairo")
 plot(final_plot)
 dev.off()
+
+# Line plot without waffles
+main_plot = ggplot() +
+  # Observed ribbon
+  geom_ribbon(
+    data = dplyr::filter(data, period == "Observed"),
+    aes(x = year, ymin = ca - 2000, ymax = ca + 2000, fill = Description),
+    alpha = 0.18
+  ) +
+  # Observed lines
+  geom_line(
+    data = dplyr::filter(data, period == "Observed"),
+    aes(x = year, y = ca, color = Description, group = Description),
+    linewidth = 1
+  ) +
+  geom_point(
+    data = dplyr::filter(data, period == "Observed"),
+    aes(x = year, y = ca, color = Description),
+    size = 1
+  ) +
+  # Simulated lines (de-emphasized)
+  geom_line(
+    data = dplyr::filter(data, period == "Simulated"),
+    aes(x = year, y = ca, color = Description, group = Description),
+    linewidth = 1,
+    linetype = "dashed",
+    alpha = 0.7
+  ) +
+  geom_point(
+    data = dplyr::filter(data, period == "Simulated"),
+    aes(x = year, y = ca, color = Description),
+    size = 1,
+    alpha = 0.7
+  ) +
+  geom_ribbon(
+    data = dplyr::filter(data, period == "Simulated"),
+    aes(x = year, ymin = ca - 2000, ymax = ca + 2000, fill = Description),
+    alpha = 0.18
+  ) +
+  # Labels
+  geom_text(
+    data = label_data,
+    aes(x = year_end + 0.6, y = ca_end_adj, label = label, color = Description),
+    hjust = 0, size = 4, fontface = "bold", show.legend = FALSE,
+    family = "Arial Narrow"
+  ) +
+  geom_blank(aes(x = max(data$year) + 35, y = 0)) +
+  scale_color_manual(values = setNames(class_colors$Color, class_colors$Description)) +
+  scale_fill_manual(values = setNames(class_colors$Color, class_colors$Description), guide = "none") +
+  labs(x = "Year", y = "Area (ha)", color = "Land use class") +
+  scale_x_break(c(2024, 2040), scales = 0.15, space=0) +
+  coord_cartesian(clip = "off") +
+  theme_classic() +
+  theme(
+    legend.position = "right",
+    plot.margin = margin(0, 0, 0, 0),
+    axis.title = element_text(size = 14, family = "Arial Narrow"),
+    axis.text = element_text(size = 12, family = "Arial Narrow")
+  ) +
+  geom_segment(
+    data = transition_data,
+    aes(x = x, xend = xend, y = y, yend = yend, color = Description),
+    linetype = "dashed",
+    linewidth = 1,
+    alpha = 0.7
+  ) +
+  geom_vline(xintercept = 2024, linetype = "dashed", color = "black", linewidth = 0.5) +
+  geom_ribbon(
+    data = transition_ribbon,
+    aes(
+      x = year,
+      ymin = ca - 2000,
+      ymax = ca + 2000,
+      fill = Description,
+      group = Description),
+    alpha = 0.2,
+    inherit.aes = FALSE)
+# Export
+png(here("outputs","plot","01p_paper1_LULC_1989-2100_simple.png"), 
+    width = 2500, height = 1400, res = 300, type="cairo")
+plot(main_plot)
+dev.off()
+
 
 #### Evolution of main land uses -------
 # Prepare data
@@ -634,7 +716,7 @@ data = all_lulc_metrics %>%
   # Add readable names and colors
   dplyr::left_join(class_colors, by = "class")
 
-
+# EXPORT
 png(here("outputs","plot","01h_lm_pland_barplot0.png"), 
     width = 2500, height = 1800, res = 300, type="cairo")
 
@@ -649,6 +731,29 @@ ggplot(data, aes(x = year, y = delta_ca, group = Description)) +
               linetype = "longdash",
               span = 0.300) + # change the span to change the smoothening of the line)
   geom_hline(yintercept = 0, color = "black", linewidth = 0.6) +
+  
+  # Vertical lines (events)
+  geom_vline(xintercept = 2001, linetype = "dashed", linewidth = 0.6) +
+  geom_vline(xintercept = 2012, linetype = "dashed", linewidth = 0.6) +
+  
+  # Annotations
+  annotate("text",
+           x = 2001,
+           y = -1300,
+           label = "20% native veg. conserved (FC)",
+           family = "Arial Narrow",
+           angle = 90,
+           vjust = -0.5,
+           size = 3.2) +
+  annotate("text",
+           x = 2012,
+           y = -1750,
+           label = "FC revision",
+           family = "Arial Narrow",
+           angle = 90,
+           vjust = -0.5,
+           size = 3.2) +
+  
   scale_x_continuous( breaks = seq(min(data$year), max(data$year), by = 2)) +
   scale_fill_manual(values = setNames(class_colors$Color, class_colors$Description), name = "Land use class") +
   scale_color_manual(values = setNames(class_colors$Color, class_colors$Description), name = "Land use class") +
@@ -699,7 +804,7 @@ data$Metric = factor(data$Metric, levels=c("a) Surface area (ha)", "b) Number of
 
 # Plot facets
 png(here("outputs","plot","01h_lm_forest_metrics_lineplot.png"), 
-    width = 1800, height = 1500, res = 300, type="cairo")
+    width = 1800, height = 1800, res = 300, type="cairo")
 
 ggplot(data, aes(x = year, y = Value)) +
   geom_line(color = "#011809", linewidth = 1) +
@@ -709,7 +814,7 @@ ggplot(data, aes(x = year, y = Value)) +
     x = "Year",
     y = NULL
   ) +
-  theme_minimal(base_family = "Arial Narrow") +
+  theme_classic(base_family = "Arial Narrow") +
   theme(
     strip.text = element_text(face = "bold", size = 10, family = "Arial Narrow"),
     plot.title = element_blank(),
@@ -814,11 +919,10 @@ coef_defor = coef_defor %>%
 coef_defor = coef_defor %>%
   dplyr::mutate(
     group = dplyr::case_when(
-      term %in% c("Total precipitations", "Mean min. temperature", "Slope") ~ "Biophysical",
-      term %in% c("Distance to nearest river", "Distance to nearest town", "Distance to nearest road", "Distance to forest edge") ~ "Distances",
+      term %in% c("Total precipitations", "Mean min. temperature", "Slope") ~ "Abiotic",
+      term %in% c("Distance to nearest river", "Distance to nearest town", "Distance to nearest road", "Distance to forest edge", "South of BR-101") ~ "Location",
       term %in% c("Proportion of built-up area", "Proportion of forest area") ~ "Land use",
       term %in% c("Inside private property", "Inside APA", "Inside public reserve", "Inside RPPN", "Inside Legal Reserve") ~ "Legal status",
-      term %in% c("South of BR-101") ~ "Location",
       TRUE ~ "Other"
     )
   )
@@ -860,21 +964,21 @@ coef_defor = coef_defor %>%
 
 #### Forest plot --------
 defor_coeff_plot = ggplot(coef_defor, aes(x = OR, y = term_ordered, color = color)) +
-  geom_point(size = 2) +
+  geom_point(size = 1.8) +
   geom_errorbar(aes(xmin = OR_low, xmax = OR_high), width = 0.4, linewidth = 0.7) +
   geom_vline(xintercept = 1, linetype = "dashed") +
   scale_color_identity() +
-  theme_minimal(base_family = "Arial Narrow") +
+  theme_classic(base_family = "Arial Narrow") +
   ggtitle('a) Deforestation') +
   labs(x = "Standardized odds ratio (OR)") +
   theme(
     panel.border = element_rect(color="black", fill = NA, linewidth = 0.5),
     text = element_text(family = "Arial Narrow"),
-    plot.title = element_text(family = "Arial Narrow", face = "bold", size = 12, hjust = 0),
+    plot.title = element_text(family = "Arial Narrow", face = "bold", size = 14, hjust = 0),
     axis.title.y = element_blank(),
-    axis.text.y = element_text(hjust = 0, size = 10),
-    axis.title.x = element_text(size = 12),
-    strip.text.y.left = element_text(angle = 90, face = "bold", size = 10),
+    axis.text.y = element_text(hjust = 0, size = 12),
+    axis.title.x = element_text(size = 14),
+    strip.text.y.left = element_text(angle = 90, face = "bold", size = 12),
     strip.placement = "outside"
   ) +
   facet_grid(group ~ ., scales = "free_y", space = "free_y", switch="y")
@@ -971,11 +1075,10 @@ coef_refor = coef_refor %>%
 coef_refor = coef_refor %>%
   dplyr::mutate(
     group = dplyr::case_when(
-      term %in% c("Total precipitations", "Mean min. temperature", "Slope") ~ "Biophysical",
-      term %in% c("Distance to nearest river", "Distance to nearest town", "Distance to nearest road", "Distance to forest edge") ~ "Distances",
+      term %in% c("Total precipitations", "Mean min. temperature", "Slope") ~ "Abiotic",
+      term %in% c("Distance to nearest river", "Distance to nearest town", "Distance to nearest road", "Distance to forest edge", "South of BR-101") ~ "Location",
       term %in% c("Proportion of built-up area", "Proportion of forest area") ~ "Land use",
       term %in% c("Inside private property", "Inside APA", "Inside public reserve", "Inside RPPN", "Inside Legal Reserve") ~ "Legal status",
-      term %in% c("South of BR-101") ~ "Location",
       TRUE ~ "Other"
     )
   )
@@ -1000,19 +1103,25 @@ coef_refor = coef_refor %>%
 
 #### Forest plot -----
 refor_coeff_plot = ggplot(coef_refor, aes(x = OR, y = term_ordered, color = color)) +
-  geom_point(size = 2) +
+  geom_point(size = 1.8) +
   geom_errorbar(aes(xmin = OR_low, xmax = OR_high), width = 0.4, linewidth = 0.7) +
   geom_vline(xintercept = 1, linetype = "dashed") +
+  # scale_x_break(c(3.5, 15),
+  #               scales=0.2,
+  #               ticklabels = c(15, 16, 17),
+  #               space = 0) +
+  scale_x_log10() +
   scale_color_identity() +
-  theme_minimal(base_family = "Arial Narrow") +
+  theme_classic(base_family = "Arial Narrow") +
   ggtitle('b) Reforestation') +
   labs(x = "Standardized odds ratio (OR)") +
+  labs(subtitle = "OR displayed on log10 scale") +
   theme(
     panel.border = element_rect(color="black", fill = NA, linewidth = 0.5),
     text = element_text(family = "Arial Narrow"),
-    plot.title = element_text(family = "Arial Narrow", face = "bold", size = 12, hjust = 0),
+    plot.title = element_text(family = "Arial Narrow", face = "bold", size = 14, hjust = 0),
     legend.position = "none",
-    axis.title.x = element_text(size= 12),
+    axis.title.x = element_text(size= 14),
     axis.text.y = element_blank(),
     axis.title.y = element_blank(),
     axis.ticks.y = element_blank(),
@@ -1023,10 +1132,10 @@ refor_coeff_plot = ggplot(coef_refor, aes(x = OR, y = term_ordered, color = colo
 
 ### Figure ------
 forest_all = defor_coeff_plot + refor_coeff_plot +
-  plot_layout(ncol = 2, widths = c(1, 2.5), axis_titles = "collect")
+  plot_layout(ncol = 2, widths = c(1, 1), axis_titles = "collect")
 forest_all
 
-png(here("outputs","plot","01p_paper1_or_pixel.png"), width = 3000, height = 2800, 
+png(here("outputs","plot","01p_paper1_or_pixel.png"), width = 3000, height = 2050, 
     res = 300, type="cairo")
 plot(forest_all)
 dev.off()
@@ -1641,7 +1750,7 @@ refor = raster_tm_2024 == 7
 
 # Grid
 bbox = st_as_sfc(st_bbox(raster_tm_2024))
-grid = st_make_grid(bbox, cellsize = 5000, square = FALSE) %>% 
+grid = st_make_grid(bbox, cellsize = 7000, square = FALSE) %>% 
   st_as_sf()
 st_crs(grid) = st_crs(raster_tm_2024)
 
@@ -1733,7 +1842,56 @@ defor_df$value = factor(defor_df$`2024`,
 land_use_cols = c("#32a65e", "#ad975a", "#519799", "#D1D100",
                   "#0000FF", "#d4271e", "#36F760", "#F736DA")
 
-# Plot
+## Illustrative point
+# Coordinates
+defor_pt = st_sfc(
+  st_point(c(768704, 7505746)),
+  crs = 31983
+)
+defor_pt = st_as_sf(defor_pt)
+# Buffer aroud the point
+defor_buf = st_buffer(defor_pt, dist = 5000)
+# Crop the main raster
+defor_crop = crop(raster_tm_2024, vect(defor_buf))
+defor_crop = mask(defor_crop, vect(defor_buf))
+defor_crop_df = as.data.frame(
+  defor_crop,
+  xy = TRUE,
+  na.rm = TRUE
+)
+names(defor_crop_df)[3] = "value"
+# LULC values
+unique(defor_crop_df$value)
+defor_crop_df$value = factor(defor_crop_df$value)
+# Inset map
+defor_inset = ggplot(defor_crop_df) +
+  geom_raster(
+    aes(x = x, y = y, fill = value)
+  ) +
+  scale_fill_manual(
+    values = c(
+      "#32a65e", "#519799", "#D1D100",
+      "#0000FF", "#d4271e", "#36F760", "#F736DA"
+    ),
+    guide = "none"
+  ) +
+  # Location of the illustrative point
+  geom_sf(
+    data = defor_pt,
+    colour = "white",
+    fill = "white",
+    shape = 21,
+    size = 3,
+    inherit.aes = FALSE
+  ) +
+  
+  coord_sf() +
+  theme_void() +
+  theme(
+    legend.position = "none"
+  )
+
+## Main map
 map_hotspots_defor = ggplot() +
   geom_raster(
     data = defor_df,
@@ -1784,9 +1942,18 @@ map_hotspots_defor = ggplot() +
     which_north = "true",
     style = ggspatial::north_arrow_nautical(),
     pad_x = unit(0.3, "cm"),
-    pad_y = unit(1.2, "cm"),
+    pad_y = unit(0.8, "cm"),
     height = unit(1.8, "cm"),
     width  = unit(1.8, "cm")
+  ) +
+  
+  # Location of the illustrative point
+  geom_sf(
+    data = defor_pt,
+    colour = "white",
+    fill = "white",
+    shape = 21,
+    size = 4
   ) +
   
   coord_sf(expand = FALSE) +
@@ -1894,7 +2061,56 @@ refor_df$value = factor(refor_df$`2024`,
 land_use_cols = c("#32a65e", "#ad975a", "#519799", "#D1D100",
                   "#0000FF", "#d4271e", "#36F760", "#F736DA")
 
-# Plot
+## Illustrative point
+# Coordinates
+refor_pt = st_sfc(
+  st_point(c(747525, 7493799)),
+  crs = 31983
+)
+refor_pt = st_as_sf(refor_pt)
+# Buffer aroud the point
+refor_buf = st_buffer(refor_pt, dist = 5000)
+# Crop the main raster
+refor_crop = crop(raster_tm_2024, vect(refor_buf))
+refor_crop = mask(refor_crop, vect(refor_buf))
+refor_crop_df = as.data.frame(
+  refor_crop,
+  xy = TRUE,
+  na.rm = TRUE
+)
+names(refor_crop_df)[3] = "value"
+# LULC values
+unique(refor_crop_df$value)
+refor_crop_df$value = factor(refor_crop_df$value)
+# Inset map
+refor_inset = ggplot(refor_crop_df) +
+  geom_raster(
+    aes(x = x, y = y, fill = value)
+  ) +
+  scale_fill_manual(
+    values = c(
+      "#32a65e", "#519799", "#D1D100",
+      "#0000FF", "#d4271e", "#36F760", "#F736DA"
+    ),
+    guide = "none"
+  ) +
+  # Location of the illustrative point
+  geom_sf(
+    data = refor_pt,
+    colour = "white",
+    fill = "white",
+    shape = 21,
+    size = 3,
+    inherit.aes = FALSE
+  ) +
+  
+  coord_sf() +
+  theme_void() +
+  theme(
+    legend.position = "none"
+  )
+
+## Main map
 map_hotspots_refor = ggplot() +
   geom_raster(
     data = refor_df,
@@ -1945,9 +2161,18 @@ map_hotspots_refor = ggplot() +
     which_north = "true",
     style = ggspatial::north_arrow_nautical(),
     pad_x = unit(0.3, "cm"),
-    pad_y = unit(1.2, "cm"),
+    pad_y = unit(0.8, "cm"),
     height = unit(1.8, "cm"),
     width  = unit(1.8, "cm")
+  ) +
+  
+  # Location of the illustrative point
+  geom_sf(
+    data = refor_pt,
+    colour = "white",
+    fill = "white",
+    shape = 21,
+    size = 4
   ) +
   
   coord_sf(expand = FALSE) +
@@ -1967,10 +2192,18 @@ map_hotspots_refor = ggplot() +
   )
 
 ### Merge maps ------
-hotspots_all = map_hotspots_defor + map_hotspots_refor +
-  plot_layout(ncol = 2, guides = "collect") &
+defor_final = map_hotspots_defor | defor_inset
+refor_final = map_hotspots_refor | refor_inset
+
+hotspots_all =
+  (defor_final) /
+  (refor_final) +
+  plot_layout(
+    widths = c(4, 1), # main map : inset
+    guides = "collect"
+  ) &
   theme(
-    legend.position = "bottom",
+    legend.position = "right",
     legend.text = element_text(
       size = 12,
       family = "Arial Narrow"
@@ -1983,7 +2216,8 @@ hotspots_all = map_hotspots_defor + map_hotspots_refor +
   )
 hotspots_all
 
+### Export
 png(here("outputs","plot","01p_paper1_hotspots.png"), 
-    width = 3000, height = 1500, res = 300, type="cairo")
+    width = 2700, height = 1800, res = 300, type="cairo")
 plot(hotspots_all)
 dev.off()
