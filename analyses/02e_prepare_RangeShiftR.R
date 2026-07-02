@@ -70,6 +70,7 @@ patches = lapply(patches, function(x){
     mutate(unique_id = row_number())
 })
 anyDuplicated(patches[['2005']]$lyr.1) # Duplicated ids
+anyDuplicated(patches[['2005']]$patch_id) # GOOD but not integer value
 anyDuplicated(patches[['2005']]$unique_id) # ALL GOOD
 
 # Rasterize patches
@@ -100,9 +101,37 @@ for (yr in names(patches)) {
   patch_rasters[[yr]] = r_patch
 }
 
-# Example
+##### 2005 ----
+# Select patches 2005
 patches2005_r = patch_rasters[['2005']]
 plot(patches2005_r)
+
+# Resample at 30m
+r = patches2005_r
+
+xmin = floor(xmin(r) / 30) * 30
+xmax = ceiling(xmax(r) / 30) * 30
+ymin = floor(ymin(r) / 30) * 30
+ymax = ceiling(ymax(r) / 30) * 30
+
+template30 = rast(
+  xmin = xmin,
+  xmax = xmax,
+  ymin = ymin,
+  ymax = ymax,
+  resolution = 30,
+  crs = crs(r)
+)
+
+patches2005_r30 = resample(
+  r,
+  template30,
+  method = "near"
+)
+
+res(patches2005_r30) # should be exactly 30 30
+
+plot(patches2005_r30)
 
 #### Rasters with habitat, matrix, corridor --------
 
@@ -159,8 +188,37 @@ reclass <- function(xx) {
 
 ## Apply to all rasters
 rasters_rshifter = lapply(rasters_w_patches, reclass)
-plot(rasters_rshifter[['2005']], col=c("white", "gray", "darkgreen"))
+
+##### 2005 -----
 r2005 = rasters_rshifter[['2005']]
+plot(r2005, col=c("white", "gray", "darkgreen"))
+
+# Resample at 30m
+r = r2005
+
+xmin = floor(xmin(r) / 30) * 30
+xmax = ceiling(xmax(r) / 30) * 30
+ymin = floor(ymin(r) / 30) * 30
+ymax = ceiling(ymax(r) / 30) * 30
+
+template30 = rast(
+  xmin = xmin,
+  xmax = xmax,
+  ymin = ymin,
+  ymax = ymax,
+  resolution = 30,
+  crs = crs(r)
+)
+
+r2005_r30 = resample(
+  r,
+  template30,
+  method = "near"
+)
+
+res(r2005_r30) # should be exactly 30 30
+
+plot(r2005_r30, col=c("white", "gray", "darkgreen"))
 
 #### Species distribution --------
 # IMPORTANT : species distribution file should only contain either 0 (species absent) or 1 (species present)
@@ -216,6 +274,31 @@ patch_w_glt_2005[patch_w_glt_2005 == 0] = 0
 patch_w_glt_2005[r2005 == -999] = -999
 plot(patch_w_glt_2005, col=c("white","gray","darkgreen"))
 
+### Resample at 30m
+r = patch_w_glt_2005
+
+xmin = floor(xmin(r) / 30) * 30
+xmax = ceiling(xmax(r) / 30) * 30
+ymin = floor(ymin(r) / 30) * 30
+ymax = ceiling(ymax(r) / 30) * 30
+
+template30 = rast(
+  xmin = xmin,
+  xmax = xmax,
+  ymin = ymin,
+  ymax = ymax,
+  resolution = 30,
+  crs = crs(r)
+)
+
+patch_w_glt_2005_r30 = resample(
+  r,
+  template30,
+  method = "near"
+)
+
+res(patch_w_glt_2005_r30) # should be exactly 30 30
+plot(patch_w_glt_2005_r30, col=c("white", "gray", "darkgreen"))
 
 #### Export -------
 ### IMPORTANT: all NAs values must take an integer value (e.g., -999)
@@ -227,13 +310,13 @@ plot(patch_w_glt_2005, col=c("white","gray","darkgreen"))
 output_dir = here("data", 
                   "rangeshifter", 
                   "tests", 
-                  "test_disp_1", 
+                  "test_disp_gui_1", # UPDATE HERE
                   "Inputs")
 
 # Landscape
-plot(r2005)
+plot(r2005_r30)
 writeRaster(
-  r2005,
+  r2005_r30,
   filename = file.path(output_dir, "raster_reclass_binary_2005.txt"),
   filetype = "AAIGrid",
   overwrite = TRUE,
@@ -242,9 +325,9 @@ writeRaster(
 )
 
 # Patches
-plot(patches2005_r)
+plot(patches2005_r30)
 writeRaster(
-  patches2005_r,
+  patches2005_r30,
   filename = file.path(output_dir, "patches_2005.txt"),
   filetype = "AAIGrid",
   overwrite = TRUE,
@@ -253,9 +336,9 @@ writeRaster(
 )
 
 # Species distribution
-plot(patch_w_glt_2005)
+plot(patch_w_glt_2005_r30)
 writeRaster(
-  patch_w_glt_2005,
+  patch_w_glt_2005_r30,
   filename = file.path(output_dir, "patches_w_glt_2005.txt"),
   filetype = "AAIGrid",
   overwrite = TRUE,

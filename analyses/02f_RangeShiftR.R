@@ -58,7 +58,7 @@ library(readxl)
 
 ### Director path ----
 
-dirpath = "data/rangeshifter/tests/test_disp_4/" # UPDATE HERE !!!
+dirpath = "data/rangeshifter/tests/test_disp_5/" # UPDATE HERE !!!
 ## Create the RS folder structure, if it doesn’t yet exist
 # dir.create(file.path(dirpath, "Inputs"), showWarnings = TRUE)
 # dir.create(file.path(dirpath, "Outputs"), showWarnings = TRUE)
@@ -126,6 +126,11 @@ eq_pop = getLocalisedEquilPop(demog = demo, DensDep_values = c(0.05, 0.06, 0.07,
 # Select the value that reaches the desired threshold
 colSums(eq_pop)
 
+# calculate proportion of all stages excluding the new-born juvenile (stage 0) population, 
+# which can't be initialised:
+eq_pop = getLocalisedEquilPop(demog = demo, DensDep_values = 0.089, plot=F)
+prop_stgs = eq_pop[-1]/sum(eq_pop[-1])
+round(prop_stgs,2)
 
 ### SENSITIVITY ANALYSIS ----
 # Run simulations for several values for given parameters
@@ -139,7 +144,7 @@ real_data %>%
 patch_corres_id = readr::read_csv(here("data", 
                                        "rangeshifter", 
                                        "tests", 
-                                       "test_disp_4", # UPDATE HERE
+                                       "test_disp_5", # UPDATE HERE
                                        "Inputs", 
                                        "patch_corres_id_2005.csv"),
                                 col_types = readr::cols(unique_id = readr::col_integer()))
@@ -148,12 +153,9 @@ patch_corres_id = readr::read_csv(here("data",
 metadata = read_excel(here("data", 
                            "rangeshifter", 
                            "tests", 
-                           "test_disp_4",  # UPDATE HERE !!!
+                           "test_disp_5",  # UPDATE HERE !!!
                            "test_parameters.xlsx"),
                       sheet="test1")
-unique(metadata$DensDep)
-unique(metadata$Emig_prob)
-unique(metadata$PR)
 
 #### Loop -----
 for(i in 1:nrow(metadata)) {
@@ -319,7 +321,6 @@ for(i in 1:nrow(metadata)) {
 # traceback()
 
 ### Results -----
-
 #### Population -----
 
 ##### Files -------
@@ -328,7 +329,7 @@ pop_files = list.files(
   here("data",
        "rangeshifter",
        "tests",
-       "test_disp_4", # UPDATE HERE
+       "test_disp_5", # UPDATE HERE
        "Outputs"),
   pattern = "_Pop\\.txt$",
   full.names = TRUE
@@ -359,30 +360,38 @@ pop_all = dplyr::left_join(
   by = "Id_simul"
 )
 
+### Parameters tested
+# UPDATE HERE
+param1 <- "Step_mortality"
+param2 <- "PR"
+param3 <- "DP"
+
 ##### Line plot ------
 ### Plot
 pop_total = pop_all %>%
-  dplyr::group_by(Id_simul, DensDep, Emig_prob, PR, Rep, Year) %>%
+  dplyr::group_by(Id_simul, !!sym(param1), !!sym(param2), !!sym(param3), Rep, Year) %>%
   dplyr::summarise(NInd = sum(NInd), .groups = "drop")
 pop_time = pop_total %>%
-  dplyr::group_by(DensDep, Emig_prob, PR, Year) %>%
+  dplyr::group_by(!!sym(param1), !!sym(param2), !!sym(param3), Year) %>%
   dplyr::summarise(MeanN = mean(NInd),.groups = "drop")
-ggplot(pop_time, aes(Year, MeanN, colour = factor(DensDep))) + # Parameter that varies as colour
+ggplot(pop_time, aes(Year, MeanN, colour = factor(!!sym(param1)))) + # Parameter that varies as colour
   geom_line(linewidth = 1) +
   # Faceting
   facet_grid(
-    rows = vars(Emig_prob), # Parameter that varies
-    cols = vars(PR), # Other parameter that varies
+    rows = vars(!!sym(param2)), # Parameter that varies
+    cols = vars(!!sym(param3)), # Other parameter that varies
     scales = "free_y") +
   # Vertical reference years
   geom_vline(
-    xintercept = c(0, 17),
+    xintercept = c(0, 8, 17),
     linetype = "dashed",
     colour = "black"
   ) +
   annotate("point", x = 0,  y = 1600, size = 3) +
+  annotate("point", x = 8, y = 3706, size = 3) +
   annotate("point", x = 17, y = 4869, size = 3) +
   annotate("text", x = 0,  y = 1600, label = "2005", vjust = -1) +
+  annotate("text", x = 8, y = 3706, label = "2014", vjust = -1) +
   annotate("text", x = 17, y = 4869, label = "2022", vjust = -1) +
   theme_bw() +
   labs(y = "Mean population size")
@@ -391,59 +400,68 @@ ggplot(pop_time, aes(Year, MeanN, colour = factor(DensDep))) + # Parameter that 
 png(here("data",
          "rangeshifter",
          "tests",
-         "test_disp_4", # UPDATE HERE
+         "test_disp_5", # UPDATE HERE
          "plot",
          "evol_pop.png"), # UPDATE HERE
     width = 3000, height = 3000, res = 300, type="cairo")
-ggplot(pop_time, aes(Year, MeanN, colour = factor(DensDep))) + # Parameter that varies as colour
+ggplot(pop_time, aes(Year, MeanN, colour = factor(!!sym(param1)))) + # Parameter that varies as colour
   geom_line(linewidth = 1) +
   # Faceting
   facet_grid(
-    rows = vars(Emig_prob), # Parameter that varies
-    cols = vars(PR), # Other parameter that varies
+    rows = vars(!!sym(param2)), # Parameter that varies
+    cols = vars(!!sym(param3)), # Other parameter that varies
     scales = "free_y") +
   # Vertical reference years
   geom_vline(
-    xintercept = c(0, 17),
+    xintercept = c(0, 9, 17),
     linetype = "dashed",
     colour = "black"
   ) +
   annotate("point", x = 0,  y = 1600, size = 3) +
+  annotate("point", x = 8, y = 3706, size = 3) +
   annotate("point", x = 17, y = 4869, size = 3) +
   annotate("text", x = 0,  y = 1600, label = "2005", vjust = -1) +
+  annotate("text", x = 8, y = 3706, label = "2014", vjust = -1) +
   annotate("text", x = 17, y = 4869, label = "2022", vjust = -1) +
   theme_bw() +
   labs(y = "Mean population size")
+
 dev.off()
 
 ##### Comparison with long-term data -----
 ### Identify good parameters by comparing with real pop
 ## Identify parameters that provide the same initial and final pop. size
 initial_popsize = 1600 # Adjust
-final_popsize = 4869 # Adjust
+final_popsize = 3706 # Adjust
 initial_pop = pop_time %>%
   dplyr::filter(Year == min(pop_time$Year)) %>%
   dplyr::filter(abs(MeanN - initial_popsize) < 20)  # Adjust tolerance
 final_pop = pop_time %>%
-  dplyr::filter(Year == 17) %>% # 2022
-  dplyr::filter(abs(MeanN - final_popsize) < 250)  # Adjust tolerance
+  dplyr::filter(Year == 8) %>% # 2014
+  dplyr::filter(abs(MeanN - final_popsize) < 200)  # Adjust tolerance
 
 # Get the parameter combinations for initial and final populations
 initial_params = initial_pop %>%
-  dplyr::select(DensDep, Emig_prob, PR) %>%
+  dplyr::select(!!sym(param1),
+                !!sym(param2),
+                !!sym(param3)) %>%
   dplyr::distinct()
 final_params = final_pop %>%
-  dplyr::select(DensDep, Emig_prob, PR) %>%
+  dplyr::select(!!sym(param1),
+                !!sym(param2),
+                !!sym(param3)) %>%
   dplyr::distinct()
 # Find the intersection
 dplyr::inner_join(initial_params, final_params)
 
 ## Heatmap plot
 fit_score = pop_time %>%
-  dplyr::group_by(DensDep, Emig_prob, PR) %>%
+  dplyr::group_by(!!sym(param1),
+                  !!sym(param2),
+                  !!sym(param3)) %>%
   dplyr::summarise(
     InitialN = MeanN[Year == min(Year)],
-    FinalN = MeanN[Year == 17],
+    FinalN = MeanN[Year == 8],
     .groups = "drop"
   ) %>%
   dplyr::mutate(
@@ -453,9 +471,9 @@ fit_score = pop_time %>%
     Total_error = Error_initial + Error_final
   )
 # Plot
-ggplot(fit_score, aes(x = Emig_prob, y = PR, fill = Total_error)) +
+ggplot(fit_score, aes(x = !!sym(param2), y = !!sym(param3), fill = Total_error)) +
   geom_tile() +
-  facet_wrap(~DensDep) +
+  facet_wrap(~.data[[param1]]) +
   scale_fill_viridis_c(
     option = "C",
     direction = -1
@@ -466,13 +484,13 @@ ggplot(fit_score, aes(x = Emig_prob, y = PR, fill = Total_error)) +
 png(here("data",
          "rangeshifter",
          "tests",
-         "test_disp_4", # UPDATE HERE
+         "test_disp_5", # UPDATE HERE
          "plot",
          "heatmap.png"),
     width = 2000, height = 1000, res = 300, type="cairo")
-ggplot(fit_score, aes(x = Emig_prob, y = PR, fill = Total_error)) +
+ggplot(fit_score, aes(x = !!sym(param2), y = !!sym(param3), fill = Total_error)) +
   geom_tile() +
-  facet_wrap(~DensDep) +
+  facet_wrap(~.data[[param1]]) +
   scale_fill_viridis_c(
     option = "C",
     direction = -1
@@ -483,23 +501,23 @@ dev.off()
 ## RMSE
 fit_score = pop_time %>%
   dplyr::group_by(
-    DensDep,
-    Emig_prob,
-    PR
+    !!sym(param1),
+    !!sym(param2),
+    !!sym(param3)
   ) %>%
   dplyr::summarise(
     N0 = MeanN[Year == 0],
-    N17 = MeanN[Year == 17],
+    N8 = MeanN[Year == 8],
     .groups = "drop"
   ) %>%
   dplyr::mutate(
-    RMSE = sqrt(((N0 - initial_popsize)^2 + (N17 - final_popsize)^2) / 2))
+    RMSE = sqrt(((N0 - initial_popsize)^2 + (N8 - final_popsize)^2) / 2))
 # heatmap RMSE
-ggplot(fit_score, aes(x = Emig_prob,
-                      y = PR,
+ggplot(fit_score, aes(x = !!sym(param2),
+                      y = !!sym(param3),
                       fill = RMSE)) +
   geom_tile() +
-  facet_grid(~DensDep) +
+  facet_grid(~.data[[param1]]) +
   scale_fill_viridis_c(
     option = "C",
     direction = -1) +
@@ -512,7 +530,7 @@ fit_score %>%
 
 ##### Patch abundance -----
 pop_patch = pop_all %>%
-  dplyr::group_by(PatchID, DensDep, Emig_prob, PR, Year) %>%
+  dplyr::group_by(PatchID, !!sym(param1), !!sym(param2), !!sym(param3), Year) %>%
   dplyr::summarise(MeanN = mean(NInd),.groups = "drop")
 # Join patch name
 patch_list = c("Aldeia_I_1",
@@ -535,9 +553,9 @@ pop_patch = pop_patch %>%
 # Select parameters and years
 sim_sel = pop_patch %>%
   dplyr::filter(
-    DensDep == 0.06,
-    Emig_prob == 0.02,
-    PR == 5,
+    Step_mortality == 0.01,
+    DP == 5,
+    PR == 2,
     Year %in% c(0, 8, 13, 17) # Years of interest
   )
 
@@ -597,7 +615,7 @@ cor(comparison$SimN, comparison$RealN)
 png(here("data",
          "rangeshifter",
          "tests",
-         "test_disp_4", # UPDATE HERE
+         "test_disp_5", # UPDATE HERE
          "plot",
          "corr_patch_simvsreal.png"),
     width = 2000, height = 1000, res = 300, type="cairo")
@@ -636,7 +654,7 @@ comparison_long = comparison %>%
 png(here("data",
          "rangeshifter",
          "tests",
-         "test_disp_4", # UPDATE HERE
+         "test_disp_5", # UPDATE HERE
          "plot",
          "corr_patch_simvsreal2.png"),
     width = 2000, height = 1000, res = 300, type="cairo")
