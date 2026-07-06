@@ -244,213 +244,245 @@ plot(sf::st_geometry(patches_sf[[36]]), col="darkgreen", add=TRUE)
 # Select patches intersecting several UMMPs
 # Clip to create multipolygons
 
-### TO FIX !!!!
-# 0. Fix overlapping UMMPs
-
-ummp_split = sf::st_intersection(ummps) %>%
-  dplyr::filter(n.overlaps < 2)
-
+## First, disjoint UMMPs (some are overlapping)
+# i.e., cut so that resulting output = patches without overlaps
+# Select the UMMPs of interest
+target_ummp = ummps %>% dplyr::filter(UMMPs %in% c("Aldeia I", "Pirineus", "Gaviões", "Imbaú I"))
+ummp_split = sf::st_intersection(target_ummp) %>% dplyr::filter(n.overlaps < 2)
 ummp_union = sf::st_union(ummp_split)
 
-# 1. SELECT TARGET UMMPs ONLY
-ummp_selected = ummp_split %>%
-  dplyr::filter(UMMPs %in% c("Pirineus", "Aldeia I"))
-
-selected_union = sf::st_union(ummp_selected)
-
-# 2. PROCESS LIST OF PATCHES
+### Clip with UMMPs
 with_progress({
   
   p = progressr::progressor(steps = length(patches_sf))
   
-  processed_all = lapply(seq_along(patches_sf), function(i) {
+  patches_ummps = lapply(seq_along(patches_sf), function(i) {
     
     p()
     
+    # 1. PREPARE PATCHES
+    # Original patch identity from landscapemetrics
     patches = sf::st_make_valid(patches_sf[[i]])
     
-    # 2.1 SPLIT TARGET VS REST
-    patches_target = sf::st_intersection(
-      patches,
-      selected_union
-    )
+    patches$patch_id = seq_len(nrow(patches))
     
-    patches_rest = sf::st_difference(
-      patches,
-      selected_union
-    ) %>%
-      sf::st_collection_extract("POLYGON") %>%
-      sf::st_cast("POLYGON")
     
-    # If nothing intersects target UMMPs
-    if (nrow(patches_target) == 0) {
-      return(patches)
-    }
-    
-    # 2.2 CLIP TARGET BY SELECTED UMMPs
+    # 2. CLIP PATCHES BY UMMPs
+    # Each patch is cut by UMMP boundaries.
+    # A patch spanning several UMMPs will generate
+    # several records.
     inside = sf::st_intersection(
-      patches_target,
-      ummp_selected
+      patches,
+      ummp_split
     )
     
-    inside_dissolved = inside %>%
-      dplyr::group_by(UMMPs) %>%
-      dplyr::summarise(
-        geometry = sf::st_union(geometry),
-        .groups = "drop"
+    # Nothing intersects selected UMMPs
+    if (nrow(inside) == 0)
+      return(patches)
+    
+    
+    # 3. CREATE NEW PATCH IDENTIFIER
+    # Each original patch × UMMP combination becomes
+    # a unique future patch.
+    inside$new_patch_id =
+      paste(
+        inside$patch_id,
+        inside$UMMPs,
+        sep = "_"
       )
     
-    # 2.3 OUTSIDE FRAGMENTS (WITHIN TARGET ONLY)
+    
+    # 4. EXTRACT FRAGMENTS OUTSIDE UMMPs
+    # These are the pieces removed by clipping.
     outside = sf::st_difference(
-      patches_target,
-      sf::st_union(ummp_selected)
+      patches,
+      sf::st_union(ummp_split)
     )
     
-    outside = sf::st_collection_extract(outside, "POLYGON")
-    outside = sf::st_cast(outside, "POLYGON")
+    outside = sf::st_collection_extract(
+      outside,
+      "POLYGON"
+    )
     
+    if (nrow(outside) > 0) {
+      outside = sf::st_cast(
+        outside,
+        "POLYGON"
+      )
+    }
+    
+    # No patch assignment yet
+    outside$new_patch_id = NA_character_
+    
+    
+    # 5. NOTHING TO REASSIGN
     if (nrow(outside) == 0) {
       
-      # nothing to reassign → just return clean merge
-      combined = dplyr::bind_rows(
-        inside_dissolved,
-        outside
+      return(
+        inside %>%
+          dplyr::group_by(new_patch_id) %>%
+          dplyr::summarise(
+            geometry = sf::st_union(geometry),
+            .groups = "drop"
+          )
       )
       
-      assigned = combined %>%
-        dplyr::filter(!is.na(UMMPs)) %>%
-        dplyr::group_by(UMMPs) %>%
-        dplyr::summarise(geometry = sf::st_union(geometry), .groups = "drop")
-      
-      unassigned = combined %>%
-        dplyr::filter(is.na(UMMPs))
-      
-      return(dplyr::bind_rows(assigned, unassigned, patches_rest))
     }
     
-    # 2.4 REASSIGNMENT LOGIC
+    
+    # 6. FIND NEIGHBOURING PATCH PIECES
     rel = sf::st_intersects(
       outside,
-      inside_dissolved,
+      inside,
       sparse = TRUE
     )
     
-    frag_area_ha =
-      as.numeric(sf::st_area(outside)) / 10000
-    
-    # SINGLE TOUCH
-    single_touch = which(lengths(rel) == 1)
+    # 7. SINGLE TOUCH RULE
+    # If a fragment touches only one clipped
+    # patch piece, assign it directly.
+    single_touch = which(
+      lengths(rel) == 1
+    )
     
     if (length(single_touch) > 0) {
       
       for (frag_id in single_touch) {
         
-        if (frag_area_ha[frag_id] >= 500)
-          next
-        
-        outside$UMMPs[frag_id] =
-          inside_dissolved$UMMPs[
+        outside$new_patch_id[frag_id] =
+          inside$new_patch_id[
             rel[[frag_id]][1]
           ]
       }
+      
     }
     
-    # TWO TOUCH RULE
+    
+    # 8. TWO-TOUCH RULE
+    # If a fragment touches two patch pieces,
+    # assign it to the one sharing the largest
+    # buffered contact area.
     two_touch = which(
-      lengths(rel) == 2 &
-        frag_area_ha < 500
+      lengths(rel) == 2
     )
     
     if (length(two_touch) > 0) {
       
       for (frag_id in two_touch) {
         
-        candidate_ids = rel[[frag_id]]
+        candidate_ids =
+          rel[[frag_id]]
         
-        frag_buf = sf::st_buffer(
-          outside[frag_id, ],
-          dist = 1
-        )
-        
-        buf_area = as.numeric(
-          sf::st_area(frag_buf)
-        )
-        
-        shares = sapply(candidate_ids, function(j) {
-          
-          inter = suppressWarnings(
-            sf::st_intersection(
-              frag_buf,
-              inside_dissolved[j, ]
-            )
+        frag_buf =
+          sf::st_buffer(
+            outside[frag_id, ],
+            dist = 1
           )
-          
-          if (nrow(inter) == 0)
-            return(0)
-          
-          sum(as.numeric(sf::st_area(inter)), na.rm = TRUE) / buf_area
-        })
+        
+        buf_area =
+          as.numeric(
+            sf::st_area(frag_buf)
+          )
+        
+        shares = sapply(
+          candidate_ids,
+          function(j) {
+            
+            inter =
+              suppressWarnings(
+                sf::st_intersection(
+                  frag_buf,
+                  inside[j, ]
+                )
+              )
+            
+            if (nrow(inter) == 0)
+              return(0)
+            
+            sum(
+              as.numeric(
+                sf::st_area(inter)
+              ),
+              na.rm = TRUE
+            ) / buf_area
+          }
+        )
         
         best_candidate =
           candidate_ids[
             which.max(shares)
           ]
         
-        outside$UMMPs[frag_id] =
-          inside_dissolved$UMMPs[best_candidate]
+        outside$new_patch_id[frag_id] =
+          inside$new_patch_id[
+            best_candidate
+          ]
       }
+      
     }
     
-    # 2.5 MERGE RESULTS
+    
+    # 9. MERGE CLIPPED PIECES + REASSIGNED FRAGMENTS
     combined = dplyr::bind_rows(
-      inside_dissolved,
+      inside,
       outside
     )
     
+    
+    # 10. REBUILD FINAL PATCHES
+    # Dissolve only pieces belonging to the same
+    # patch × UMMP combination.
     assigned = combined %>%
-      dplyr::filter(!is.na(UMMPs)) %>%
-      dplyr::group_by(UMMPs) %>%
+      dplyr::filter(
+        !is.na(new_patch_id)
+      ) %>%
+      dplyr::group_by(
+        new_patch_id
+      ) %>%
       dplyr::summarise(
-        geometry = sf::st_union(geometry),
+        geometry = sf::st_union(
+          geometry
+        ),
         .groups = "drop"
       )
     
     unassigned = combined %>%
-      dplyr::filter(is.na(UMMPs))
+      dplyr::filter(
+        is.na(new_patch_id)
+      )
     
-    result_target = dplyr::bind_rows(assigned, unassigned)
-    
-    # 2.6 RECOMBINE WITH REST
     dplyr::bind_rows(
-      result_target,
-      patches_rest
+      assigned,
+      unassigned
     )
+    
   })
+  
 })
 
-# Check
-# Select target UMMPs
-ummp_outline = ummp_split %>%
-  dplyr::filter(UMMPs %in% c("Pirineus", "Aldeia I"))
+## Check
+patches_36 = patches_ummps[[36]]
 
-# Extract 36th result
-patches_36 = processed_all[[36]]
-plot(sf::st_geometry(patches_36),
-     col = "#2E7D32",
-     border = NA,
-     main = "Patches (36th layer) + UMMP outlines",
-     reset = FALSE)
+# Random color per patch
+set.seed(123)
 
-# UMMP outlines on top
-plot(sf::st_geometry(ummp_outline),
-     col = NA,
-     border = "red",
-     lwd = 2,
-     add = TRUE)
+patch_cols = sample(
+  grDevices::rainbow(nrow(patches_36)),
+  nrow(patches_36)
+)
 
-# Remove columns
-processed_all = purrr::map(
-  processed_all,
+plot(
+  sf::st_geometry(patches_36),
+  col = patch_cols,
+  border = "grey20",
+  lwd = 0.3,
+  reset = FALSE,
+  main = "Forest patches after UMMP clipping"
+)
+
+
+# Select columns
+patches_ummps = purrr::map(
+  patches_ummps,
   ~ dplyr::select(.x, lyr.1))
 
 
@@ -472,13 +504,14 @@ processed_all = purrr::map(
 regions_names = regions_sf %>%
   dplyr::select(FragName2)
 # Run patch size
-patches_split = purrr::map(
-  patches_split,
+patches_ummps = purrr::map(
+  patches_ummps,
   ~ dplyr::mutate(.x, area_ha = as.numeric(sf::st_area(.x)) / 10000)
 )
+
 # Assign names
 patches_names = purrr::map(
-  patches_split,
+  patches_ummps,
   function(x){
     
     # 1. Assign Region names
@@ -612,6 +645,71 @@ patches_names = purrr::map(
     )
 )
 
+#### Correct geometry ------
+# Check if there are multiple types of geometry
+table(
+  unlist(
+    lapply(
+      patches_names,
+      sf::st_geometry_type
+    )
+  )
+)
+
+# Fix
+with_progress({
+  
+  p = progressr::progressor(steps = length(patches_names))
+  
+  patches_names_good= lapply(seq_along(patches_names), function(i) {
+    
+    p()
+    
+    x = patches_names[[i]]
+    
+    gc_idx = sf::st_geometry_type(x) == "GEOMETRYCOLLECTION"
+    
+    if (!any(gc_idx)) return(x)
+    
+    # split dataset
+    x_gc = x[gc_idx, ]
+    x_ok = x[!gc_idx, ]
+    
+    # fix only GEOMETRYCOLLECTIONs
+    x_gc_fixed = x_gc %>%
+      sf::st_make_valid() %>%
+      sf::st_collection_extract("POLYGON", warn = FALSE)
+    
+    # recombine safely
+    dplyr::bind_rows(x_ok, x_gc_fixed)
+    
+  })
+  
+})
+
+# Dissolve back
+patches_names_good = lapply(patches_names_good, function(x) {
+  
+  x %>%
+    dplyr::group_by(patch_id) %>%
+    dplyr::summarise(
+      geometry = sf::st_union(geometry),
+      .groups = "drop"
+    ) %>%
+    sf::st_make_valid()
+  
+})
+
+# Verification
+table(
+  unlist(
+    lapply(
+      patches_names_good,
+      sf::st_geometry_type
+    )
+  )
+)
+
 #### Patch dilatation-erosion -------
 # Dilatation-erosion on all the raster (as above) may result in connecting close but disconnected patches (see: Boa Esperanca, two close patches but actually connected by a CORRIDOR)
 # Hence, we apply dilatation-erosion afterwards
@@ -738,12 +836,12 @@ plot(sf::st_geometry(patches_dilat[[36]]), col="darkgreen", add=TRUE)
 
 
 #### Export patches ----------
-base_path = here("outputs", "data", "patches")
+base_path = here("outputs", "data", "patches_rshifter")
 purrr::walk2(
-  processed_all,
+  patches_names,
   years,
   ~ {
-    output_path = file.path(base_path, paste0("patches_", .y, ".gpkg"))
+    output_path = file.path(base_path, paste0("patches_rshifter_", .y, ".gpkg"))
     sf::st_write(.x, output_path, layer = "patches", append=FALSE, delete_dsn = TRUE, quiet = TRUE)
     message("Exported: ", output_path)
   }
