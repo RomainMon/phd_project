@@ -838,7 +838,7 @@ plot(sf::st_geometry(patches_dilat[[36]]), col="darkgreen", add=TRUE)
 #### Export patches ----------
 base_path = here("outputs", "data", "patches_rshifter")
 purrr::walk2(
-  patches_names,
+  patches_names_good,
   years,
   ~ {
     output_path = file.path(base_path, paste0("patches_rshifter_", .y, ".gpkg"))

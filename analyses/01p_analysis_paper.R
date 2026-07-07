@@ -1756,12 +1756,12 @@ st_crs(grid) = st_crs(raster_tm_2024)
 
 ### Deforestation ----
 # Compute proportions in the grid
-extract_defor = terra::extract(defor, vect(grid), fun = mean, na.rm = TRUE)
-grid$prop_defor = extract_defor[,2]
+extract_defor = terra::extract(defor, vect(grid), fun = sum, na.rm = TRUE)
+grid$n_defor = extract_defor[,2]
 
 # Remove NAs
 grid = grid %>% 
-  dplyr::filter(!is.na(prop_defor))
+  dplyr::filter(!is.na(n_defor))
 
 # Neighbor matrix
 nb_defor = poly2nb(grid, queen = TRUE) # Queen contiguity
@@ -1770,13 +1770,13 @@ nb_defor = poly2nb(grid, queen = TRUE) # Queen contiguity
 lw_defor = nb2listw(nb_defor, style = "W", zero.policy = TRUE)
 
 # Compute Moran's I
-lmoran = spdep::localmoran(grid$prop_defor, lw_defor, alternative="two.sided")
+lmoran = spdep::localmoran(grid$n_defor, lw_defor, alternative="two.sided")
 
 # Extract values
 grid$lmI = lmoran[, "Ii"] # local Moran's I
 grid$lmZ = lmoran[, "Z.Ii"] # z-scores
 grid$lmp = lmoran[, "Pr(z != E(Ii))"] # p-values
-mp = moran.plot(as.vector(scale(grid$prop_defor)), lw_defor)
+mp = moran.plot(as.vector(scale(grid$n_defor)), lw_defor)
 grid$quadrant = NA
 # high-high
 grid[(mp$x >= 0 & mp$wx >= 0) & (grid$lmp <= 0.05), "quadrant"]= 1
@@ -1975,12 +1975,12 @@ map_hotspots_defor = ggplot() +
 
 ### Reforestation ----
 # Compute proportions in the grid
-extract_refor = terra::extract(refor, vect(grid), fun = mean, na.rm = TRUE)
-grid$prop_refor = extract_refor[,2]
+extract_refor = terra::extract(refor, vect(grid), fun = sum, na.rm = TRUE)
+grid$n_refor = extract_refor[,2]
 
 # Remove NAs
 grid = grid %>% 
-  dplyr::filter(!is.na(prop_refor))
+  dplyr::filter(!is.na(n_refor))
 
 # Neighbor matrix
 nb_refor = poly2nb(grid, queen = TRUE) # Queen contiguity
@@ -1989,13 +1989,13 @@ nb_refor = poly2nb(grid, queen = TRUE) # Queen contiguity
 lw_refor = nb2listw(nb_refor, style = "W", zero.policy = TRUE)
 
 # Compute Moran's I
-lmoran = spdep::localmoran(grid$prop_refor, lw_refor, alternative="two.sided")
+lmoran = spdep::localmoran(grid$n_refor, lw_refor, alternative="two.sided")
 
 # Extract values
 grid$lmI = lmoran[, "Ii"] # local Moran's I
 grid$lmZ = lmoran[, "Z.Ii"] # z-scores
 grid$lmp = lmoran[, "Pr(z != E(Ii))"] # p-values
-mp = moran.plot(as.vector(scale(grid$prop_refor)), lw_refor)
+mp = moran.plot(as.vector(scale(grid$n_refor)), lw_refor)
 grid$quadrant = NA
 # high-high
 grid[(mp$x >= 0 & mp$wx >= 0) & (grid$lmp <= 0.05), "quadrant"]= 1
