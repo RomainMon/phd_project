@@ -182,6 +182,7 @@ test_data_car_refor %>%
   dplyr::group_by(Less20For2024) %>% 
   dplyr::summarise(mean=mean(area_reforest_ha))
 
+
 # Calculate mean and sd for deforestation and reforestation
 def_mean_sd = data_car %>%
   sf::st_drop_geometry() %>%
