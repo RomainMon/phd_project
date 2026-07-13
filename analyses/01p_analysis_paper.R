@@ -176,6 +176,12 @@ cat(
   "\n2024:",
   paste(round(less20_2024$prop[less20_2024$Less20For2024 == 1], 2), "%"))
 
+# Calculate mean reforestation on properties above (Less20For = 0) and below (Less20For = 1) the 20% Legal Reserve threshold
+test_data_car_refor %>% 
+  sf::st_drop_geometry() %>% 
+  dplyr::group_by(Less20For2024) %>% 
+  dplyr::summarise(mean=mean(area_reforest_ha))
+
 # Calculate mean and sd for deforestation and reforestation
 def_mean_sd = data_car %>%
   sf::st_drop_geometry() %>%
@@ -1556,12 +1562,12 @@ plot_x1 = ggplot(pred_manual, aes(x = x, y = predicted, color = Less20For2024, f
   ggtitle("Property size") +
   scale_color_manual(
     values = c("0" = "#5e4c5f", "1" = "#ffbb6f"),
-    labels = c("<20% forest cover", ">20% forest cover"),
+    labels = c(">20% forest cover", "<20% forest cover"),
     name = "Forest cover in 2024"
   ) +
   scale_fill_manual(
     values = c("0" = "#5e4c5f", "1" = "#ffbb6f"),
-    labels = c("<20% forest cover", ">20% forest cover"),
+    labels = c(">20% forest cover", "<20% forest cover"),
     name = "Forest cover in 2024"
   ) +
   guides(fill = "none") +
@@ -1622,12 +1628,12 @@ plot_x2 = ggplot(pred_manual, aes(x = x, y = predicted, color = Less20For2024, f
   ggtitle("Surrounding reforestation (2024)") +
   scale_color_manual(
     values = c("0" = "#5e4c5f", "1" = "#ffbb6f"),
-    labels = c("<20% forest cover", ">20% forest cover"),
+    labels = c(">20% forest cover", "<20% forest cover"),
     name = "Forest cover in 2024"
   ) +
   scale_fill_manual(
     values = c("0" = "#5e4c5f", "1" = "#ffbb6f"),
-    labels = c("<20% forest cover", ">20% forest cover"),
+    labels = c(">20% forest cover", "<20% forest cover"),
     name = "Forest cover in 2024"
   ) +
   guides(fill = "none") +
@@ -1689,12 +1695,12 @@ plot_x3 = ggplot(pred_manual, aes(x = x, y = predicted, color = Less20For2024, f
   ggtitle("Surrounding agriculture (1989)") +
   scale_color_manual(
     values = c("0" = "#5e4c5f", "1" = "#ffbb6f"),
-    labels = c("<20% forest cover", ">20% forest cover"),
+    labels = c(">20% forest cover", "<20% forest cover"),
     name = "Forest cover in 2024"
   ) +
   scale_fill_manual(
     values = c("0" = "#5e4c5f", "1" = "#ffbb6f"),
-    labels = c("<20% forest cover", ">20% forest cover"),
+    labels = c(">20% forest cover", "<20% forest cover"),
     name = "Forest cover in 2024"
   ) +
   guides(fill = "none") +
