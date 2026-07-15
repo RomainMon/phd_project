@@ -38,6 +38,7 @@ forest_class_metrics = readr::read_csv(
   show_col_types = FALSE)
 
 ## Modeling datasets
+# The response variable is binary with 0 (control) and 1 (deforestation/reforestation)
 base_path = here("outputs", "data", "MapBiomas", "LULCC_datasets")
 # Property-scale deforestation dataset
 train_data_car_defor = sf::st_read(
