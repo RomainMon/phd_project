@@ -29,6 +29,7 @@ library(performance)
 library(sjPlot)
 library(DHARMa)
 library(here)
+library(AICcmodavg)
 
 ### 1.RESPONSE RATE -----
 ## Data
@@ -253,7 +254,6 @@ diag(matrice_q8) <- 0 # Diagonal of 0
 
 matrice_q8_sym <- (matrice_q8 | t(matrice_q8)) # rendre la matrice symétrique, si 1 d'un côté, 1 de l'autre aussi 
 matrice_q8_sym <- matrice_q8_sym * 1
-View(matrice_q8_sym)
 
 ## Network 
 net_q8 <-
@@ -329,7 +329,6 @@ mat_sym_q8[is.na(mat_sym_q8)] <- 0 # rowMeans with na.rm=TRUE returns 0 if both 
 rownames(mat_sym_q8) <- rownames(matrice_q8av)
 colnames(mat_sym_q8) <- colnames(matrice_q8av)# Restoring column and row names 
 diag(mat_sym_q8) <- 0
-View(mat_sym_q8)
 
 ## Network 
 net_q8av <- graph_from_adjacency_matrix(mat_sym_q8, 
@@ -395,7 +394,6 @@ mat_sym_q9[is.na(mat_sym_q9)] <- 0 # rowMeans with na.rm=TRUE returns 0 if both 
 rownames(mat_sym_q9) <- rownames(matrice_q9av)
 colnames(mat_sym_q9) <- colnames(matrice_q9av)# Restoring column and row names 
 diag(mat_sym_q9) <- 0
-View(mat_sym_q9)
 
 ## Network 
 net_q9av <- graph_from_adjacency_matrix(mat_sym_q9, 
@@ -461,7 +459,6 @@ mat_sym_q10[is.na(mat_sym_q10)] <- 0
 rownames(mat_sym_q10) <- rownames(matrice_q10av)
 colnames(mat_sym_q10) <- colnames(matrice_q10av)
 diag(mat_sym_q10) <- 0
-View(mat_sym_q10)
 
 ## Network
 net_q10av <- graph_from_adjacency_matrix(mat_sym_q10, 
@@ -496,6 +493,7 @@ coms<-cluster_fast_greedy(net_q10av)
 coms
 
 ### 3.2 Multilayer network ----
+#### Create multilayer object ----
 # Create igraph objects 
 mnet2 <- ml_empty()
 
@@ -505,8 +503,8 @@ add_igraph_layer_ml(mnet2, net_q10av, "Dependancy")
 
 mnet2
 
-##### Calculating the metrics for the mnet2 -----
-## Degree
+#### Node metrics -----
+## DEGREE
 # Total degree per actor (all categories combined)
 deg2 <- degree_ml(mnet2)
 names(deg2) <- unlist(actors_ml(mnet2)) 
@@ -529,7 +527,55 @@ print(top_degrees2)
                                     0))
 print(topdeg2)
 
-## COMPARAISON DES COUCHES
+
+## DISTANCE
+acteurs_reseau2 <- unlist(actors_ml(mnet2))
+length(acteurs_reseau2)
+liste_resultats2 <- list()
+for (i in 1:length(acteurs_reseau2)) {
+  nom_actuel2 <- acteurs_reseau2[i]
+  liste_resultats2[[i]] <- distance_ml(mnet2, from = nom_actuel2)
+}
+
+toutes_les_distances2 <- do.call(rbind, liste_resultats2)
+
+## VERSATILITY
+# to identify which stakeholders occupy consistently important positions across all three layers, rather than within a single network
+
+## Calcul de l'écart type entre les trois couches 
+liste_acteurs <- actors_ml(mnet2)[1]
+
+# nettoyer liste et séparer acteurs 
+acteurs <- gsub('c\\(|\\)|"|\'', '', liste_acteurs)
+
+# On sépare les noms à chaque virgule et on enlève les espaces inutiles au début/fin
+noms_acteurs <- trimws(unlist(strsplit(acteurs, ",")))
+
+# Calcul des degrés par couche
+deg_collaboration <- degree_ml(mnet2, layers = "Collaboration")
+deg_information   <- degree_ml(mnet2, layers = "Information")
+deg_dependancy    <- degree_ml(mnet2, layers = "Dependancy")
+
+# Assemblage dans un data.frame propre
+df_degres <- data.frame(
+  Collaboration = deg_collaboration,
+  Information   = deg_information,
+  Dependancy    = deg_dependancy
+)
+
+# Calculs
+moyenne <- rowMeans(df_degres)
+ecart_type <- apply(df_degres, 1, sd)
+
+versatility_data <- data.frame(
+  Stakeholder = noms_acteurs,
+  Versatility_Score = moyenne / (1 + ecart_type)
+)
+
+View(versatility_data)
+
+#### Layer comparison -----
+## BASIC COMPARISON
 #comparaison distribution degré
 layer_comparison_ml(mnet2, method = "jeffrey.degree")
 #même degré dans différentes couches - qq soit les voisins
@@ -537,7 +583,13 @@ layer_comparison_ml(mnet2, method="pearson.degree")
 #mêmes liens entre mêmes paires de sommets
 layer_comparison_ml(mnet2, method="jaccard.edges")
 
-## DETECTION DES COMMUNAUTES 
+## EDGE OVERLAP
+# to quantify how many relationships are shared across dimensions
+matrice_overlap <- layer_comparison_ml(mnet2, method = "coverage.edges")
+print(matrice_overlap)
+
+#### Community detection -----
+## COMMUNITY DETECTION
 comu1 <- glouvain_ml(mnet2) #optimisation de la modularité
 comu2 <- clique_percolation_ml(mnet2) #recherche de cliques adjacentes
 comu3 <- abacus_ml(mnet2, min.actors = 3, min.layers = 3) #détection de motifs
@@ -557,17 +609,6 @@ plot(mnet2, vertex.labels.cex=.3, com=comu1)
 plot(mnet2,vertex.labels.cex=.3, com=comu2)
 plot(mnet2, vertex.labels.cex=.3, com=comu3)
 
-## DISTANCE
-acteurs_reseau2 <- unlist(actors_ml(mnet2))
-length(acteurs_reseau2)
-liste_resultats2 <- list()
-for (i in 1:length(acteurs_reseau2)) {
-  nom_actuel2 <- acteurs_reseau2[i]
-  liste_resultats2[[i]] <- distance_ml(mnet2, from = nom_actuel2)
-}
-
-toutes_les_distances2 <- do.call(rbind, liste_resultats2)
-View(toutes_les_distances2)
 
 ### 3.3 MuxViz vizualisation-----
 ## Création des reseau igraph
@@ -603,6 +644,9 @@ library(rgl)
 # Then, to make this a permanent change, I created a “patch_muxviz” script with the modified function code 
 # And an R.profile using this command: file.edit("~/.Rprofile")
 # These two new scripts allow you to directly use the modified version of the `plot_multiplex3D` function when calling the muxViz package.
+
+### Import the new function
+source(here::here("R", "aurelie_vinot", "patch_muxviz.R"))
 
 g_list <- list(net_q8, net_q9av, net_q10av)
 
@@ -694,7 +738,7 @@ shell.exec(getwd())
 
 ### 4.QAP TEST -----
 liste_layers <- list(
-  "Collaboration" = matrice_q8_sym, 
+  "Collaboration" = mat_sym_q8, 
   "Information" = mat_sym_q9,             
   "Dependancy" = mat_sym_q10
 )
@@ -715,7 +759,7 @@ collab_dep2
 
 plot(density(collab_dep2$dist), 
      main = "Comparison of collaboration and dependency networks")
-abline(v = collab_info2$testval, col = "red", lwd = 2)
+abline(v = collab_dep2$testval, col = "red", lwd = 2)
 summary(collab_dep2)
 
 # Information-dependancy layers
@@ -724,7 +768,7 @@ info_dep2
 
 plot(density(info_dep2$dist), 
      main = "Comparison of information and dependency networks")
-abline(v = collab_info2$testval, col = "red", lwd = 2)
+abline(v = info_dep2$testval, col = "red", lwd = 2)
 summary(info_dep2)
 
 ## Final visualization 
@@ -734,7 +778,7 @@ df_dist <- data.frame(
   `Collab_Dep`  = collab_dep2$dist,
   `Info_Dep`    = info_dep2$dist
 ) %>% 
-  pivot_longer(cols = everything(), names_to = "Comparison", values_to = "Correlation")
+  tidyr::pivot_longer(cols = everything(), names_to = "Comparison", values_to = "Correlation")
 
 # Create a dataframe 
 df_observed <- data.frame(
@@ -762,25 +806,25 @@ df_observed <- df_observed %>%
     v_offset = case_when(
       Comparison == "Collab_Dep"  ~ 4,  # below
       Comparison == "Collab_Info" ~ 2,  # middle
-      Comparison == "Info_Dep"    ~ 2,  
+      Comparison == "Info_Dep"    ~ 3,  
       TRUE                        ~ 2
     )
   )
 
 # PLOT
-qap <- ggplot(df_dist, aes(x = Correlation, fill = Comparison, color = Comparison)) +
+qap = ggplot(df_dist, aes(x = Correlation, fill = Comparison, color = Comparison)) +
   # density curves
   geom_density(alpha = 0.35, size = 0.8) +
   
   # Vertical lines
   geom_vline(data = df_observed, aes(xintercept = Observed, color = Comparison),
-             linetype = "dashed", size = 0.9, show.legend = FALSE) +
+             linetype = "dashed", linewidth = 0.5, show.legend = FALSE) +
   
   # Text
   geom_text(data = df_observed, aes(x = Observed, y = Inf, 
                                     label = paste0("Obs: ", round(Observed, 2)), 
                                     color = Comparison, vjust = v_offset),
-            hjust = 1.1, fontface = "bold", size = 5, show.legend = FALSE) +
+            hjust = 1.1, fontface = "bold", size = 3.5, show.legend = FALSE) +
   
   # Colors
   scale_fill_manual(values = custom_colors, labels = legend_labels) +
@@ -796,33 +840,29 @@ qap <- ggplot(df_dist, aes(x = Correlation, fill = Comparison, color = Compariso
   
   theme_minimal (base_size = 12) +
   theme(
-    axis.title.x = element_text(size = 16, face = "bold", margin = margin(t = 10)), # Titre X plus grand
-    axis.title.y = element_text(size = 16, face = "bold", margin = margin(r = 10)), # Titre Y plus grand
+    axis.title.x = element_text(size = 12, face = "bold", margin = margin(t = 10)), # Titre X plus grand
+    axis.title.y = element_text(size = 12, face = "bold", margin = margin(r = 10)), # Titre Y plus grand
     axis.text.x = element_text(size = 10),                                         # Chiffres sur l'axe X
     axis.text.y = element_text(size = 10),
 
     legend.position = "bottom",
     legend.box = "horizontal",
-    legend.title = element_text(size = 14, face = "bold"),                       
-    legend.text = element_text(size = 13),
+    legend.title = element_text(size = 12, face = "bold"),                       
+    legend.text = element_text(size = 10),
     panel.grid.minor = element_blank(),
     panel.background = element_rect(fill = "white", color = NA),
     plot.background = element_rect(fill = "white", color = NA)
   )
 
-ggsave(
-  filename = "C:/Users/Stage/Desktop/Dossier_Aurelie/Statistics/Clean M2 internship folder/Clean script for article/Clean_QAP.png",
-  plot = qap,
-  width = 10,       
-  height = 5,
-  dpi = 300,       
-  type = "cairo"
-)
+# Export
+png(here("outputs","plot","03a_SNAs_QAP.png"), width = 3000, height = 1500, res = 300, type="cairo")
+plot(qap)
+dev.off()
 
 ### 5.BIPARTITE NETWORKS -----
 # Data
-data_strat<- read_excel("Clean_dataset.xlsx", 
-                        sheet = "final_strategies")
+data_strat <- read_excel(here("data","interviews","Q1","Dataset_Q1_clean.xlsx"),
+                   sheet = "final_strategies")
 
 ### 5.1 Bipartite actor-strategies 
 ## Incidence matrix
@@ -842,7 +882,7 @@ str_1 <- str1 %>% as.data.frame() # Convert to a dataframe to assign unique name
 rownames(str_1) <- make.unique(str_1$Stakeholders_categories)
 
 matrice_str_1 <- str_1 %>% # On supprime l'ancienne colonne et on transforme en matrice
-  select(-Stakeholders_categories) %>% 
+  dplyr::select(-Stakeholders_categories) %>% 
   as.matrix()
 View(matrice_str_1)
 
@@ -924,13 +964,18 @@ browsable(page_finale)
 
 ### 5.2 Network metrics 
 ## Nodes metric
+# Here, we calculate various indices for network properties at the node level ('species' in bipartite package)
+# where higher level nodes are in columns, lower level nodes in row
+
+# Respondents
 low1 <- specieslevel(matrice_triee_1, level = "lower")
-(low_clean_1 <- low1[, c("degree", 
-                         "weighted.closeness", 
-                         "weighted.betweenness",
-                         "nestedrank")])
+(low_clean_1 <- low1[, c("degree", # Sum of links
+                         "normalised.degree", # As degree, but scaled by the number of possible partners
+                         "weighted.closeness", # Computes closeness (in one of its varieties), but based on weighted representation of the network
+                         "weighted.betweenness", # Computes betweenness (proportion of shortest paths through this node), but based on weighted representation of the network
+                         "nestedrank")]) # Quantifies generalism
 
-
+# Strategies
 high1 <- specieslevel(matrice_triee_1, level = "higher")
 (high_clean_1 <- high1[, c("degree", 
                            "weighted.closeness", 
@@ -952,13 +997,13 @@ grouplevel(matrice_triee_1,
 
 ### 6.LINEAR MIXED EFFECT MODEL ----
 ## Data
-data_reg <- read_excel("Clean_dataset.xlsx", 
-                       sheet = "perceived_success")
+data_reg <- read_excel(here("data","interviews","Q1","Dataset_Q1_clean.xlsx"),
+                         sheet = "perceived_success")
 
 # Table for regressions
 reg <- data_reg %>%
-  mutate (across(
-    .col = c(3:16, 21:34) , ~ case_when(
+  dplyr::mutate (across(
+    .col = c(3:16, 21:34) , ~ dplyr::case_when(
       . == "Not at all" ~ 0,
       . == "Slightly" ~ 0.25,
       . == "Moderately" ~ 0.5,
@@ -973,34 +1018,33 @@ colonnes_fixes <- c("Stakeholders_categories", "years_in_project",
 
 reg_final <- reg %>%
   # strategy columns in long format
-  pivot_longer(
+  tidyr::pivot_longer(
     cols = -any_of(colonnes_fixes), 
     names_to = "temp_name", 
     values_to = "valeur"
   ) %>%
   # determine whether it is success or involvement
-  mutate(
+  dplyr::mutate(
     type_mesure = ifelse(str_detect(temp_name, fixed("(involvement)")), "involvement", "Perceived_success"),
     
     # clean strategy's name 
     strategy = str_remove(temp_name, fixed("(involvement)"))
   ) %>%
   # deleting the temporary column that still contains the suffixes
-  select(-temp_name) %>%
+  dplyr::select(-temp_name) %>%
   # pivot to have one column success and one involvement
-  pivot_wider(
+  tidyr::pivot_wider(
     names_from = type_mesure,
     values_from = valeur
   )
 
-View(reg_final)
 reg_final$strategy <- gsub("_", " ", reg_final$strategy)
 
 # logic order and format change 
 ordre <- c("Occasionally", "Moderately", "Significantly", "Exclusively")
 
 reg_final <- reg_final %>%
-  mutate(across(c(involvement_level), 
+  dplyr::mutate(across(c(involvement_level), 
                 ~ factor(.x, levels = ordre, ordered = TRUE)), # convertir les caractères en facteur avec un ordre
          Stakeholders_categories = as.factor(Stakeholders_categories),
          strategy = as.factor(strategy),
@@ -1008,16 +1052,29 @@ reg_final <- reg_final %>%
   )
 str(reg_final)
 
-## MODEL 
-# summary 
-model1 <- lmer(Perceived_success ~ Degree * involvement + years_in_project + (1|ID), data = reg_final)
+# join bipartite metrics
+metrics = low_clean_1 %>% 
+  dplyr::select(1:2) %>% 
+  rownames_to_column(var="ID")
+reg_final = reg_final %>% 
+  dplyr::left_join(metrics, by="ID")
 
-check_model(model1, check = c("normality", "homogeneity"))
+## MODEL SELECTION
+model1 <- lmer(Perceived_success ~ degree * involvement + years_in_project + (1|ID), REML=FALSE, data = reg_final)
+model2 <- lmer(Perceived_success ~ normalised.degree * involvement + years_in_project + (1|ID), REML=FALSE, data = reg_final)
+cand.set <- list(
+  degree = model1,
+  normalised_degree = model2
+)
+aictab(cand.set)
 
+# Model interpretation
+model1 <- lmer(Perceived_success ~ degree * involvement + years_in_project + (1|ID), REML=TRUE, data = reg_final)
+performance::check_model(model1, check = c("normality", "qq", "homogeneity", "outliers"))
 summary(model1, correlation = T)
 
 # Model predictions 
-pred1 <- ggpredict(model1, terms = c("involvement", "Degree"))
+pred1 <- ggpredict(model1, terms = c("involvement", "degree"))
 
 plot(pred1) + 
   labs( 
@@ -1027,7 +1084,7 @@ plot(pred1) +
   theme_minimal()
 
 
-pred2 <- ggpredict(model1, terms = c("Degree", "involvement"))
+pred2 <- ggpredict(model1, terms = c("degree", "involvement"))
 
 pred <- plot(pred2) + 
   labs(
@@ -1035,6 +1092,15 @@ pred <- plot(pred2) +
     y = "Predicted perceived success",
     colour = "Level of involvement",
     fill = "Level of involvement" 
+  ) +
+  guides(
+    colour = guide_legend(
+      override.aes = list(
+        fill = NA,
+        linewidth = 1.2
+      )
+    ),
+    fill = "none" # to remove the filled boxes from the legend
   ) +
   
   # reverse = TRUE pour inverser l'ordre de la légende 
@@ -1045,26 +1111,249 @@ pred <- plot(pred2) +
   
   theme_minimal (base_size = 12) +
   theme(
-    axis.title.x = element_text(size = 16, face = "bold", margin = margin(t = 10)), # Titre X plus grand
-    axis.title.y = element_text(size = 16, face = "bold", margin = margin(r = 10)), # Titre Y plus grand
+    axis.title.x = element_text(size = 12, face = "bold", margin = margin(t = 10)), # Titre X plus grand
+    axis.title.y = element_text(size = 12, face = "bold", margin = margin(r = 10)), # Titre Y plus grand
     axis.text.x = element_text(size = 10),                                         # Chiffres sur l'axe X
     axis.text.y = element_text(size = 10),
     
+    title = element_blank(),
     legend.position = "bottom",
     legend.box = "horizontal",
-    legend.title = element_text(size = 14, face = "bold"),                        
-    legend.text = element_text(size = 13),
+    legend.title = element_text(size = 12, face = "bold"),                 
+    legend.text = element_text(size = 10),
     panel.grid.minor = element_blank(),
     panel.background = element_rect(fill = "white", color = NA),
     plot.background = element_rect(fill = "white", color = NA)
   )
 
-ggsave(
-  filename = "C:/Users/Stage/Desktop/Dossier_Aurelie/Statistics/Clean M2 internship folder/Clean script for article/prediction_model_3.png",
-  plot = pred,
-  width = 8,       
-  height = 5,
-  dpi = 300,       
-  type = "cairo"
+# Export
+png(here("outputs","plot","03a_SNAs_LMM.png"), width = 2500, height = 1500, res = 300, type="cairo")
+plot(pred)
+dev.off()
+
+
+###7.CORRELATIONS-------
+
+#### Number of respondents ~ node degree -----
+
+# 1. Node degree
+degree_8 <- igraph::degree(net_q8av)
+degree_9 <- igraph::degree(net_q9av)
+degree_10 <- igraph::degree(net_q10av)
+
+# 2. Number of respondents at each question
+nb_respondents_8 <- data_q8 %>%
+    dplyr::group_by(Stakeholders_categories) %>%
+    dplyr::summarise(nb_respondents_8 = n())
+
+nb_respondents_9 <- data_q9 %>%
+    dplyr::group_by(Stakeholders_categories) %>%
+    dplyr::summarise(nb_respondents_9 = n())
+
+nb_respondents_10 <- data_q10 %>%
+    dplyr::group_by(Stakeholders_categories) %>%
+    dplyr::summarise(nb_respondents_10 = n())
+
+
+# 3. Join tables
+df_8 <- data.frame(
+  Stakeholders_categories= names(degree_8),
+  degree = as.numeric(degree_8)
+)
+View(df_8)
+
+df_9 <- data.frame(
+  Stakeholders_categories= names(degree_9),
+  degree = as.numeric(degree_9)
 )
 
+df_10 <- data.frame(
+  Stakeholders_categories= names(degree_10),
+  degree = as.numeric(degree_10)
+)
+
+# On fusionne avec le nombre de répondants
+df8_f <- left_join(df_8, nb_respondents_8, by = "Stakeholders_categories")
+df9_f <- left_join(df_9, nb_respondents_9, by = "Stakeholders_categories")
+df10_f <- left_join(df_10, nb_respondents_10, by = "Stakeholders_categories")
+
+# corrélation 
+r8 <- cor(df8_f$nb_respondents_8, df8_f$degree, method = "spearman", use = "complete.obs")
+r9 <- cor(df9_f$nb_respondents_9, df9_f$degree, method = "spearman", use = "complete.obs")
+r10 <- cor(df10_f$nb_respondents_10, df10_f$degree, method = "spearman", use = "complete.obs")
+
+# Afficher le résultat
+print(r8)
+print(r9)
+print(r10)
+
+### WITHOUT ONG ###
+nb_8 <- data_q8 %>%
+    dplyr::group_by(Stakeholders_categories) %>%
+    dplyr::filter(Stakeholders_categories != "NGO") %>%
+    dplyr::summarise(nb_8 = n())
+
+nb_9 <- data_q9 %>%
+    dplyr::group_by(Stakeholders_categories) %>%
+    dplyr::filter(Stakeholders_categories != "NGO") %>%
+    dplyr::summarise(nb_9 = n())
+
+nb_10 <- data_q10 %>%
+    dplyr::group_by(Stakeholders_categories) %>%
+    dplyr::filter(Stakeholders_categories != "NGO") %>%
+    dplyr::summarise(nb_10 = n())
+
+df8 <- data.frame(
+  Stakeholders_categories= names(degree_8),
+  degree = as.numeric(degree_8)
+)
+
+df9 <- data.frame(
+  Stakeholders_categories= names(degree_9),
+  degree = as.numeric(degree_9)
+)
+
+df10 <- data.frame(
+  Stakeholders_categories= names(degree_10),
+  degree = as.numeric(degree_10)
+)
+
+# On fusionne avec le nombre de répondants
+df8_f <- left_join(df8, nb_8, by = "Stakeholders_categories")
+df9_f <- left_join(df_9, nb_9, by = "Stakeholders_categories")
+df10_f <- left_join(df_10, nb_10, by = "Stakeholders_categories")
+
+# corrélation 
+r8 <- cor(df8_f$nb_8, df8_f$degree, method = "spearman", use = "complete.obs")
+r9 <- cor(df9_f$nb_9, df9_f$degree, method = "spearman", use = "complete.obs")
+r10 <- cor(df10_f$nb_10, df10_f$degree, method = "spearman", use = "complete.obs")
+
+# Afficher le résultat
+print(r8)
+print(r9)
+print(r10)
+
+#### With multilayer networks (global degree) -----
+# Extraction des degrés globaux 
+all_degree <- multinet::degree_ml(mnet2)
+respondents <- actors_ml(mnet2)$actor #On extrait la colonne de texte brute "$actor" renvoyée par multinet pour pas qu'elle s'appelle actor 
+
+# Création du tableau de comparaison
+df_multicouche <- data.frame(
+  Stakeholders_categories = respondents,
+  total_degree = as.numeric(all_degree)
+)
+View(df_multicouche)
+
+# Fusion avec les répondants
+# j'utilise le nombre de répondant du réseau 8 car c'est le même pour tous 
+df_final_multicouche <- left_join(df_multicouche, nb_respondents_8, by = "Stakeholders_categories")
+View(df_final_multicouche)
+
+df_final_multicouche <- df_final_multicouche[c(1:3, 5:15),] # si on veut enlever le nombre de répondants 
+
+# Coefficient de Spearman global
+r_multicouche <- cor(df_final_multicouche$nb_respondents_8, df_final_multicouche$total_degree, method = "spearman", use = "complete.obs")
+print(r_multicouche)
+
+###8.ROBUSTNESS OF THE NETWORK -------
+
+#### Degree on edge ----
+nsim=1000
+# set up function for edge deletion for betweenness
+resamp.edge.bt <- function(x) {
+  # Calcule le degré initial (mode = "all" pour réseau non-orienté, utilise "in" ou "out" si orienté)
+  bt.g <- igraph::degree(x, mode = "all", loops = FALSE)
+  mat <- as.matrix(x)
+  dim.x <- dim(mat)[1]
+  out.mat <- matrix(NA, nsim, 9)  # create matrix for output and then name
+  colnames(out.mat) <- c("S90", "S80", "S70", "S60", "S50", "S40", "S30", 
+                         "S20", "S10")
+  # this double loop goes through each sampling fraction and each random
+  for (j in 1:9) {
+    for (i in 1:nsim) {
+      # our sampling fraction is defined here using the gsize function
+      # which tells us the total number of active edges in a network object
+      sub.samp <- sample(seq(1, gsize(x)), size = round(gsize(x) * (j/10), 0), replace = F)
+      temp.net <- x
+      net.reduced <- igraph::delete_edges(temp.net, sub.samp)
+      temp.stats <- igraph::degree(net.reduced, mode = "all", loops = FALSE)
+      # calculate spearman's rho for replicate and output result
+      out.mat[i, j] <- cor(temp.stats, bt.g, method = "spearman")
+    }
+  }
+  return(out.mat)
+}  # return results
+
+matrice_robustness_q8 <- resamp.edge.bt(net_q8av)
+matrice_robustness_q9 <- resamp.edge.bt(net_q9av)
+matrice_robustness_q10 <- resamp.edge.bt(net_q10av)
+
+# display results as boxplot
+bet.plot<-boxplot(matrice_robustness_q8,
+                  ylim = c(-1, 1), 
+                  main = "Degree collaboration", 
+                  xlab = "Sampling fraction", 
+                  ylab = "Spearmans rho")
+
+bet.plot<-boxplot(matrice_robustness_q9,
+                  ylim = c(-1, 1), 
+                  main = "Degree information", 
+                  xlab = "Sampling fraction", 
+                  ylab = "Spearmans rho")
+
+bet.plot<-boxplot(matrice_robustness_q10,
+                  ylim = c(-1, 1), 
+                  main = "Degree dependency", 
+                  xlab = "Sampling fraction", 
+                  ylab = "Spearmans rho")
+
+#### Degree on nodes ----
+resamp.test <- function(x) {
+  # the next line can be replaced with any centrality measure you'd like
+  bw.g <- sna::degree(x, gmode = "graph")
+  mat <- as.matrix(x)
+  dim.x <- dim(mat)[1]
+  out.mat <- matrix(NA, nsim, 9)  # create matrix for output and then name
+  colnames(out.mat) <- c("S90", "S80", "S70", "S60", "S50", "S40", "S30",
+                         "S20", "S10")
+  # this double loop goes through each sampling fraction and each random
+  # replicate to cacluate centrality statistics and runs a Spearman's rho
+  # correlation between the resulting centrality values and the original
+  # sample
+  for (j in 1:9) {
+    for (i in 1:nsim) {
+      # this sampling procedure samples without replacement from a sequence from 1
+      # to the total number of nodes, the size of the sample being determined by
+      # 10-j/10. For example if j=1, 10-1/10 = 0.9 or a 90% sub-sample.
+      sub.samp <- sample(seq(1, dim.x), size = round(dim.x * ((10 - j)/10),
+                                                     0), replace = F)
+      # calculate the betweenness statistic for the matrix reduced to only include
+      # the sub-sampled rows/columns
+      temp.stats <- sna::degree(mat[sub.samp, sub.samp], gmode = "graph")
+      # calcuate spearman's rho for replicate
+      out.mat[i, j] <- suppressWarnings(cor(temp.stats, bw.g[sub.samp],
+                                            method = "spearman"))
+    }
+  }
+  return(out.mat)
+}  # return the result
+
+# display results as boxplot by sampling fraction
+boxplot(resamp.test(matrice_q8_sym), 
+        ylim = c(0, 1), 
+        main = "BR - Degree collaboration", 
+        xlab = "sampling fraction",
+        ylab = "Spearmans rho")
+
+boxplot(resamp.test(mat_sym_q9), 
+        ylim = c(0, 1), 
+        main = "BR - Degree information", 
+        xlab = "sampling fraction",
+        ylab = "Spearmans rho")
+
+boxplot(resamp.test(mat_sym_q10), 
+        ylim = c(0, 1), 
+        main = "BR - Degree dependency", 
+        xlab = "sampling fraction",
+        ylab = "Spearmans rho")
