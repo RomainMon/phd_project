@@ -1,0 +1,1070 @@
+#------------------------------------------------#
+# Authors: Aurélie Vinot, Romain Monassier
+# Objective: Running SNAs on questionnaire data (Q1) to stakeholders
+# Mostly based on Aurélie's M2 internship (January-July 2026)
+# Some analyses were added after the end of her internship
+#------------------------------------------------#
+
+# library 
+library(readxl)
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(tidyverse)
+library(scales)
+library(ggrepel)
+library(patchwork)
+library(forcats)
+library(igraph)
+library(multinet)
+library(sna)
+library(gtools)
+library(bipartite)
+library(bipartiteD3)
+library(htmltools)
+library(htmlwidgets)
+library(ggeffects)
+library(lmerTest)
+library(performance)
+library(sjPlot)
+library(DHARMa)
+library(here)
+
+### 1.RESPONSE RATE -----
+## Data
+pourcentage <- read_excel(here("data","interviews","Q1","Dataset_Q1_clean.xlsx"),
+                          sheet = "responses_rates")
+
+## Clean data 
+creer_graphique_article <- function(pourcentage, col_taux, titre) {
+  
+  # clean and sort data 
+  data_clean <- pourcentage %>%
+    dplyr::filter(!!sym(col_taux) > 0)
+  
+  categories_triee <- sort(unique(data_clean$Category))
+  if ("Other" %in% categories_triee) {
+    categories_triee <- c(categories_triee[categories_triee != "Other"], "Other")
+  }
+  
+  # labels 
+  data_clean <- data_clean %>%
+    dplyr::mutate(Category = factor(Category, levels = categories_triee)) %>%
+    dplyr::arrange(desc(Category)) %>% # Inversion pour correspondre à l'ordre d'empilement ggplot
+    dplyr::mutate(
+      prop = !!sym(col_taux),
+      label = paste0(round(prop, 1), "%"),
+      label = ifelse(prop < 2, "", paste0(round(prop, 1), "%")), # label if >= 2
+      y_pos = cumsum(prop) - (prop / 2) # text in the middle
+    )
+  
+  # add colors 
+  nb_colors <- length(categories_triee)
+  mes_couleurs <- palette.colors(n = nb_colors, palette = "Polychrome")
+  
+  # graph
+  ggplot(data_clean, aes(x = 2, y = prop, fill = Category)) +
+  geom_bar(stat = "identity", color = "white", linewidth = 0.5) + 
+  coord_polar(theta = "y") +
+  # rate
+  geom_text(aes(y = y_pos, label = label), 
+            color = "black", 
+            size = 2.5, 
+            fontface = "bold") +
+  xlim(0.5, 2.5) + 
+  theme_void() + 
+  theme(
+    legend.position = "right",
+    legend.title = element_text(face = "bold"),
+    plot.title = element_text(hjust = 0.5, face = "bold", size = 15, margin = margin(b = 10))
+  ) +
+  labs(title = titre, fill = "Stakeholders category") +
+  scale_fill_manual(values = as.vector(mes_couleurs))
+}
+
+
+## Graph creation 
+p1 <- creer_graphique_article(pourcentage, "Taux_tot_category", "Percentage of the respondents")
+p2 <- creer_graphique_article(pourcentage, "Taux_pop", "Percentage of contacted actors")
+
+# Extract colors of stakeholders in p1
+cats_p1 <- levels(ggplot_build(p1)$plot$data$Category)
+cols_p1 <- as.vector(palette.colors(n = length(cats_p1), palette = "Polychrome"))
+
+palette_reference <- cols_p1
+names(palette_reference) <- cats_p1 
+
+# Add stakeholders in P2 but not in P1
+toutes_cats_p2 <- unique(pourcentage$Category[pourcentage$Taux_pop > 0])
+nouvelles_cats <- setdiff(toutes_cats_p2, cats_p1)
+
+# Neew colors from polychrom but different from the existing categories 
+if(length(nouvelles_cats) > 0) {
+  extra_cols <- as.vector(palette.colors(n = length(toutes_cats_p2) + 5, palette = "Polychrome"))
+  nouvelles_cols <- extra_cols[(length(cols_p1) + 1):(length(cols_p1) + length(nouvelles_cats))]
+  names(nouvelles_cols) <- nouvelles_cats
+  palette_reference <- c(palette_reference, nouvelles_cols) # new reference palette 
+}
+
+# Re-create the graphs 
+creer_graphique_stable <- function(pourcentage, col_taux, titre, palette_fixe) {
+  
+  data_clean <- pourcentage %>% dplyr::filter(!!sym(col_taux) > 0)
+  
+  categories_presentes <- sort(unique(data_clean$Category))
+  if ("Other" %in% categories_presentes) {
+    categories_presentes <- c(categories_presentes[categories_presentes != "Other"], "Other")
+  }
+  
+  data_clean <- data_clean %>%
+    dplyr::mutate(Category = factor(Category, levels = categories_presentes)) %>%
+    dplyr::arrange(desc(Category)) %>% 
+    dplyr::mutate(
+      prop = !!sym(col_taux),
+      label = ifelse(prop < 2, "", paste0(round(prop, 1), "%")),
+      y_pos = cumsum(prop) - (prop / 2)
+    )
+  
+  ggplot(data_clean, aes(x = 2, y = prop, fill = Category)) +
+    geom_bar(stat = "identity", color = "white", linewidth = 0.5) + 
+    coord_polar(theta = "y", clip = "off") + 
+    geom_text(
+      aes(x = 2, y = y_pos, label = label),
+      size = 4,
+      fontface = "bold",
+      color = "black"
+    ) +
+    xlim(0.5, 3.5) + 
+    labs(fill = "Stakeholder category", title = titre) +
+    theme_void() + 
+    theme(
+      legend.position = "right",
+      plot.margin = margin(20, 20, 20, 20) 
+    ) +
+    scale_fill_manual(values = palette_fixe)
+}
+
+p1 <- creer_graphique_article(pourcentage, "Taux_tot_category", "Percentage of the respondents")
+p2 <- creer_graphique_article(pourcentage, "Taux_pop", "Percentage of contacted actors")
+
+print(p1)
+print(p2)
+
+# combined plots 
+combined_plot <- p1 + theme(legend.position = "none") + (p2 + theme(legend.position = "none"))
+combined_plot
+
+
+### 2.DISTRIBUTION OF THE SURVEY POPULATION ----
+## Data
+data <- read_excel(here("data","interviews","Q1","Dataset_Q1_clean.xlsx"),
+                   sheet = "demographic_data")
+
+
+## Demographic graph 
+data <- data %>%
+  dplyr::mutate(group = cut(Age, 
+                     breaks = c(0, 20, 30, 40, 50, 60, 70, 100),
+                     labels = c("<20", "20-29", "30-39", "40-49", "50-59", "60-69", "70+"),
+                     right = FALSE))
+
+ggplot(data, aes(x = group, fill = Gender)) +
+  geom_bar(position = "dodge") +
+   geom_text(
+    stat = 'count', 
+    aes(label = after_stat(count)), 
+    position = position_dodge(width = 0.9), 
+    vjust = -0.5, 
+    size = 3.5
+  ) +
+  scale_fill_manual(values = c("Female" = "#e91", "Male" = "#219")) +
+  labs(
+    title = "Distribution of actors by age and gender",
+    x = "Age group",
+    y = "Number of actors"
+  ) +
+  theme_minimal()
+
+## Years of involvement 
+data <- data %>%
+  dplyr::mutate(pro_group = cut(Pro_involvement , 
+                         breaks = c(0,10,20, 30, 40, 51),
+                         labels = c("<10","10-19", "20-29", "30-39", "40-49"),
+                         right = FALSE))
+
+ggplot(data, aes(x = pro_group)) +
+  geom_bar(fill = "#346789", color = "white") +
+  geom_text(stat='count', aes(label = after_stat(count)), vjust=-0.5) + 
+  labs(
+    title = "Distribution of actors by their years of professional experience in the GLTCP",
+    x = "Years of professional experience in the GLTCP",
+    y = "Number of actors"
+  ) +
+  theme_minimal()
+
+
+### 3.MULTILAYER NETWORK -----
+## data 
+data_q8 <- read_excel(here("data","interviews","Q1","Dataset_Q1_clean.xlsx"), 
+                      sheet = "matrix_collaboration")
+data_q9 <- read_excel(here("data","interviews","Q1","Dataset_Q1_clean.xlsx"),
+                      sheet = "matrix_information")
+data_q10 <- read_excel(here("data","interviews","Q1","Dataset_Q1_clean.xlsx"),
+                       sheet = "matrix_dependency")
+#### 3.1 Matrices  ---------
+##### Collaboration ------
+## Summary
+data_q8_long = data_q8 %>% 
+  tidyr::pivot_longer(!Stakeholders_categories, names_to = "With", values_to = "Collab_type")
+unique(data_q8_long$Collab_type)
+
+
+###### Binary network ---------
+## Asymmetric matrix
+data_q8ma <- data_q8 %>%
+  dplyr::mutate (across(
+    .col = -1, ~ dplyr::case_when(
+      . == "Currently collaborating" ~ 1, # If 2 stakeholders are currently collaborating: take 1
+      str_detect(., "^No prior")       ~ 0, # If 2 stakeholders are no prior collaboration: take 0
+      str_detect(., "^Collaborated in the past,") ~ 1, # If 2 stakeholders collaborated in the past: take 1
+      TRUE                            ~ NA_real_
+    )))
+
+## Transform into a symmetric matrix between stakeholder categories  
+data_q8m <- data_q8ma %>%
+  dplyr::group_by(Stakeholders_categories) %>%
+  dplyr::summarise(dplyr::across(everything(), ~ if(all(is.na(.))) NA_real_ else max(., na.rm = TRUE))) %>% 
+  dplyr::ungroup()
+
+# Rearrange the table, rows, and columns as shown opposite + replace NA with 0
+data_q8m_final = data_q8m %>%
+  dplyr::arrange(Stakeholders_categories) %>%
+  dplyr::select(Stakeholders_categories, sort(setdiff(colnames(.), "Stakeholders_categories")))
+
+data_q8m_clean <- data_q8m_final %>%
+  dplyr::mutate(across(where(is.numeric), ~ replace_na(., 0))) # NA --> 0 
+
+## Transform into clean matrix
+matrice_q8 = data_q8m_clean %>%
+  tibble::column_to_rownames("Stakeholders_categories") %>%
+  as.matrix()
+
+diag(matrice_q8) <- 0 # Diagonal of 0
+
+matrice_q8_sym <- (matrice_q8 | t(matrice_q8)) # rendre la matrice symétrique, si 1 d'un côté, 1 de l'autre aussi 
+matrice_q8_sym <- matrice_q8_sym * 1
+View(matrice_q8_sym)
+
+## Network 
+net_q8 <-
+  igraph::graph_from_adjacency_matrix(as.matrix(matrice_q8_sym),
+                                      mode = "max")
+## Network metrics 
+#degree
+igraph::degree(net_q8) 
+#betweeness
+igraph::betweenness(net_q8)
+#eigenvector
+igraph::eigen_centrality(net_q8)
+#centralization
+igraph::centr_degree(net_q8) 
+#density
+igraph::edge_density(net_q8)
+#Triades-transitivité 
+igraph::triad_census(net_q8)
+
+igraph::transitivity(net_q8, type = "global")
+igraph::transitivity(net_q8, type = "local")
+
+igraph::diameter(net_q8, directed = FALSE)
+igraph::farthest_vertices(net_q8, directed = FALSE)
+# Modularité 
+plot(net_q8,vertex.size=5,vertex.label="")
+coms<-cluster_fast_greedy(net_q8)
+coms
+
+
+###### Weighted network ---------
+# We calculate wij = number of respondents reporting collaboration / number of respondents in the stakeholder category
+# This would solve two issues:
+# 1) it avoids creating a tie based on a single "yes" response;
+# 2) it makes the collaboration layer weighted, making it more consistent with the other information and dependency layers. 
+# The collaboration network would then represent the strength (or prevalence) of collaboration between stakeholder groups rather than simply the existence of a collaboration.
+
+## Asymmetric matrix
+# Here, we only consider the current collaborations (take the value 1)
+data_q8a <- data_q8 %>%
+  dplyr::mutate (across(
+    .col = -1, ~ dplyr::case_when(
+      . == "Currently collaborating" ~ 1,
+      str_detect(., "^No prior") ~ 0,
+      str_detect(., "^Collaborated in the past,") ~ 0,
+      TRUE                            ~ NA_real_
+    )))
+
+# Compute wij
+data_q8av <- data_q8a %>%
+  dplyr::group_by(Stakeholders_categories) %>%
+  dplyr::summarise(
+    dplyr::across(
+      dplyr::everything(),
+      ~ round(sum(. == 1, na.rm = TRUE) / dplyr::n(),2)
+    ),
+    .groups = "drop"
+  )
+
+# Put rows and columns across from each other
+data_q8arr <- data_q8av %>%
+  arrange(Stakeholders_categories) %>%
+  select(Stakeholders_categories, sort(setdiff(colnames(.), "Stakeholders_categories")))
+
+matrice_q8av <- data_q8arr %>% 
+  tibble::column_to_rownames("Stakeholders_categories") %>%
+  as.matrix()
+
+# Creation of the symmetric matrix (mean of each side)
+temp_array <- array(c(matrice_q8av, t(matrice_q8av)), dim = c(nrow(matrice_q8av), ncol(matrice_q8av), 2)) # 3D version of the matrice 
+mat_sym_q8 <- rowMeans(temp_array, dims = 2, na.rm = TRUE) # Calculating the average along the third dimension (depth)
+mat_sym_q8[is.na(mat_sym_q8)] <- 0 # rowMeans with na.rm=TRUE returns 0 if both values were NA
+rownames(mat_sym_q8) <- rownames(matrice_q8av)
+colnames(mat_sym_q8) <- colnames(matrice_q8av)# Restoring column and row names 
+diag(mat_sym_q8) <- 0
+View(mat_sym_q8)
+
+## Network 
+net_q8av <- graph_from_adjacency_matrix(mat_sym_q8, 
+                                        mode = "max", 
+                                        weighted = TRUE, 
+                                        diag = FALSE)
+
+## Network metrics
+# degree
+igraph::degree(net_q8av)
+igraph::strength(net_q8av)
+# betweenessfo weighted networks  
+poids_distance <- 1 / E(net_q8av)$weight
+igraph::betweenness(net_q8av, directed = FALSE, weights = poids_distance)
+# eigenvector 
+igraph::eigen_centrality(net_q8av)
+# Centralization
+igraph::centr_degree(net_q8av) 
+# density
+igraph::edge_density(net_q8av)
+#Triades-transitivité 
+igraph::triad_census(net_q8av)
+
+igraph::transitivity(net_q8av, type = "global")
+igraph::transitivity(net_q8av, type = "local")
+# diameter 
+igraph::diameter(net_q8av, directed = FALSE)
+igraph::farthest_vertices(net_q8av, directed = FALSE)  #get the ids of the nodes that form the ends of that longest shortest path
+# Modularité 
+plot(net_q8av,vertex.size=5,vertex.label="")
+coms<-cluster_fast_greedy(net_q8av)
+coms
+
+##### Information ------
+data_q9a <- data_q9 %>%
+  mutate (across(
+    .col = -1, ~ case_when(
+      . == "Not at all" ~ 0,
+      . == "Slightly" ~ 0.25,
+      . == "Moderately" ~ 0.5,
+      . == "Highly" ~ 0.75,
+      . == "Fully" ~ 1,
+    )))
+
+# Mean by stakeholder categories/column 
+data_q9av <- data_q9a %>%
+  group_by(across(1)) %>% # group by first column 
+  summarise(across(everything(), ~ round(mean(., na.rm = TRUE),2)), .groups = "drop") # mean for other columns 
+
+# Put rows and columns across from each other
+data_q9arr <- data_q9av %>%
+  arrange(Stakeholders_categories) %>%
+  select(Stakeholders_categories, sort(setdiff(colnames(.), "Stakeholders_categories")))
+
+matrice_q9av <- data_q9arr %>% 
+  tibble::column_to_rownames("Stakeholders_categories") %>%
+  as.matrix()
+
+# Creation of the symmetric matrix (mean of each side)
+temp_array <- array(c(matrice_q9av, t(matrice_q9av)), dim = c(nrow(matrice_q9av), ncol(matrice_q9av), 2)) # 3D version of the matrice 
+mat_sym_q9 <- rowMeans(temp_array, dims = 2, na.rm = TRUE) # Calculating the average along the third dimension (depth)
+mat_sym_q9[is.na(mat_sym_q9)] <- 0 # rowMeans with na.rm=TRUE returns 0 if both values were NA
+rownames(mat_sym_q9) <- rownames(matrice_q9av)
+colnames(mat_sym_q9) <- colnames(matrice_q9av)# Restoring column and row names 
+diag(mat_sym_q9) <- 0
+View(mat_sym_q9)
+
+## Network 
+net_q9av <- graph_from_adjacency_matrix(mat_sym_q9, 
+                                        mode = "max", 
+                                        weighted = TRUE, 
+                                        diag = FALSE)
+
+## Network metrics
+# degree
+igraph::degree(net_q9av)
+igraph::strength(net_q9av)
+# betweenessfo weighted networks  
+poids_distance <- 1 / E(net_q9av)$weight
+igraph::betweenness(net_q9av, directed = FALSE, weights = poids_distance)
+# eigenvector 
+igraph::eigen_centrality(net_q9av)
+# Centralization
+igraph::centr_degree(net_q9av) 
+# density
+igraph::edge_density(net_q9av)
+#Triades-transitivité 
+igraph::triad_census(net_q9av)
+
+igraph::transitivity(net_q9av, type = "global")
+igraph::transitivity(net_q9av, type = "local")
+# diameter 
+igraph::diameter(net_q9av, directed = FALSE)
+igraph::farthest_vertices(net_q9av, directed = FALSE)  #get the ids of the nodes that form the ends of that longest shortest path
+# Modularité 
+plot(net_q9av,vertex.size=5,vertex.label="")
+coms<-cluster_fast_greedy(net_q9av)
+coms
+
+##### Dependency ------
+data_q10a <- data_q10 %>%
+  mutate (across(
+    .col = -1, ~ case_when(
+      . == "Not at all" ~ 0,
+      . == "Slightly" ~ 0.25,
+      . == "Moderately" ~ 0.5,
+      . == "Highly" ~ 0.75,
+      . == "Fully" ~ 1,
+    )))
+
+# Mean by stakeholder category/column 
+data_q10av <- data_q10a %>%
+  group_by(across(1)) %>% 
+  summarise(across(everything(), ~ round(mean(., na.rm = TRUE),2)), .groups = "drop") 
+
+# Put rows and columns across from each other 
+data_q10arr <- data_q10av %>%
+  arrange(Stakeholders_categories) %>%
+  select(Stakeholders_categories, sort(setdiff(colnames(.), "Stakeholders_categories")))
+
+matrice_q10av <- data_q10arr %>% 
+  tibble::column_to_rownames("Stakeholders_categories") %>%
+  as.matrix()
+
+# Creation of the symmetric matrix (mean of each side)
+temp_array <- array(c(matrice_q10av, t(matrice_q10av)), dim = c(nrow(matrice_q10av), ncol(matrice_q10av), 2)) 
+mat_sym_q10 <- rowMeans(temp_array, dims = 2, na.rm = TRUE) 
+mat_sym_q10[is.na(mat_sym_q10)] <- 0 
+rownames(mat_sym_q10) <- rownames(matrice_q10av)
+colnames(mat_sym_q10) <- colnames(matrice_q10av)
+diag(mat_sym_q10) <- 0
+View(mat_sym_q10)
+
+## Network
+net_q10av <- graph_from_adjacency_matrix(mat_sym_q10, 
+                                         mode = "max", 
+                                         weighted = TRUE, 
+                                         diag = FALSE)
+
+## Network metrics
+# degree
+igraph::degree(net_q10av)
+igraph::strength(net_q10av)
+# betweenessfo weighted networks  
+poids_distance2 <- 1 / E(net_q10av)$weight
+igraph::betweenness(net_q10av, directed = FALSE, weights = poids_distance2)
+# eigenvector 
+igraph::eigen_centrality(net_q10av)
+# Centralization
+igraph::centr_degree(net_q10av) 
+# density
+igraph::edge_density(net_q10av)
+#Triades-transitivité 
+igraph::triad_census(net_q10av)
+
+igraph::transitivity(net_q10av, type = "global")
+igraph::transitivity(net_q10av, type = "local")
+# diameter 
+igraph::diameter(net_q10av, directed = FALSE)
+igraph::farthest_vertices(net_q10av, directed = FALSE)  #get the ids of the nodes that form the ends of that longest shortest path
+# Modularité 
+plot(net_q10av,vertex.size=5,vertex.label="")
+coms<-cluster_fast_greedy(net_q10av)
+coms
+
+### 3.2 Multilayer network ----
+# Create igraph objects 
+mnet2 <- ml_empty()
+
+add_igraph_layer_ml(mnet2, net_q8av, "Collaboration")
+add_igraph_layer_ml(mnet2, net_q9av, "Information")
+add_igraph_layer_ml(mnet2, net_q10av, "Dependancy")
+
+mnet2
+
+##### Calculating the metrics for the mnet2 -----
+## Degree
+# Total degree per actor (all categories combined)
+deg2 <- degree_ml(mnet2)
+names(deg2) <- unlist(actors_ml(mnet2)) 
+top_degrees2 <- (deg2[order(-deg2)]) 
+print(top_degrees2)
+# Degree per layer
+(topdeg2 <- 
+    data.frame(actor = names(top_degrees2),
+               Collaboration = degree_ml(mnet2, actors = names(top_degrees2), layers = "Collaboration"),
+               Information = degree_ml(mnet2, actors = names(top_degrees2), layers = "Information"),
+               Dependancy = degree_ml(mnet2, actors = names(top_degrees2), layers = "Dependancy")))
+
+# Deviation
+(topdeg2$Deviation <- apply(topdeg2[, c("Collaboration", "Information", "Dependancy")], 1, sd))
+# Standardized deviation
+(topdeg2$Moyenne_Degre <- rowMeans(topdeg2[, c("Collaboration", "Information", "Dependancy")]))
+
+(topdeg2$Dev_Standardisee <- ifelse(topdeg2$Moyenne_Degre > 0, 
+                                    topdeg2$Deviation / topdeg2$Moyenne_Degre, 
+                                    0))
+print(topdeg2)
+
+## COMPARAISON DES COUCHES
+#comparaison distribution degré
+layer_comparison_ml(mnet2, method = "jeffrey.degree")
+#même degré dans différentes couches - qq soit les voisins
+layer_comparison_ml(mnet2, method="pearson.degree")
+#mêmes liens entre mêmes paires de sommets
+layer_comparison_ml(mnet2, method="jaccard.edges")
+
+## DETECTION DES COMMUNAUTES 
+comu1 <- glouvain_ml(mnet2) #optimisation de la modularité
+comu2 <- clique_percolation_ml(mnet2) #recherche de cliques adjacentes
+comu3 <- abacus_ml(mnet2, min.actors = 3, min.layers = 3) #détection de motifs
+comu4 <- infomap_ml(mnet2) # utlisation de marches aléatoires
+#nb communautés et taille selon l'algo choisi
+table(comu1$cid)
+table(comu2$cid)
+table(comu3$cid)
+table(comu4$cid)
+#indicateurs
+modularity_ml(mnet2, comu1, gamma = 1, omega = 1)
+modularity_ml(mnet2, comu2, gamma = 1, omega = 1)
+modularity_ml(mnet2, comu3, gamma = 1, omega = 1)
+modularity_ml(mnet2, comu4, gamma = 1, omega = 1)
+#visualisation
+plot(mnet2, vertex.labels.cex=.3, com=comu1)
+plot(mnet2,vertex.labels.cex=.3, com=comu2)
+plot(mnet2, vertex.labels.cex=.3, com=comu3)
+
+## DISTANCE
+acteurs_reseau2 <- unlist(actors_ml(mnet2))
+length(acteurs_reseau2)
+liste_resultats2 <- list()
+for (i in 1:length(acteurs_reseau2)) {
+  nom_actuel2 <- acteurs_reseau2[i]
+  liste_resultats2[[i]] <- distance_ml(mnet2, from = nom_actuel2)
+}
+
+toutes_les_distances2 <- do.call(rbind, liste_resultats2)
+View(toutes_les_distances2)
+
+### 3.3 MuxViz vizualisation-----
+## Création des reseau igraph
+net_q8av <- graph_from_adjacency_matrix(mat_sym_q8, 
+                                        mode = "max", 
+                                        weighted = TRUE, 
+                                        diag = FALSE)
+
+net_q9av <- graph_from_adjacency_matrix(mat_sym_q9, 
+                                        mode = "max", 
+                                        weighted = TRUE, 
+                                        diag = FALSE)
+
+net_q10av <- graph_from_adjacency_matrix(mat_sym_q10, 
+                                         mode = "max", 
+                                         weighted = TRUE, 
+                                         diag = FALSE)
+
+## Reseau en 3D ##
+file.edit("~/.Rprofile")
+library(muxViz)
+library(rgl)
+
+# To make it work, I modified the code for the `plot_multiplex3D` function using this command: 
+# trace(plot_multiplex3D, edit=TRUE)
+# Substitutions : 
+# rgl.clear par clear3d
+# if (layer.labels == "auto" || length(layer.labels) != Layers) par if (any(layer.labels == "auto") || length(layer.labels) != Layers)
+# if (!is.na(layer.labels) && !is.null(layer.labels)) par if (all(!is.na(layer.labels)) && !is.null(layer.labels)) x3
+# if (show.aggregate && (all(!is.na(layer.labels)) && !is.null(layer.labels))) { layer.labels <- c(layer.labels, "Aggregate") par if (isTRUE(show.aggregate) && !is.null(layer.labels) && all(!is.na(layer.labels))) { layer.labels <- c(layer.labels, "Aggregate")}
+# if (node.size.values == "auto") par if (is.character(node.size.values) && any(node.size.values == "auto"))
+# V(g.list[[l]])$size <- node.size.values * node.size.scale par V(g.list[[l]])$size <- (if(is.list(node.size.values)) node.size.values[[l]] else node.size.values) * node.size.scale[l]
+# Then, to make this a permanent change, I created a “patch_muxviz” script with the modified function code 
+# And an R.profile using this command: file.edit("~/.Rprofile")
+# These two new scripts allow you to directly use the modified version of the `plot_multiplex3D` function when calling the muxViz package.
+
+g_list <- list(net_q8, net_q9av, net_q10av)
+
+lay <- layoutMultiplex(g_list, layout="fr", ggplot.format=F, box=T)
+
+node_degrees_list <- lapply(g_list, function(x) igraph::degree(x))
+
+# PLOT
+
+### ESSAI AMELIORATION MULTICOUCHE
+plot_multiplex3D(g_list, 
+                 layer.layout = lay, 
+                 layer.colors = c("#E41A1C", "#377EB8", "#4DAF4A"),
+                 layer.labels = c("Collaboration", "Information", "Dependency"),
+                 layer.labels.cex = 1.5,
+                 
+                 # On garde l'espacement augmenté pour aérer le graphique
+                 layer.shift.x = 0.8,       
+                 layer.space = 3.5,         
+                 
+                 node.size.values = node_degrees_list, 
+                 node.size.scale = 1.2,     
+                 
+                 show.nodeLabels = FALSE,   
+                 show.aggregate = FALSE,
+                 as.undirected = TRUE)
+
+
+# AJUSTEMENT DES LIENS INTER-COUCHES 
+shift_x <- 0.8  
+layer_space <- 3.5 
+nb_layers <- length(g_list)
+nb_nodes <- nrow(lay) 
+
+inter_layer_coords <- c()
+
+for(l in 1:(nb_layers - 1)) {
+  z_start <- (l-1) * layer_space
+  x_off_start <- (l-1) * shift_x
+  
+  z_end <- l * layer_space
+  x_off_end <- l * shift_x
+  
+  for(i in 1:nb_nodes) {
+    pA <- c(lay[i, 1] + x_off_start, lay[i, 2], z_start)
+    pB <- c(lay[i, 1] + x_off_end,   lay[i, 2], z_end)
+    inter_layer_coords <- rbind(inter_layer_coords, pA, pB)
+  }
+}
+
+# Dessin des segments plus fins et transparents
+segments3d(inter_layer_coords, 
+           col = "grey30",   
+           alpha = 0.2,      # baisse de l'opacité
+           lty = 3,          
+           lwd = 0.8)
+
+# AJOUT DES NOMS DES NOEUDS
+noms_officiels <- c(
+  "Assentamentos", "City_hall", "Federal_agencies", "Forestry_co", 
+  "International_org", "Local_assos", "Local_landowners", 
+  "Educational_inst", "NGO", 
+  "Oil_energy_&_mining_co", "RPPN", "Road_co", 
+  "Scientific_inst", "State_agencies", "Zoo"
+)
+
+numeros <- noms_officiels <- c(
+  "n1", "n2", "n3", "n4", 
+  "n5", "n6", "n7", "n8", "n9", "n10", "n11", "n12", "n13", 
+  "n14", "n15"
+)
+
+#Ajout et placement du texte sur le graphique 3D
+text3d(x = lay[, 1] + 1.0,  # On ajoute 2 * layer.shift.x (0.5 * 2)
+       y = lay[, 2], 
+       z = 4.1,                # On utilise 2 * layer.space (2 * 2)
+       texts = numeros,
+       col = "black", 
+       cex = 1.2,            # 'Petit' (réduit de 1.2 à 0.7)
+       adj = 0.5)
+
+
+# Exportation 
+library(htmlwidgets)
+
+scene <- rglwidget() # Capture la scène actuelle
+saveWidget(scene, "Multilayer_network_3D.html", selfcontained = TRUE)
+shell.exec(getwd())
+
+### 4.QAP TEST -----
+liste_layers <- list(
+  "Collaboration" = matrice_q8_sym, 
+  "Information" = mat_sym_q9,             
+  "Dependancy" = mat_sym_q10
+)
+
+# collaboration-informations layers
+collab_info2 <- qaptest(liste_layers, gcor, g1=1, g2=2,reps=1000)
+collab_info2
+
+plot(density(collab_info2$dist), 
+     main = "Comparison of collaboration and information networks")
+abline(v = collab_info2$testval, col = "red", lwd = 2)
+
+summary(collab_info2)
+
+# Collaboration-dependancy layers
+collab_dep2 <- qaptest(liste_layers, gcor, g1=1, g2=3,reps=1000)
+collab_dep2
+
+plot(density(collab_dep2$dist), 
+     main = "Comparison of collaboration and dependency networks")
+abline(v = collab_info2$testval, col = "red", lwd = 2)
+summary(collab_dep2)
+
+# Information-dependancy layers
+info_dep2 <- qaptest(liste_layers, gcor, g1=2, g2=3,reps=1000)
+info_dep2
+
+plot(density(info_dep2$dist), 
+     main = "Comparison of information and dependency networks")
+abline(v = collab_info2$testval, col = "red", lwd = 2)
+summary(info_dep2)
+
+## Final visualization 
+# Combine distribution data 
+df_dist <- data.frame(
+  `Collab_Info` = collab_info2$dist,
+  `Collab_Dep`  = collab_dep2$dist,
+  `Info_Dep`    = info_dep2$dist
+) %>% 
+  pivot_longer(cols = everything(), names_to = "Comparison", values_to = "Correlation")
+
+# Create a dataframe 
+df_observed <- data.frame(
+  Comparison = c("Collab_Info", "Collab_Dep", "Info_Dep"),
+  Observed = c(collab_info2$testval, collab_dep2$testval, info_dep2$testval)
+)
+
+#  Define colors 
+custom_colors <- c(
+  "Collab_Info" = "#6C3483",  # Violet
+  "Collab_Dep"  = "#F1C40F",  # Jaune
+  "Info_Dep"    = "#117864"   # Vert Canard
+)
+
+# Labels 
+legend_labels <- c(
+  "Collab_Info" = "Collaboration vs Information",
+  "Collab_Dep"  = "Collaboration vs Dependency",
+  "Info_Dep"    = "Information vs Dependency"
+)
+
+# Ajust labels 
+df_observed <- df_observed %>%
+  mutate(
+    v_offset = case_when(
+      Comparison == "Collab_Dep"  ~ 4,  # below
+      Comparison == "Collab_Info" ~ 2,  # middle
+      Comparison == "Info_Dep"    ~ 2,  
+      TRUE                        ~ 2
+    )
+  )
+
+# PLOT
+qap <- ggplot(df_dist, aes(x = Correlation, fill = Comparison, color = Comparison)) +
+  # density curves
+  geom_density(alpha = 0.35, size = 0.8) +
+  
+  # Vertical lines
+  geom_vline(data = df_observed, aes(xintercept = Observed, color = Comparison),
+             linetype = "dashed", size = 0.9, show.legend = FALSE) +
+  
+  # Text
+  geom_text(data = df_observed, aes(x = Observed, y = Inf, 
+                                    label = paste0("Obs: ", round(Observed, 2)), 
+                                    color = Comparison, vjust = v_offset),
+            hjust = 1.1, fontface = "bold", size = 5, show.legend = FALSE) +
+  
+  # Colors
+  scale_fill_manual(values = custom_colors, labels = legend_labels) +
+  scale_color_manual(values = custom_colors, labels = legend_labels) +
+  
+  # Labs
+  labs(
+    x = "Correlation Coefficient",
+    y = "Density",
+    fill = "Network Pair",
+    color = "Network Pair"
+  ) +
+  
+  theme_minimal (base_size = 12) +
+  theme(
+    axis.title.x = element_text(size = 16, face = "bold", margin = margin(t = 10)), # Titre X plus grand
+    axis.title.y = element_text(size = 16, face = "bold", margin = margin(r = 10)), # Titre Y plus grand
+    axis.text.x = element_text(size = 10),                                         # Chiffres sur l'axe X
+    axis.text.y = element_text(size = 10),
+
+    legend.position = "bottom",
+    legend.box = "horizontal",
+    legend.title = element_text(size = 14, face = "bold"),                       
+    legend.text = element_text(size = 13),
+    panel.grid.minor = element_blank(),
+    panel.background = element_rect(fill = "white", color = NA),
+    plot.background = element_rect(fill = "white", color = NA)
+  )
+
+ggsave(
+  filename = "C:/Users/Stage/Desktop/Dossier_Aurelie/Statistics/Clean M2 internship folder/Clean script for article/Clean_QAP.png",
+  plot = qap,
+  width = 10,       
+  height = 5,
+  dpi = 300,       
+  type = "cairo"
+)
+
+### 5.BIPARTITE NETWORKS -----
+# Data
+data_strat<- read_excel("Clean_dataset.xlsx", 
+                        sheet = "final_strategies")
+
+### 5.1 Bipartite actor-strategies 
+## Incidence matrix
+# Dataframe
+str1 <- data_strat %>%
+  mutate (across(
+    .col = -1, ~ case_when(
+      . == "Not at all" ~ 0,
+      . == "Slightly" ~ 0.25,
+      . == "Moderately" ~ 0.5,
+      . == "Highly" ~ 0.75,
+      . == "Fully" ~ 1,
+    )))
+str1[is.na(str1)] <- 0
+
+str_1 <- str1 %>% as.data.frame() # Convert to a dataframe to assign unique names to the rows
+rownames(str_1) <- make.unique(str_1$Stakeholders_categories)
+
+matrice_str_1 <- str_1 %>% # On supprime l'ancienne colonne et on transforme en matrice
+  select(-Stakeholders_categories) %>% 
+  as.matrix()
+View(matrice_str_1)
+
+# réorganisation des lignes et colonnes de la matrice 
+matrice_triee_1 <- matrice_str_1[mixedorder(rownames(matrice_str_1)), order(colnames(matrice_str_1))]
+View(matrice_triee_1)
+
+## Attribution de couleurs 
+racine_bas <- sapply(strsplit(rownames(matrice_triee_1), "[.]"), `[`, 1) # on récupère les noms de la matrice pour avoir les attributs 
+# Création du dictionnaire de couleurs 
+(categories_uniques <- unique(racine_bas))
+couleurs <- palette.colors(n = 11, palette = "Polychrome")
+names(couleurs) <- categories_uniques
+
+rownames(matrice_triee_1) <- sprintf("ID%02d", 1:42)  # Changement de noms des lignes 
+colnames(matrice_triee_1) <- gsub("_", " ", colnames(matrice_triee_1))
+
+## Couleurs bipartite 
+# Tous les noms du graphique
+noms_lignes <- rownames(matrice_triee_1)
+noms_colonnes <- colnames(matrice_triee_1)
+tous_les_noms <- c(noms_lignes, noms_colonnes)
+# On initialise en gris clair pour les colonnes (sinon bipartite pas content)
+couleurs_finales <- rep("#D3D3D3", length(tous_les_noms))
+names(couleurs_finales) <- tous_les_noms
+# On remplace les couleurs des lignes par les couleurs calculées
+couleurs_finales[noms_lignes] <- couleurs[racine_bas]
+
+## BipartiteD3
+# Assign percentages to the strategies and rank them in descending order 
+pourcentage1 <- c(" 5%", " 7%", " 6%", " 7%", " 8%", " 11%", " 8%", " 4%", " 8%", " 8%", " 6%", " 10%", " 8%", " 5%")
+colnames(matrice_triee_1) <- paste0(colnames(matrice_triee_1), pourcentage1) # percentage to column 
+p_numerique <- as.numeric(gsub(".* ([0-9]+)%", "\\1", colnames(matrice_triee_1))) # digit extraction 
+ordre_decroissant <- order(p_numerique, decreasing = TRUE)
+(matrice_ordonnee <- matrice_triee_1[, ordre_decroissant]) # matrix sorting
+
+# PLOT
+bp <- bipartite_D3(
+  matrice_ordonnee,                
+  colouroption = "manual",      
+  NamedColourVector = couleurs_finales, 
+  ColourBy = 1,               # FORCE la coloration par le côté GAUCHE
+  MainFigSize = c(1000, 1500),
+  IndivFigSize = c(300, 800),
+  BoxLabPos = c(50, 50),
+  Pad = 4,
+  BarSize = 20,
+  MinWidth = 5,
+  PrimaryLab = 'Actors', 
+  SecondaryLab = "Conservation strategies",
+  SortSecondary = colnames(matrice_ordonnee),
+  SiteNames = "Work into",
+  IncludePerc = F)
+
+# Create the legend in HTML: 
+# References: Documentation on the htmltools package
+names(couleurs) <- gsub("_", " ", names(couleurs)) 
+# Iterate through the categories to create colored squares
+# `lapply` transforms each category in the legend into a small piece of HTML code
+legende_html <- tags$div(
+  style = "padding: 10px; font-family: sans-serif; font-size: 12px; line-height: 1.5;",
+  tags$h4("stakeholder category"),
+  lapply(names(couleurs), function(cat) {
+    tags$div(
+      tags$span(style = paste0("display:inline-block; width:12px; height:12px; margin-right:5px; background-color:", couleurs[cat], ";")),
+      cat
+    )
+  })
+)
+
+# Arrange everything in a “Flexbox” layout: CSS layout method: guide to the Flexbox module  https://css-tricks.com/snippets/css/a-guide-to-flexbox/
+page_finale <- tags$div(
+  style = "display: flex; align-items: flex-start;",
+  tags$div(style = "flex: 0 0 200px; border-right: 1px solid #ddd;", legende_html), # Column legend
+  tags$div(style = "flex: 1;", bp)                                            # Column graph
+)
+
+browsable(page_finale) 
+
+### 5.2 Network metrics 
+## Nodes metric
+low1 <- specieslevel(matrice_triee_1, level = "lower")
+(low_clean_1 <- low1[, c("degree", 
+                         "weighted.closeness", 
+                         "weighted.betweenness",
+                         "nestedrank")])
+
+
+high1 <- specieslevel(matrice_triee_1, level = "higher")
+(high_clean_1 <- high1[, c("degree", 
+                           "weighted.closeness", 
+                           "nestedrank")])
+
+## Network metrics 
+# Calculation of the Most Important Overall Indices
+(res_network_1 <- networklevel(matrice_triee_1, 
+                               index = c("connectance", 
+                                         "NODF", 
+                                         "modularity", 
+                                         "robustness")))
+
+## Group-level metrics 
+grouplevel(matrice_triee_1,
+           index = c( "mean number of shared partners",
+                      "togetherness",
+                      "C score")) 
+
+### 6.LINEAR MIXED EFFECT MODEL ----
+## Data
+data_reg <- read_excel("Clean_dataset.xlsx", 
+                       sheet = "perceived_success")
+
+# Table for regressions
+reg <- data_reg %>%
+  mutate (across(
+    .col = c(3:16, 21:34) , ~ case_when(
+      . == "Not at all" ~ 0,
+      . == "Slightly" ~ 0.25,
+      . == "Moderately" ~ 0.5,
+      . == "Highly" ~ 0.75,
+      . == "Fully" ~ 1,
+      . == "I don't know" ~ NA,
+    )))
+
+## Pivot the table to get the format for the regressions
+colonnes_fixes <- c("Stakeholders_categories", "years_in_project", 
+                    "involvement_level", "Degree", "ID", "Nestedrank")  # List of columns to keep, other than the strategy columns
+
+reg_final <- reg %>%
+  # strategy columns in long format
+  pivot_longer(
+    cols = -any_of(colonnes_fixes), 
+    names_to = "temp_name", 
+    values_to = "valeur"
+  ) %>%
+  # determine whether it is success or involvement
+  mutate(
+    type_mesure = ifelse(str_detect(temp_name, fixed("(involvement)")), "involvement", "Perceived_success"),
+    
+    # clean strategy's name 
+    strategy = str_remove(temp_name, fixed("(involvement)"))
+  ) %>%
+  # deleting the temporary column that still contains the suffixes
+  select(-temp_name) %>%
+  # pivot to have one column success and one involvement
+  pivot_wider(
+    names_from = type_mesure,
+    values_from = valeur
+  )
+
+View(reg_final)
+reg_final$strategy <- gsub("_", " ", reg_final$strategy)
+
+# logic order and format change 
+ordre <- c("Occasionally", "Moderately", "Significantly", "Exclusively")
+
+reg_final <- reg_final %>%
+  mutate(across(c(involvement_level), 
+                ~ factor(.x, levels = ordre, ordered = TRUE)), # convertir les caractères en facteur avec un ordre
+         Stakeholders_categories = as.factor(Stakeholders_categories),
+         strategy = as.factor(strategy),
+         ID = as.factor(ID)
+  )
+str(reg_final)
+
+## MODEL 
+# summary 
+model1 <- lmer(Perceived_success ~ Degree * involvement + years_in_project + (1|ID), data = reg_final)
+
+check_model(model1, check = c("normality", "homogeneity"))
+
+summary(model1, correlation = T)
+
+# Model predictions 
+pred1 <- ggpredict(model1, terms = c("involvement", "Degree"))
+
+plot(pred1) + 
+  labs( 
+    x = "Level of involvement",
+    y = "Predicted perceived success",
+    colour = "Bipartite node degree") +
+  theme_minimal()
+
+
+pred2 <- ggpredict(model1, terms = c("Degree", "involvement"))
+
+pred <- plot(pred2) + 
+  labs(
+    x = "Bipartite node degree",
+    y = "Predicted perceived success",
+    colour = "Level of involvement",
+    fill = "Level of involvement" 
+  ) +
+  
+  # reverse = TRUE pour inverser l'ordre de la légende 
+  #guides(
+    #colour = guide_legend(reverse = TRUE),
+    #fill = guide_legend(reverse = TRUE)
+  #) +
+  
+  theme_minimal (base_size = 12) +
+  theme(
+    axis.title.x = element_text(size = 16, face = "bold", margin = margin(t = 10)), # Titre X plus grand
+    axis.title.y = element_text(size = 16, face = "bold", margin = margin(r = 10)), # Titre Y plus grand
+    axis.text.x = element_text(size = 10),                                         # Chiffres sur l'axe X
+    axis.text.y = element_text(size = 10),
+    
+    legend.position = "bottom",
+    legend.box = "horizontal",
+    legend.title = element_text(size = 14, face = "bold"),                        
+    legend.text = element_text(size = 13),
+    panel.grid.minor = element_blank(),
+    panel.background = element_rect(fill = "white", color = NA),
+    plot.background = element_rect(fill = "white", color = NA)
+  )
+
+ggsave(
+  filename = "C:/Users/Stage/Desktop/Dossier_Aurelie/Statistics/Clean M2 internship folder/Clean script for article/prediction_model_3.png",
+  plot = pred,
+  width = 8,       
+  height = 5,
+  dpi = 300,       
+  type = "cairo"
+)
+
