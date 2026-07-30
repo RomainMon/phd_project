@@ -283,7 +283,6 @@ plot(net_q8,vertex.size=5,vertex.label="")
 coms<-cluster_fast_greedy(net_q8)
 coms
 
-
 ###### Weighted network ---------
 # We calculate wij = number of respondents reporting collaboration / number of respondents in the stakeholder category
 # This would solve two issues:
@@ -361,6 +360,7 @@ igraph::farthest_vertices(net_q8av, directed = FALSE)  #get the ids of the nodes
 plot(net_q8av,vertex.size=5,vertex.label="")
 coms<-cluster_fast_greedy(net_q8av)
 coms
+
 
 ##### Information ------
 data_q9a <- data_q9 %>%
@@ -492,8 +492,8 @@ plot(net_q10av,vertex.size=5,vertex.label="")
 coms<-cluster_fast_greedy(net_q10av)
 coms
 
-### 3.2 Multilayer network ----
-#### Create multilayer object ----
+#### 3.2 Multilayer network ----
+##### Create multilayer object ----
 # Create igraph objects 
 mnet2 <- ml_empty()
 
@@ -503,7 +503,7 @@ add_igraph_layer_ml(mnet2, net_q10av, "Dependancy")
 
 mnet2
 
-#### Node metrics -----
+##### Node metrics -----
 ## DEGREE
 # Total degree per actor (all categories combined)
 deg2 <- degree_ml(mnet2)
@@ -574,7 +574,7 @@ versatility_data <- data.frame(
 
 View(versatility_data)
 
-#### Layer comparison -----
+##### Layer comparison -----
 ## BASIC COMPARISON
 #comparaison distribution degré
 layer_comparison_ml(mnet2, method = "jeffrey.degree")
@@ -588,7 +588,7 @@ layer_comparison_ml(mnet2, method="jaccard.edges")
 matrice_overlap <- layer_comparison_ml(mnet2, method = "coverage.edges")
 print(matrice_overlap)
 
-#### Community detection -----
+##### Community detection -----
 ## COMMUNITY DETECTION
 comu1 <- glouvain_ml(mnet2) #optimisation de la modularité
 comu2 <- clique_percolation_ml(mnet2) #recherche de cliques adjacentes
@@ -609,8 +609,85 @@ plot(mnet2, vertex.labels.cex=.3, com=comu1)
 plot(mnet2,vertex.labels.cex=.3, com=comu2)
 plot(mnet2, vertex.labels.cex=.3, com=comu3)
 
+#### 3.3 Cytoscape visualization ---------
+# -> Requires two main tables representing intra-layer edges and nodes
 
-### 3.3 MuxViz vizualisation-----
+###### Collaboration -----
+# Node table with metric
+node_table_q8 = as.data.frame(igraph::degree(net_q8av)) %>% 
+  rownames_to_column(var = "Node") %>% 
+  dplyr::rename(Degree_1 = "igraph::degree(net_q8av)") %>% 
+  dplyr::mutate(Node = dplyr::case_when(Node == "RaPPN" ~ "RPPN",
+                                        TRUE ~ Node))
+# Edge table with edge weight
+intra_layer_table_q8 = mat_sym_q8 %>% 
+  as.data.frame() %>% 
+  tibble::rownames_to_column(var = "source") %>% 
+  tidyr::pivot_longer(!source, names_to = "target", values_to = "score_1") %>% 
+  dplyr::mutate(source = dplyr::case_when(source == "RaPPN" ~ "RPPN",
+                                          TRUE ~ source)) %>% 
+  dplyr::mutate(target = dplyr::case_when(target == "RaPPN" ~ "RPPN",
+                                          TRUE ~ target)) %>% 
+  # Remove node i-node i edges
+  subset(source != target)
+
+###### Information -----
+# Node table with metric
+node_table_q9 = as.data.frame(igraph::degree(net_q9av)) %>% 
+  rownames_to_column(var = "Node") %>% 
+  dplyr::rename(Degree_2 = "igraph::degree(net_q9av)") %>% 
+  dplyr::mutate(Node = dplyr::case_when(Node == "RaPPN" ~ "RPPN",
+                                        TRUE ~ Node))
+# Edge table with edge weight
+intra_layer_table_q9 = mat_sym_q9 %>% 
+  as.data.frame() %>% 
+  tibble::rownames_to_column(var = "source") %>% 
+  tidyr::pivot_longer(!source, names_to = "target", values_to = "score_2") %>% 
+  dplyr::mutate(source = dplyr::case_when(source == "RaPPN" ~ "RPPN",
+                                          TRUE ~ source)) %>% 
+  dplyr::mutate(target = dplyr::case_when(target == "RaPPN" ~ "RPPN",
+                                          TRUE ~ target)) %>% 
+  # Remove node i-node i edges
+  subset(source != target)
+
+###### Dependency -----
+# Node table with metric
+node_table_q10 = as.data.frame(igraph::degree(net_q10av)) %>% 
+  rownames_to_column(var = "Node") %>% 
+  dplyr::rename(Degree_3 = "igraph::degree(net_q10av)") %>% 
+  dplyr::mutate(Node = dplyr::case_when(Node == "RaPPN" ~ "RPPN",
+                                        TRUE ~ Node))
+# Edge table with edge weight
+intra_layer_table_q10 = mat_sym_q10 %>% 
+  as.data.frame() %>% 
+  tibble::rownames_to_column(var = "source") %>% 
+  tidyr::pivot_longer(!source, names_to = "target", values_to = "score_3") %>% 
+  dplyr::mutate(source = dplyr::case_when(source == "RaPPN" ~ "RPPN",
+                                          TRUE ~ source)) %>% 
+  dplyr::mutate(target = dplyr::case_when(target == "RaPPN" ~ "RPPN",
+                                          TRUE ~ target)) %>% 
+  # Remove node i-node i edges
+  subset(source != target)
+
+###### Merge tables -----
+# Node table
+node_table = node_table_q8 %>% 
+  dplyr::left_join(node_table_q9, by="Node") %>% 
+  dplyr::left_join(node_table_q10, by="Node")
+
+# Edge table
+intra_layer_table = intra_layer_table_q8 %>% 
+  dplyr::left_join(intra_layer_table_q9, by=c("source","target")) %>% 
+  dplyr::left_join(intra_layer_table_q10, by=c("source","target")) %>% 
+  # Remove duplicated pairs (source, target)
+  dplyr::mutate(
+    node1 = pmin(source, target),
+    node2 = pmax(source, target)) %>% # Creates two columns that reorder the pairs
+  dplyr::distinct(node1, node2, .keep_all = TRUE) %>% # Keep only one element by pair
+  dplyr::select(-c(node1, node2))
+
+
+#### 3.4 MuxViz vizualisation-----
 ## Création des reseau igraph
 net_q8av <- graph_from_adjacency_matrix(mat_sym_q8, 
                                         mode = "max", 
@@ -1357,3 +1434,28 @@ boxplot(resamp.test(mat_sym_q10),
         main = "BR - Degree dependency", 
         xlab = "sampling fraction",
         ylab = "Spearmans rho")
+
+
+### EXPORT -------
+#### Cytoscape exports ----
+# Node table
+readr::write_csv(
+  node_table,
+  here(
+    "outputs",
+    "data",
+    "SNA",
+    "Cytoscape",
+    "node_table.csv"
+  ))
+
+# Intra-layer edge table
+readr::write_csv(
+  intra_layer_table,
+  here(
+    "outputs",
+    "data",
+    "SNA",
+    "Cytoscape",
+    "intra_layer_table.csv"
+  ))
