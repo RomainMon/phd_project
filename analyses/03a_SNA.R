@@ -539,8 +539,8 @@ for (i in 1:length(acteurs_reseau2)) {
 
 toutes_les_distances2 <- do.call(rbind, liste_resultats2)
 
-## VERSATILITY
-# to identify which stakeholders occupy consistently important positions across all three layers, rather than within a single network
+## MEAN DEGREE AND VERSATILITY
+# Versatility is used to identify which stakeholders occupy consistently important positions across all three layers, rather than within a single network
 
 ## Calcul de l'écart type entre les trois couches 
 liste_acteurs <- actors_ml(mnet2)[1]
@@ -551,7 +551,7 @@ acteurs <- gsub('c\\(|\\)|"|\'', '', liste_acteurs)
 # On sépare les noms à chaque virgule et on enlève les espaces inutiles au début/fin
 noms_acteurs <- trimws(unlist(strsplit(acteurs, ",")))
 
-# Calcul des degrés par couche
+# Calcul des degrés des acteurs par couche
 deg_collaboration <- degree_ml(mnet2, layers = "Collaboration")
 deg_information   <- degree_ml(mnet2, layers = "Information")
 deg_dependancy    <- degree_ml(mnet2, layers = "Dependancy")
@@ -563,6 +563,20 @@ df_degres <- data.frame(
   Dependancy    = deg_dependancy
 )
 
+## Mean degree across layers
+df_degres %>%
+  pivot_longer(cols = c(Collaboration, Information, Dependancy), 
+               names_to = "Couche", values_to = "Degree") %>%
+  group_by(Couche) %>%
+  summarise(
+    Moyenne = mean(Degree),
+    Ecart_Type = sd(Degree)
+  ) %>%
+  mutate(
+    Resultat_Formatted = paste0(round(Moyenne, 2), " +/- ", round(Ecart_Type, 2))
+  )
+
+## Versatility computation
 # Calculs
 moyenne <- rowMeans(df_degres)
 ecart_type <- apply(df_degres, 1, sd)
@@ -573,6 +587,7 @@ versatility_data <- data.frame(
 )
 
 View(versatility_data)
+
 
 ##### Layer comparison -----
 ## BASIC COMPARISON
@@ -629,7 +644,9 @@ intra_layer_table_q8 = mat_sym_q8 %>%
   dplyr::mutate(target = dplyr::case_when(target == "RaPPN" ~ "RPPN",
                                           TRUE ~ target)) %>% 
   # Remove node i-node i edges
-  subset(source != target)
+  subset(source != target) %>%
+  # Remove 0
+  dplyr::filter(score_1 > 0)
 
 ###### Information -----
 # Node table with metric
@@ -648,7 +665,9 @@ intra_layer_table_q9 = mat_sym_q9 %>%
   dplyr::mutate(target = dplyr::case_when(target == "RaPPN" ~ "RPPN",
                                           TRUE ~ target)) %>% 
   # Remove node i-node i edges
-  subset(source != target)
+  subset(source != target) %>% 
+  # Remove 0
+  dplyr::filter(score_2 > 0)
 
 ###### Dependency -----
 # Node table with metric
@@ -667,7 +686,9 @@ intra_layer_table_q10 = mat_sym_q10 %>%
   dplyr::mutate(target = dplyr::case_when(target == "RaPPN" ~ "RPPN",
                                           TRUE ~ target)) %>% 
   # Remove node i-node i edges
-  subset(source != target)
+  subset(source != target)  %>% 
+  # Remove 0
+  dplyr::filter(score_3 > 0)
 
 ###### Merge tables -----
 # Node table
@@ -941,7 +962,7 @@ dev.off()
 data_strat <- read_excel(here("data","interviews","Q1","Dataset_Q1_clean.xlsx"),
                    sheet = "final_strategies")
 
-### 5.1 Bipartite actor-strategies 
+#### 5.1 Bipartite actor-strategies -----
 ## Incidence matrix
 # Dataframe
 str1 <- data_strat %>%
@@ -1039,7 +1060,7 @@ page_finale <- tags$div(
 
 browsable(page_finale) 
 
-### 5.2 Network metrics 
+##### Network metrics ------
 ## Nodes metric
 # Here, we calculate various indices for network properties at the node level ('species' in bipartite package)
 # where higher level nodes are in columns, lower level nodes in row
@@ -1071,6 +1092,119 @@ grouplevel(matrice_triee_1,
            index = c( "mean number of shared partners",
                       "togetherness",
                       "C score")) 
+
+
+#### 5.2 Bipartite organization-strategies -----
+# Calcul de la moyenne par organisation/colonne
+str1_av <- str1 %>%
+  group_by(across(1)) %>% # On groupe par la première colonne 
+  summarise(across(everything(), ~ mean(., na.rm = TRUE)), .groups = "drop") # On calcule la moyenne pour toutes les autres colonnes
+View(str1_av)
+
+matt_str1_av <- str1_av %>% 
+  tibble::column_to_rownames("Stakeholders_categories") %>%
+  as.matrix()
+View(matt_str1_av)
+
+### Création du réseau bipartite ###
+## Plotweb
+colnames(matt_str1_av) <- gsub("_", " ", colnames(matt_str1_av))
+rownames(matt_str1_av) <- gsub("_", " ", rownames(matt_str1_av))
+windows(width=15, height=10)
+bipartite::plotweb(matt_str1_av, 
+                   srt = 90,              
+                   text_size = 0.7,       
+                   y_lim = c(-0.5, 1.5),  
+                   spacing = 0.3,         
+                   lower_color = couleurs,   
+                   link_color = "lower",               
+                   link_alpha = 0.5)
+
+palette <- palette.colors(n = 14, palette = "Polychrome")
+bipartite::plotweb(matt_str1_av, 
+                   srt = 90,              
+                   text_size = 0.7,       
+                   y_lim = c(-0.5, 1.5),  
+                   spacing = 0.3,         
+                   higher_color = palette,   
+                   link_color = "higher",               
+                   link_alpha = 0.5)
+## BipartiteD3
+# Vecteur couleur 
+lignes <- rownames(matt_str1_av)
+colonnes <- colnames(matt_str1_av)
+tot_noms <- c(lignes,colonnes)
+# On initialise en gris clair pour les colonnes (sinon bipartite pas content)
+col <- rep("#D3D3D3", length(tot_noms))
+names(col) <- tot_noms
+# On remplace les couleurs des lignes par les couleurs calculées
+col[lignes] <- couleurs
+
+# Classer colonne de la matrice par ordre alphabétique 
+ordre_alphabetique <- order(colnames(matt_str1_av))
+matt_triee <- matt_str1_av[, ordre_alphabetique]
+View(matt_triee)
+# Assigner les pourcentages aux stratégies et les classer dans l'ordre décroissant 
+pourcentage2 <- c(" 4%", " 7%", " 5%", " 8%", " 6%", " 11%", " 7%", " 4%", " 7%", " 7%", " 7%", " 12%", " 9%", " 5%")
+(colnames(matt_triee) <- paste0(colnames(matt_triee), pourcentage2)) # assigner les pourcentages aux colonnes
+p_numerique <- as.numeric(gsub(".* ([0-9]+)%", "\\1", colnames(matt_triee))) # extraction des chiffres 
+ordre_decroissant <- order(p_numerique, decreasing = TRUE)
+(matrice_ordonnee2 <- matt_triee[, ordre_decroissant]) # trie de la matrice
+
+# Afficher le graphique 
+bp2 <- bipartite_D3(
+  matrice_ordonnee2,                
+  colouroption = "manual",      
+  NamedColourVector = couleurs, 
+  ColourBy = 1,               # FORCE la coloration par le côté GAUCHE
+  MainFigSize = c(3000, 1500),
+  IndivFigSize = c(300, 800),
+  BoxLabPos = c(20, 50),
+  Pad = 4,
+  BarSize = 20,
+  MinWidth = 5,
+  PrimaryLab = 'Org', 
+  SecondaryLab = "Conservation strategies",
+  SortSecondary = colnames(matrice_ordonnee2),
+  SiteNames = "Work into",
+  IncludePerc = F)
+
+# Assembler le tout dans une structure "Flexbox" : méthode de mise en page CSS : guide sur le module Flexbox https://css-tricks.com/snippets/css/a-guide-to-flexbox/
+page_finale2 <- tags$div(
+  style = "display: flex; align-items: flex-start;",
+  tags$div(style = "flex: 0 0 200px; border-right: 1px solid #ddd;", legende_html), # Colonne légende
+  tags$div(style = "flex: 1;", bp2)                                            # Colonne graphique
+)
+
+browsable(page_finale2)
+
+#### Network metrics ------
+## Nodes metric
+(low2 <- specieslevel(matt_str1_av, level = "lower"))
+(low_clean_2 <- low2[, c("degree", 
+                         "weighted.closeness", 
+                         "nestedrank")])
+
+
+(high2 <- specieslevel(matt_str1_av, level = "higher"))
+(high_clean_2 <- high2[, c("degree", 
+                           "weighted.closeness", 
+                           "nestedrank")])
+
+## Network metrics 
+# Calcul des indices globaux les plus importants
+(res_network_2 <- networklevel(matt_str1_av, 
+                               index = c("connectance", 
+                                         "NODF", 
+                                         "modularity", 
+                                         "robustness")))
+
+## Group-level metrics 
+grouplevel(matt_str1_av,
+           index = c( "mean number of shared partners",
+                      "togetherness",
+                      "C score"))
+
 
 ### 6.LINEAR MIXED EFFECT MODEL ----
 ## Data
@@ -1163,13 +1297,35 @@ plot(pred1) +
 
 pred2 <- ggpredict(model1, terms = c("degree", "involvement"))
 
-pred <- plot(pred2) + 
+pred = plot(pred2) + 
   labs(
     x = "Bipartite node degree",
     y = "Predicted perceived success",
     colour = "Level of involvement",
     fill = "Level of involvement" 
   ) +
+
+  scale_fill_manual(labels = c("Very low", 
+                               "Low",
+                               "Moderate",
+                               "High",
+                               "Very high"),
+                    values = c("#01016f",
+                               "#6497bf",
+                               "#5a5a5a",
+                               "#de8d3a",
+                               "#d8031c")) +
+  scale_colour_manual(labels = c("Very low", 
+                               "Low",
+                               "Moderate",
+                               "High",
+                               "Very high"),
+                    values = c("#01016f",
+                               "#6497bf",
+                               "#5a5a5a",
+                               "#de8d3a",
+                               "#d8031c")) +
+  
   guides(
     colour = guide_legend(
       override.aes = list(
@@ -1179,12 +1335,6 @@ pred <- plot(pred2) +
     ),
     fill = "none" # to remove the filled boxes from the legend
   ) +
-  
-  # reverse = TRUE pour inverser l'ordre de la légende 
-  #guides(
-    #colour = guide_legend(reverse = TRUE),
-    #fill = guide_legend(reverse = TRUE)
-  #) +
   
   theme_minimal (base_size = 12) +
   theme(
@@ -1204,7 +1354,7 @@ pred <- plot(pred2) +
   )
 
 # Export
-png(here("outputs","plot","03a_SNAs_LMM.png"), width = 2500, height = 1500, res = 300, type="cairo")
+png(here("outputs","plot","Axis3","03a_SNAs_LMM.png"), width = 2500, height = 1500, res = 300, type="cairo")
 plot(pred)
 dev.off()
 
@@ -1417,7 +1567,7 @@ resamp.test <- function(x) {
 }  # return the result
 
 # display results as boxplot by sampling fraction
-boxplot(resamp.test(matrice_q8_sym), 
+boxplot(resamp.test(mat_sym_q8), 
         ylim = c(0, 1), 
         main = "BR - Degree collaboration", 
         xlab = "sampling fraction",
@@ -1434,6 +1584,413 @@ boxplot(resamp.test(mat_sym_q10),
         main = "BR - Degree dependency", 
         xlab = "sampling fraction",
         ylab = "Spearmans rho")
+
+
+### 9.QUALITATIVE ANALYSIS ----
+#### Most important factors for the success of the GLTCP ####
+# Tableau avec la liste de toutes les réponses 
+data_success <- tibble(
+  reponse = c(
+    "Concientizacao da populacao", "Local awareness and buy-in from land owners", "Comunicação", "Comunicação.",
+    "Alcance junto a população regional", 
+    "Conscientização e envolvimento da população, bem como divulgação dos sucessos do programa", 
+    "Disseminação da cultura preservacionista", 
+    "Educação das populações","Área protegidas", "Áreas protegidas", "Conectividade", "Confecção dos fragmentos floretais", 
+    "Restauração florestal nas margens de cursos d'água", 
+    "Reserva MD", "Population connectivity", "Habitat extenso e conectado", "Reflorestamento", 
+    "Restauração florestal em geral", "Floresta contigua", "Healthy habitat", 
+    "Continued expansion of forested area and connectivity across the GLT-relevant landscape", 
+    "Restauracao das matas em areas de pasto","Mais áreas protegidas", "Restauração ecológica", 
+    "Connecting corridors and replanting local forests", "Seriedade nos trabalhos", "Comprometimento da equipe", "Comprometimento da equipe.",
+    "Equipe entende e participa da definição da meta e dos objetivos do programa", "great, passionate, knowledgeable people", 
+    "Dedicação", "Equipe engajada e motivada", "Compromisso", "Profissionalismo", "Pessoas interessadas e preparadas para o serviço", 
+    "equipe comprometida", "Esforço", "Engajamento", "Engajamento da.equipe", "Trabalho", "Equipe excelente, super comprometida e proativa", 
+    "Seriedade", "dedicaçao","planejamento estratégico com manejo adaptativo", "a continuous cycle of participatory strategic planning",
+    "Planejamento", "Programa baseado em transdisciplinaridade", "Conhecimento científico consolidado", "science-based", 
+    "Monitoramento constante  das ações", "Multidisciplinaridade","Continuidade", "Continuidade.", "Trabalho contínuo ininterrompu ao longo do tempo", 
+    "consistent involvement long term", "Histórico conservacionista na região", "Conequitadas", "good, long reputation", 
+    "O fato do Mico-leão-dourado fazer parte de uma fauna bonita e estar ameaçado","Long-term financial sustainability of AMLD as the lead conservation actor for GLTs.", 
+    "Financiamento confiável", "Estratégias de captação de recursos", "Fontes de financiamento internacional", "Apoio", 
+    "Disponibilidade de recursos", "recursos suficientes", "Recursos financeiro para manter os projeto e a instituição", 
+    "Transparent and efficient financial management", "aporte financeiro", "Comprometimento de parceiros, doadores, apoiadores",
+    "ONG", "Cooperação internacional tem sido importante", "strong NGOs", "Diálogo com diferentes atores no cenário local, regional, nacional e internacional", 
+    "Cooperacao", "múltiplos parceiros", "capable locally based staff and strong collaborations",
+    "Comprometimento institutional e de parceiros", "Interesse de instituições e profissionais", "Investimentos de orgãos e instituições nacionais e internacionais", 
+    "Parceria com outras instituições", "Mais proprietários ruas envolvidos nas atividades", "Parcerias com outras instituições", 
+    "Políticas de proteção ao MLD e à Mata Atlântica", "Government support through land protection, legal support and financial", 
+    "Ferramentas de gestão institucionais", "Strong governmental engagement in forest protection",
+    "Engajamento da sociedade", "Engajamento social", "Engajamento das comunidades locais", "Bom relacionamento com moradores da região", 
+    "Interação entre diversos atores da sociedade", "Engajamento local","Proprietários parceiros", 
+    "Compreensão das necessidades dos atores locais, principalmente os agricultores", "Maior engajamento da comunidade e proprietários rurais",
+    "Gestão", "Monitoramento", "Com fluxo de micos", "Translocação de micos","presença constante no território", 
+    "Monitoramento de caça e tráfico de animais", "Monitoramento dos grupos de mico-leão-dourado e prevenção do tráfico",
+    "Controle das doenças", "Vacinacao contra a febre amarela", "Disease control",
+    "Monitoramento das espécies invasoras"
+  )
+)
+
+# Attribuer les catégories aux réponses 
+data_success <- data_success %>%
+  mutate(
+    category_success = case_when(
+      reponse %in% c("Concientizacao da populacao", "Local awareness and buy-in from land owners", "Comunicação", "Comunicação.",
+                     "Alcance junto a população regional", "Conscientização e envolvimento da população, bem como divulgação dos sucessos do programa", 
+                     "Disseminação da cultura preservacionista", "Educação das populações") 
+      ~ "Public awareness/education",
+      
+      reponse %in% c("Área protegidas", "Áreas protegidas", "Conectividade", "Confecção dos fragmentos floretais", 
+                     "Restauração florestal nas margens de cursos d'água", "Reserva MD", "Population connectivity", 
+                     "Habitat extenso e conectado", "Reflorestamento", "Restauração florestal em geral", "Floresta contigua", 
+                     "Healthy habitat", "Continued expansion of forested area and connectivity across the GLT-relevant landscape", 
+                     "Restauracao das matas em areas de pasto", "Mais áreas protegidas", "Restauração ecológica", 
+                     "Connecting corridors and replanting local forests") 
+      ~ "Restoration/protection of forests and habitats",
+      
+      reponse %in% c("Seriedade nos trabalhos", "Comprometimento da equipe", "Comprometimento da equipe.", "Equipe entende e participa da definição da meta e dos objetivos do programa", 
+                     "great, passionate, knowledgeable people", "Dedicação", "Equipe engajada e motivada", "Compromisso", 
+                     "Profissionalismo", "Pessoas interessadas e preparadas para o serviço", "equipe comprometida", 
+                     "Esforço", "Engajamento", "Engajamento da.equipe", "Trabalho", "Equipe excelente, super comprometida e proativa", 
+                     "Seriedade", "dedicaçao") 
+      ~ "Pro engagement and teamwork",
+      
+      reponse %in% c("planejamento estratégico com manejo adaptativo", "a continuous cycle of participatory strategic planning", 
+                     "Planejamento", "Programa baseado em transdisciplinaridade", "Conhecimento científico consolidado", 
+                     "science-based", "Monitoramento constante  das ações", "Multidisciplinaridade") 
+      ~ "Adaptive program management mode",
+      
+      reponse %in% c("Continuidade", "Continuidade.", "Trabalho contínuo ininterrompu ao longo do tempo", "consistent involvement long term", 
+                     "Histórico conservacionista na região", "Conequitadas", "good, long reputation", 
+                     "O fato do Mico-leão-dourado fazer parte de uma fauna bonita e estar ameaçado") 
+      ~ "Sustaining the program over the long term",
+      
+      reponse %in% c("Long-term financial sustainability of AMLD as the lead conservation actor for GLTs.", 
+                     "Financiamento confiável", "Estratégias de captação de recursos", "Fontes de financiamento internacional", 
+                     "Apoio", "Disponibilidade de recursos", "recursos suficientes", "Recursos financeiro para manter os projeto e a instituição", 
+                     "Transparent and efficient financial management", "aporte financeiro", "Comprometimento de parceiros, doadores, apoiadores") 
+      ~ "Financial aspect",
+      
+      reponse %in% c("ONG", "Cooperação internacional tem sido importante", "strong NGOs", 
+                     "Diálogo com diferentes atores no cenário local, regional, nacional e internacional", 
+                     "Cooperacao", "múltiplos parceiros", "capable locally based staff and strong collaborations") 
+      ~ "Effective programme governance, long-term commitment from organisms",
+      
+      reponse %in% c("Comprometimento institutional e de parceiros", "Interesse de instituições e profissionais", 
+                     "Investimentos de orgãos e instituições nacionais e internacionais", "Parceria com outras instituições", 
+                     "Mais proprietários ruas envolvidos nas atividades", "Parcerias com outras instituições", 
+                     "Políticas de proteção ao MLD e à Mata Atlântica", "Government support through land protection, legal support and financial", 
+                     "Ferramentas de gestão institucionais", "Strong governmental engagement in forest protection") 
+      ~ "Effective programme governance, institutional partners commitment",
+      
+      reponse %in% c("Engajamento da sociedade", "Engajamento social", "Engajamento das comunidades locais", 
+                     "Bom relacionamento com moradores da região", "Interação entre diversos atores da sociedade", 
+                     "Engajamento local") 
+      ~ "Effective programme governance, involvement of local communities",
+      
+      reponse %in% c("Proprietários parceiros", "Compreensão das necessidades dos atores locais, principalmente os agricultores", 
+                     "Maior engajamento da comunidade e proprietários rurais") 
+      ~ "Effective programme governance, involvement of local landowners",
+      
+      reponse %in% c("Gestão", "Monitoramento", "Com fluxo de micos", "Translocação de micos") 
+      ~ "Monitoring of the tamarin population",
+      
+      reponse %in% c("presença constante no território", "Monitoramento de caça e tráfico de animais", 
+                     "Monitoramento dos grupos de mico-leão-dourado e prevenção do tráfico") 
+      ~ "Illegal trade prevention in tamarins",
+      
+      reponse %in% c("Controle das doenças", "Vacinacao contra a febre amarela", "Disease control") 
+      ~ "Monitoring of diseases threats",
+      
+      reponse == "Monitoramento das espécies invasoras" 
+      ~ "Monitoring of invasive species",
+      
+      TRUE ~ "Non classé" 
+    )
+  )
+
+# Verification
+table(data_success$category_success)
+unique(data_success$category_success)
+
+# Stats sur les réponses 
+stat_success <- data_success %>%
+  count(category_success, name = "number_success") %>%
+  mutate(percentage_success = (number_success / sum(number_success)) * 100) %>%
+  arrange(desc(percentage_success))
+
+# Génération du graphique
+# pourcentage
+ggplot(stat_success, aes(x = reorder(category_success, percentage_success), y = percentage_success)) +
+  geom_col(fill = "#BF3EFF", color = "black", width = 0.7) +
+  coord_flip() + # Aligne les barres horizontalement 
+  labs(
+    x = "Category",
+    y = "Percentage of factor for the success of GLTCP (%)"
+  ) +
+  theme_minimal() +
+  geom_text(aes(label = paste0(round(percentage_success, 1), "%")), 
+            hjust = -0.1, size = 3.5) # Une seule parenthèse ici !# Ajoute la valeur du % au bout de chaque barre
+
+# nombre
+ggplot(stat_success, aes(x = reorder(category_success, number_success), y = number_success)) +
+  geom_col(fill = "#68228B", color = "black", width = 0.7) +
+  coord_flip() + # Aligne les barres horizontalement 
+  labs(
+    x = "Category",
+    y = "Number of factor for the success of GLTCP"
+  ) +
+  theme_minimal() +
+  geom_text(aes(label = paste0(number_success)), 
+            hjust = -0.2, size = 3.5)
+
+## Si on regroupe tous les types de gouvernance 
+stat_success_gouv <- data_success %>%
+  mutate(category_success = if_else(
+    str_detect(category_success, "^Effective programme governance"), 
+    "Effective programme governance", 
+    category_success               
+  )) %>%
+  count(category_success, name = "number_success") %>%
+  mutate(percentage_success = (number_success / sum(number_success)) * 100) %>%
+  arrange(desc(percentage_success))
+
+# Génération du graphique
+# pourcentage
+ggplot(stat_success_gouv, aes(x = reorder(category_success, percentage_success), y = percentage_success)) +
+  geom_col(fill = "#BF3EFF", color = "black", width = 0.7) +
+  coord_flip() + # Aligne les barres horizontalement 
+  labs(
+    x = "Category",
+    y = "Percentage of factor for the success of GLTCP (%)"
+  ) +
+  theme_minimal() +
+  geom_text(aes(label = paste0(round(percentage_success, 1), "%")), 
+            hjust = -0.1, size = 3.5) # Une seule parenthèse ici !# Ajoute la valeur du % au bout de chaque barre
+
+# Nombre
+ggplot(stat_success_gouv, aes(x = reorder(category_success, number_success), y = number_success)) +
+  geom_col(fill = "#68228B", color = "black", width = 0.7) +
+  coord_flip() + # Aligne les barres horizontalement 
+  labs(
+    x = "Category",
+    y = "Number of factor for the success of GLTCP"
+  ) +
+  theme_minimal() +
+  geom_text(aes(label = paste0(number_success)), 
+            hjust = -0.2, size = 3.5)
+
+#### Significant challenges in implementing the GLTCP ####
+# Tableau avec la liste de toutes les réponses 
+data_challenge <- tibble(
+  reponse = c(
+    # Public awareness/education
+    "Informar apropriadamente o público adulto local", "Consciência ecológica da comunidade", 
+    "Conscientização", "pouco conhecimento das comunidades sobre o trabalho desenvolvido", 
+    "Desenvolver o turismo", "Falta de consciência da população", 
+    "Divulgação científica de métodos e resultados", "Lack of empathy",
+    "Aprender sobre o comportamento dos micos", "Lack of knowledge", 
+    "Incentivar jovens da região para carreiras em ciências biologicas", 
+    "Capacitação de mão de obra técnico científica",
+    "Área protegida", "ter uma área continua de florestas de boa qualidade", 
+    "Falta de áreas para restauração - liberação de áreas para corredores", 
+    "Aumento da cobertura florestal", "Áreas", "Construcao de corredores florestais", 
+    "Aumento da conectividade de fragmentos", "Fazer os corredores", "Floresta contigua", 
+    "Grande quantidade de áreas a serem restauradas",
+    "Instabilidade financeira", "recursos variáveis", "Falta de apoio financeiro", "Verbas", 
+    "Raising sufficient funding to retain competent staff to carry out technical areas of the program (GIS, digital communications)", 
+    "A verba prometida pela FAPERJ não será recebida, limitando a aquisição de materiais previstos", 
+    "Sustentabilidade dos recursos financeiros", "Necessidade contínua na arrecadação de fundos", 
+    "Current heavy need for fund-raising to support basic AMLD operations", "human greed", 
+    "sustainability, both financial and staff", 
+    "obtaining long-term funding commitments - conservation is long-term.  Significant results cannot be achieved in one year", 
+    "Falta de opções économiques para o uso da terra (floresta em pé não dá dinheiro)", 
+    "Disponibilidae de recursos", "Recursos financeiros",
+    "sustainability of the NGOs", "Falta de apoio dos órgãos públicos", 
+    "Alinhamento da agenda dos pesquisadores", "Equipe reduzida", "Participação dos órgãos públicos", 
+    "Ampliação da área de ocorrência do mico-leão-dourado", "Maior sinergia entre as instituições", 
+    "Reconhecimento do program e integração do projeto pelas instituições", "Governo Federal/ politica", "changing policy and government in Brazil",
+    "Lack of government programming assisting", "Leia ambientais mais severas", "Implementação de políticas socioambientais", 
+    "Participação da comunidade", "Convencimento de grandes proprietários de terra", 
+    "Convencimento de proprietários rurais (não há fiscalização ambiental o suficiente)", "Resistência dos proprietários em restaurar Áreas de Proteção Permanente e Reserva Legal", 
+    "Tornar áreas de pasto em florestas", "Convencimento dos pecuaristas", "Participação dos donos de terras", 
+    "Conseguir apoio.dos proprietarios", "População de agricultores envelhecendo", "População e proprietários rurais comprometidos",
+    "Instabilidade política e corrupção institucionalizada afetando a gestão pública", 
+    "Mudanças de uso da terra por incompetência do poder público ou por manejo de proprietários privados", 
+    "Federal programs allowing land clearing in GLT habitat", "Baixa prioridade das causas ambientais no contexto político e econômico nacional", 
+    "Pagamento de PSA para quem protege", "Externalidades negativas, como mudanças de governo e forças políticas atuantes", 
+    "Polarização política proposital apartando segmentos sociais e desprezando donos de terra nas ações de conservação", 
+    "Alinhar políticas públicas ao desenvolvimento sustentável", "Crimes ambientais sem penalização", 
+    "politicas variáveis", "Banalização e crescimento do crime gerando tráfico de animais, incêndios florestais e violência no campo",
+    "Monitoramento", "Controle do tráfico de animais", "Combate ao tráfico de animais", "Tráfico de Micos", 
+    "Falta de fiscalização constante (tráfico de animais e desmatamento)", "Tráfico de animais silvestres", 
+    "garantir proteção à captura ilegal para o tráfico", "Controle sobre o tráfico", 
+    "Retorno do tráfico de animais, associado ao crime organizado", "Potencial ferrovia (ou outros rompimentos do habitat)", "Controle do desmatamento", 
+    "disputa de território para o mico", "Desmatamento", "Desmatamento.", "Urbanização", "continued threats (yellow fever, linear infrastructure, politics)", 
+    "Mudanças climáticas", "Ongoing urban expansion, other development", "pressões sociais sobre meio ambiente continuas", "Ameaças",
+    "Possible railway construction", "emergência de doenças de dificil contrôle", "Uso de práticas sustentáveis em áreas rurais da região"
+  )
+)
+
+# Attribuer les catégories aux réponses 
+data_challenge <- data_challenge %>%
+  mutate(
+    category_challenge = case_when(
+      reponse %in% c("Informar apropriadamente o público adulto local", "Consciência ecológica da comunidade", 
+                     "Conscientização", "pouco conhecimento das comunidades sobre o trabalho desenvolvido", 
+                     "Desenvolver o turismo", "Falta de consciência da população", 
+                     "Divulgação científica de métodos e resultados", "Lack of empathy") 
+      ~ "Public awareness/education",
+      
+      reponse %in% c("Aprender sobre o comportamento dos micos", "Lack of knowledge", 
+                     "Incentivar jovens da região para carreiras em ciências biologicas", 
+                     "Capacitação de mão de obra técnico científica") 
+      ~ "Improving scientific knowledge about tamarins and the programme",
+      
+      reponse %in% c("Área protegida", "ter uma área continua de florestas de boa qualidade", 
+                     "Falta de áreas para restauração - liberação de áreas para corredores", 
+                     "Aumento da cobertura florestal", "Áreas", "Construcao de corredores florestais", 
+                     "Aumento da conectividade de fragmentos", "Fazer os corredores", "Floresta contigua", 
+                     "Grande quantidade de áreas a serem restauradas") 
+      ~ "Restoration/protection of forests and habitats",
+      
+      reponse %in% c("Instabilidade financeira", "recursos variáveis", "Falta de apoio financeiro", "Verbas", 
+                     "Raising sufficient funding to retain competent staff to carry out technical areas of the program (GIS, digital communications)", 
+                     "A verba prometida pela FAPERJ não será recebida, limitando a aquisição de materiais previstos", 
+                     "Sustentabilidade dos recursos financeiros", "Necessidade contínua na arrecadação de fundos", 
+                     "Current heavy need for fund-raising to support basic AMLD operations", "human greed", 
+                     "sustainability, both financial and staff", 
+                     "obtaining long-term funding commitments - conservation is long-term.  Significant results cannot be achieved in one year", 
+                     "Falta de opções économiques para o uso da terra (floresta em pé não dá dinheiro)", 
+                     "Disponibilidae de recursos", "Recursos financeiros") 
+      ~ "Financial aspect",
+      
+      reponse %in% c("sustainability of the NGOs", "Falta de apoio dos órgãos públicos", 
+                     "Alinhamento da agenda dos pesquisadores", "Equipe reduzida", "Participação dos órgãos públicos", 
+                     "Ampliação da área de ocorrência do mico-leão-dourado") 
+      ~ "Effective programme governance, long-term commitment from organisms",
+      
+      reponse %in% c("Maior sinergia entre as instituições", "Reconhecimento do program e integração do projeto pelas instituições", 
+                     "Governo Federal/ politica", "changing policy and government in Brazil", "Lack of government programming assisting", 
+                     "Leia ambientais mais severas", "Implementação de políticas socioambientais") 
+      ~ "Effective programme governance, institutional partners commitment",
+      
+      reponse == "Participação da comunidade" 
+      ~ "Effective programme governance, involvement of local communities",
+      
+      reponse %in% c("Convencimento de grandes proprietários de terra", "Convencimento de proprietários rurais (não há fiscalização ambiental o suficiente)", 
+                     "Resistência dos proprietários em restaurar Áreas de Proteção Permanente e Reserva Legal", 
+                     "Tornar áreas de pasto em florestas", "Convencimento dos pecuaristas", "Participação dos donos de terras", 
+                     "Conseguir apoio.dos proprietarios", "População de agricultores envelhecendo", 
+                     "População e proprietários rurais comprometidos") 
+      ~ "Effective programme governance, involvement of local landowners",
+      
+      reponse %in% c("Instabilidade política e corrupção institucionalizada afetando a gestão pública", 
+                     "Mudanças de uso da terra por incompetência do poder público ou por manejo de proprietários privados", 
+                     "Federal programs allowing land clearing in GLT habitat", 
+                     "Baixa prioridade das causas ambientais no contexto político e econômico nacional", 
+                     "Pagamento de PSA para quem protege", "Externalidades negativas, como mudanças de governo e forças políticas atuantes", 
+                     "Polarização política proposital apartando segmentos sociais e desprezando donos de terra nas ações de conservação", 
+                     "Alinhar políticas públicas ao desenvolvimento sustentável", "Crimes ambientais sem penalização", 
+                     "politicas variáveis", "Banalização e crescimento do crime gerando tráfico de animais, incêndios florestais e violência no campo") 
+      ~ "Political instability",
+      
+      reponse == "Monitoramento" 
+      ~ "Monitoring of the tamarin population",
+      
+      reponse %in% c("Controle do tráfico de animais", "Combate ao tráfico de animais", "Tráfico de Micos", 
+                     "Falta de fiscalização constante (tráfico de animais e desmatamento)", "Tráfico de animais silvestres", 
+                     "garantir proteção à captura ilegal para o tráfico", "Controle sobre o tráfico", 
+                     "Retorno do tráfico de animais, associado ao crime organizado") 
+      ~ "Illegal trade prevention in tamarins",
+      
+      reponse %in% c("Potencial ferrovia (ou outros rompimentos do habitat)", "Controle do desmatamento", 
+                     "disputa de território para o mico", "Desmatamento", "Desmatamento.", "Urbanização") 
+      ~ "Habitat fragmentation, deforestation",
+      
+      reponse %in% c("continued threats (yellow fever, linear infrastructure, politics)", "Mudanças climáticas", 
+                     "Ongoing urban expansion, other development", "pressões sociais sobre meio ambiente continuas", 
+                     "Ameaças", "Possible railway construction") 
+      ~ "Human pressures on the tamarin’s environment",
+      
+      reponse == "emergência de doenças de dificil contrôle" 
+      ~ "Monitoring of diseases threats",
+      
+      reponse == "Uso de práticas sustentáveis em áreas rurais da região" 
+      ~ "Sustainable practices",
+      
+      TRUE ~ "Non classé"
+    )
+  )
+
+# Verification 
+table(data_challenge$category_challenge)
+unique(data_challenge$category_challenge)
+
+# Stats sur les réponses 
+stat_challenge <- data_challenge %>%
+  count(category_challenge, name = "number_challenge") %>%
+  mutate(percentage_challenge = (number_challenge / sum(number_challenge)) * 100) %>%
+  arrange(desc(percentage_challenge))
+
+# Génération du graphique 
+# pourcentage
+ggplot(stat_challenge, aes(x = reorder(category_challenge, percentage_challenge), y = percentage_challenge)) +
+  geom_col(fill = "#CD6889", color = "black", width = 0.7) +
+  coord_flip() + # Aligne les barres horizontalement 
+  labs(
+    x = "Category",
+    y = "Percentage of challenge in implementing the GLTCP"
+  ) +
+  theme_minimal() +
+  geom_text(aes(label = paste0(round(percentage_challenge, 1), "%")), 
+            hjust = -0.1, size = 3.5) # Une seule parenthèse ici !# Ajoute la valeur du % au bout de chaque barre
+
+# nombre
+ggplot(stat_challenge, aes(x = reorder(category_challenge, number_challenge), y = number_challenge)) +
+  geom_col(fill = "#8B0A50", color = "black", width = 0.7) +
+  coord_flip() + # Aligne les barres horizontalement 
+  labs(
+    x = "Category",
+    y = "Number of challenge in implementing the GLTCP"
+  ) +
+  theme_minimal() +
+  geom_text(aes(label = paste0(number_challenge)), 
+            hjust = -0.2, size = 3.5)
+
+## Si on regroupe tous les types de gouvernance 
+stat_challenge_gouv <- data_challenge %>%
+  mutate(category_challenge = if_else(
+    str_detect(category_challenge, "^Effective programme governance"), 
+    "Effective programme governance", 
+    category_challenge                
+  )) %>%
+  count(category_challenge, name = "number_challenge") %>%
+  mutate(percentage_challenge = (number_challenge / sum(number_challenge)) * 100) %>%
+  arrange(desc(percentage_challenge))
+
+# graphiques 
+# pourcentage
+ggplot(stat_challenge_gouv, aes(x = reorder(category_challenge, percentage_challenge), y = percentage_challenge)) +
+  geom_col(fill = "#CD6889", color = "black", width = 0.7) +
+  coord_flip() + # Aligne les barres horizontalement 
+  labs(
+    x = "Category",
+    y = "Percentage of challenge in implementing the GLTCP"
+  ) +
+  theme_minimal() +
+  geom_text(aes(label = paste0(round(percentage_challenge, 1), "%")), 
+            hjust = -0.1, size = 3.5) # Une seule parenthèse ici !# Ajoute la valeur du % au bout de chaque barre
+
+# nombres
+ggplot(stat_challenge_gouv, aes(x = reorder(category_challenge, number_challenge), y = number_challenge)) +
+  geom_col(fill = "#8B0A50", color = "black", width = 0.7) +
+  coord_flip() + # Aligne les barres horizontalement 
+  labs(
+    x = "Category",
+    y = "Number of challenge in implementing the GLTCP"
+  ) +
+  theme_minimal() +
+  geom_text(aes(label = paste0(number_challenge)), 
+            hjust = -0.2, size = 3.5)
 
 
 ### EXPORT -------
