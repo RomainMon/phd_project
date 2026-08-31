@@ -1,6 +1,6 @@
 #------------------------------------------------#
 # Author: Romain Monassier
-# Objective: Patch-scale metrics
+# Objective: Delimitate biologically meaningful patches for GLTs and metric computation
 #------------------------------------------------#
 
 ### Load packages ------
@@ -143,6 +143,7 @@ plot(sf::st_geometry(pipelines_sf), add=TRUE, lwd=1.5)
 # freq(rasters_mspa[[36]])
 # freq(rasters_dilate[[36]])
 
+
 ### 1a) Vector metrics on REAL patches -----
 # Here, we work with 'real' patches (i.e., fragments either isolated or connected by a narrow corridor)
 
@@ -168,6 +169,7 @@ reclass_high_forest = function(r, topo, forest_value,
 }
 
 # Reclass
+# forest cells above 500 m take the value 10
 rasters_mspa_alt = lapply(
   rasters_mspa,
   reclass_high_forest,
@@ -176,7 +178,6 @@ rasters_mspa_alt = lapply(
   elev_threshold = 500,
   new_value = 10
 )
-
 
 # Check
 plot(
@@ -228,6 +229,7 @@ plot(
     "#32a65e", "#ad975a", "#519799","#FFFFB2", "#0000FF", "#d4271e","purple","orange"
   )
 )
+
 
 #### Get patches ------
 
@@ -470,12 +472,15 @@ patch_cols = sample(
   nrow(patches_36)
 )
 
+# Plot
+plot(rasters_lf[[36]], col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e", "purple", "orange"))
 plot(
   sf::st_geometry(patches_36),
   col = patch_cols,
   border = "grey20",
   lwd = 0.3,
   reset = FALSE,
+  add= TRUE,
   main = "Forest patches after UMMP clipping"
 )
 
@@ -646,7 +651,7 @@ patches_names = purrr::map(
 )
 
 #### Correct geometry ------
-# Check if there are multiple types of geometry
+# Check if there are multiple types of geometry (especially: 'geometrycollection')
 table(
   unlist(
     lapply(
@@ -714,6 +719,8 @@ table(
 # Dilatation-erosion on all the raster (as above) may result in connecting close but disconnected patches (see: Boa Esperanca, two close patches but actually connected by a CORRIDOR)
 # Hence, we apply dilatation-erosion afterwards
 # E.g., without dilatation-erosion, Afetiva remains disconnected from its corridor...
+
+# Select patches to dilate-erode (based on previous patch name definition)
 targets = c("Afetiva", "Rio_Vermelho")
 
 patches_dilat = purrr::map(
@@ -739,7 +746,7 @@ patches_dilat = purrr::map(
       sf::st_union() %>%
       sf::st_as_sf()
     
-    ## 4. Keep attributes from first target (or customise)
+    ## 4. Keep attributes from first target
     merged_patch = target[1, ]
     sf::st_geometry(merged_patch) = sf::st_geometry(merged_geom)
     
@@ -755,7 +762,7 @@ patches_dilat = purrr::map(
 )
 
 # visualize
-plot(rasters_lf[[36]], col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e", "orange"))
+plot(rasters_lf[[36]], col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e", "purple", "orange"))
 plot(sf::st_geometry(patches_dilat[[36]]), col="darkgreen", add=TRUE)
 
 #### Patch selection ------
