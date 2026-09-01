@@ -3,7 +3,9 @@
 # Objective: Running RangeShiftR simulations
 #------------------------------------------------#
 
+###################################################
 ### BEFORE RUNNING EACH SIMULATION, UPDATE DIRPATH
+###################################################
 
 ### Load packages ------
 library(RangeShiftR)
@@ -58,7 +60,7 @@ library(readxl)
 
 ### Director path ----
 
-dirpath = "data/rangeshifter/tests/test_disp_gui_1/" # UPDATE HERE !!!
+dirpath = "data/rangeshifter/tests/test_resist_1/" # UPDATE HERE !!!
 ## Create the RS folder structure, if it doesn’t yet exist
 # dir.create(file.path(dirpath, "Inputs"), showWarnings = TRUE)
 # dir.create(file.path(dirpath, "Outputs"), showWarnings = TRUE)
@@ -66,13 +68,14 @@ dirpath = "data/rangeshifter/tests/test_disp_gui_1/" # UPDATE HERE !!!
 
 ### Check the landscape -----
 ## Import a landscape
-landsc = terra::rast(file.path(dirpath, "Inputs", "raster_reclass_binary_2005.txt"))
-terra::plot(landsc, col=c("gray","darkgreen"))
+landsc = terra::rast(file.path(dirpath, "Inputs", "raster_reclass_2005.txt"))
+terra::plot(landsc)
 terra::res(landsc)
 terra::unique(landsc)
 
 ## Patches
 patch = terra::rast(file.path(dirpath, "Inputs", "patches_2005.txt"))
+terra::res(patch)
 # We can have a glimpse at how many cells the different patches contain:
 table(terra::values(patch))
 # Plot the patches in different colours
@@ -87,6 +90,7 @@ terra::plot(
 
 ## Species distribution
 patch_w_glt  = terra::rast(file.path(dirpath, "Inputs", "patches_w_glt_2005.txt"))
+terra::res(patch_w_glt)
 terra::plot(patch_w_glt, col=c("gray","darkgreen"))
 terra::unique(patch_w_glt)
 
@@ -120,7 +124,7 @@ demo = Demography(StageStruct = stg,
                   ReproductionType = 0)
 
 # Maximum individuals observed in a forest patch (see: Ruiz-Miranda et al. 2019)
-?getLocalisedEquilPop
+# ?getLocalisedEquilPop
 par(mfrow=c(1,1))
 eq_pop = getLocalisedEquilPop(demog = demo, DensDep_values = c(0.05, 0.06, 0.07, 0.08, 0.09, 0.095, 0.1, 0.2, 0.3)) #  absolute values of individuals
 # Select the value that reaches the desired threshold
@@ -144,16 +148,17 @@ real_data %>%
 patch_corres_id = readr::read_csv(here("data", 
                                        "rangeshifter", 
                                        "tests", 
-                                       "test_disp_5", # UPDATE HERE
+                                       "test_resist_1", # UPDATE HERE!!!
                                        "Inputs", 
                                        "patch_corres_id_2005.csv"),
                                 col_types = readr::cols(unique_id = readr::col_integer()))
 
 #### Parameters file ----
+# Load an Excel sheet with the parameters to test
 metadata = read_excel(here("data", 
                            "rangeshifter", 
                            "tests", 
-                           "test_disp_5",  # UPDATE HERE !!!
+                           "test_resist_1",  # UPDATE HERE!!!
                            "test_parameters.xlsx"),
                       sheet="test1")
 
@@ -202,7 +207,7 @@ for(i in 1:nrow(metadata)) {
   # DynamicLandYears: For a dynamic landscape, DynamicLandYears lists the years in which the corresponding habitat maps in LandscapeFile and - if applicable - their respective patch and/or costs maps (in PatchFile,CostsFile) are loaded and used in the simulation
   # demogScaleLayersFile: List of vectors with file names of additional landscape layers which can be used to locally scale certain demographic rates and thus allow them to vary spatially. The list must contain equally sized vectors providing file names, one vector for each element in DynamicLandYears, which are interpreted as stacked layers. Can only be used in combination with habitat quality maps, i.e. when HabPercent=TRUE. It must contain percentage values ranging from 0 to 100
   real_land = ImportedLandscape(
-    LandscapeFile = "raster_reclass_binary_2005.txt",
+    LandscapeFile = "raster_reclass_2005.txt",
     PatchFile = "patches_2005.txt",
     Resolution = 28.35578,
     Nhabitats = 2, # Number of land covers. UPDATE DEPENDING ON THE LANDSCAPE
@@ -256,6 +261,7 @@ for(i in 1:nrow(metadata)) {
   # - Dispersal kernel: use DispersalKernel
   # - Stochastic movement simulator (SMS): use SMS
   # - Correlated random walk (CRW): use CorrRW
+  # IMPORTANT: the dispersal resistance of each land type is set by the argument Costs
   transfer = SMS(PR = pr, # Perceptual range in nb of cells (must be integer)
                  PRMethod = 1, # Method to evaluate the effective cost of a particular step from the landscape within the perceptual range: 1 = Arithmetic mean, 2 = Harmonic mean, 3 = Weighted arithmetic mean
                  MemSize = ms, # Memory size (nb of previous steps over which to calculate current direction to apply directional persistence). Default = 1, max = 14

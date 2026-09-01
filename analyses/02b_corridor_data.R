@@ -50,7 +50,7 @@ plot(rasters_mspa[[36]], col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#000
 names(rasters_mspa) = raster_df$year # Name by year
 
 #### Patches  -------
-base_path = here("outputs", "data", "patches")
+base_path = here("outputs", "data", "patches_shifter")
 vect_files = list.files(base_path, pattern = "\\.gpkg$", full.names = TRUE)
 
 # Extract years

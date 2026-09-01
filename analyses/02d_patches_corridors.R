@@ -11,7 +11,7 @@ library(sf)
 
 
 ### Import patch datasets ------
-base_path = here("outputs", "data", "patches")
+base_path = here("outputs", "data", "patches_rshifter")
 
 patch_files = list.files(
   base_path,

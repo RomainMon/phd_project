@@ -46,7 +46,7 @@ for (i in seq_along(corridors)) {
 names(corridors) = vector_df$year # Name by year
 
 # Patches
-base_path = here("outputs", "data", "patches")
+base_path = here("outputs", "data", "patches_rshifter")
 vect_files = list.files(base_path, pattern = "\\.gpkg$", full.names = TRUE)
 
 # Extract years
