@@ -27,8 +27,8 @@ source(here("R","mailys_queru","fct_patch_cut_proc_RM.R")) # <- Replaced with my
 
 #### Load habitat map  ----
 
-##### MSPA rasters -------
-base_path = here("outputs", "data", "MapBiomas", "MSPA", "reclass_w_mspa")
+##### Rasters -------
+base_path = here("outputs", "data", "landscape_rshifter")
 raster_files = list.files(base_path, pattern = "\\.tif$", full.names = TRUE)
 
 # Extract years
@@ -43,7 +43,7 @@ years = raster_df$year
 for (i in seq_along(rasters_mspa)) {
   cat("Year", years[i], " → raster name:", basename(raster_df$file[i]), "\n")
 }
-plot(rasters_mspa[[36]], col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e", "orange"))
+plot(rasters_mspa[[36]], col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e", "purple", "orange"))
 
 ##### Patches -----
 base_path = here("outputs", "data", "patches_rshifter")
@@ -63,7 +63,7 @@ for (i in seq_along(patches)) {
 }
 names(patches) = vector_df$year # Name by year
 # Plot
-plot(rasters_mspa[[36]], col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e","orange"))
+plot(rasters_mspa[[36]], col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e", "purple", "orange"))
 plot(sf::st_geometry(patches[[36]]), col="lightgreen", add=TRUE)
 
 ##### Group locations -----
@@ -172,6 +172,7 @@ smallest_patches = dplyr::bind_rows(
     
   })
 )
+smallest_patches
 
 ### Thresholds
 MiniArea = 20000 #m²

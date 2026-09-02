@@ -151,7 +151,7 @@ patch_corres_id = readr::read_csv(here("data",
                                        "test_resist_1", # UPDATE HERE!!!
                                        "Inputs", 
                                        "patch_corres_id_2005.csv"),
-                                col_types = readr::cols(unique_id = readr::col_integer()))
+                                col_types = readr::cols(cut_patch_id = readr::col_integer()))
 
 #### Parameters file ----
 # Load an Excel sheet with the parameters to test
@@ -335,7 +335,7 @@ pop_files = list.files(
   here("data",
        "rangeshifter",
        "tests",
-       "test_disp_5", # UPDATE HERE
+       "test_resist_1", # UPDATE HERE !!!
        "Outputs"),
   pattern = "_Pop\\.txt$",
   full.names = TRUE
@@ -368,24 +368,24 @@ pop_all = dplyr::left_join(
 
 ### Parameters tested
 # UPDATE HERE
-param1 <- "Step_mortality"
+param1 <- "Emig_prob"
 param2 <- "PR"
-param3 <- "DP"
+# param3 <- "DP"
 
 ##### Line plot ------
 ### Plot
 pop_total = pop_all %>%
-  dplyr::group_by(Id_simul, !!sym(param1), !!sym(param2), !!sym(param3), Rep, Year) %>%
+  dplyr::group_by(Id_simul, !!sym(param1), !!sym(param2), Rep, Year) %>%
   dplyr::summarise(NInd = sum(NInd), .groups = "drop")
 pop_time = pop_total %>%
-  dplyr::group_by(!!sym(param1), !!sym(param2), !!sym(param3), Year) %>%
+  dplyr::group_by(!!sym(param1), !!sym(param2), Year) %>%
   dplyr::summarise(MeanN = mean(NInd),.groups = "drop")
 ggplot(pop_time, aes(Year, MeanN, colour = factor(!!sym(param1)))) + # Parameter that varies as colour
   geom_line(linewidth = 1) +
   # Faceting
   facet_grid(
     rows = vars(!!sym(param2)), # Parameter that varies
-    cols = vars(!!sym(param3)), # Other parameter that varies
+    # cols = vars(!!sym(param3)), # Other parameter that varies
     scales = "free_y") +
   # Vertical reference years
   geom_vline(
@@ -406,7 +406,7 @@ ggplot(pop_time, aes(Year, MeanN, colour = factor(!!sym(param1)))) + # Parameter
 png(here("data",
          "rangeshifter",
          "tests",
-         "test_disp_5", # UPDATE HERE
+         "test_resist_1", # UPDATE HERE
          "plot",
          "evol_pop.png"), # UPDATE HERE
     width = 3000, height = 3000, res = 300, type="cairo")
@@ -415,11 +415,11 @@ ggplot(pop_time, aes(Year, MeanN, colour = factor(!!sym(param1)))) + # Parameter
   # Faceting
   facet_grid(
     rows = vars(!!sym(param2)), # Parameter that varies
-    cols = vars(!!sym(param3)), # Other parameter that varies
+    # cols = vars(!!sym(param3)), # Other parameter that varies
     scales = "free_y") +
   # Vertical reference years
   geom_vline(
-    xintercept = c(0, 9, 17),
+    xintercept = c(0, 8, 17),
     linetype = "dashed",
     colour = "black"
   ) +
@@ -441,21 +441,23 @@ initial_popsize = 1600 # Adjust
 final_popsize = 3706 # Adjust
 initial_pop = pop_time %>%
   dplyr::filter(Year == min(pop_time$Year)) %>%
-  dplyr::filter(abs(MeanN - initial_popsize) < 20)  # Adjust tolerance
+  dplyr::filter(abs(MeanN - initial_popsize) < 500)  # Adjust tolerance
 final_pop = pop_time %>%
   dplyr::filter(Year == 8) %>% # 2014
-  dplyr::filter(abs(MeanN - final_popsize) < 200)  # Adjust tolerance
+  dplyr::filter(abs(MeanN - final_popsize) < 500)  # Adjust tolerance
 
 # Get the parameter combinations for initial and final populations
 initial_params = initial_pop %>%
   dplyr::select(!!sym(param1),
                 !!sym(param2),
-                !!sym(param3)) %>%
+                # !!sym(param3)
+                ) %>%
   dplyr::distinct()
 final_params = final_pop %>%
   dplyr::select(!!sym(param1),
                 !!sym(param2),
-                !!sym(param3)) %>%
+                # !!sym(param3)
+                ) %>%
   dplyr::distinct()
 # Find the intersection
 dplyr::inner_join(initial_params, final_params)
@@ -464,7 +466,8 @@ dplyr::inner_join(initial_params, final_params)
 fit_score = pop_time %>%
   dplyr::group_by(!!sym(param1),
                   !!sym(param2),
-                  !!sym(param3)) %>%
+                  # !!sym(param3)
+                  ) %>%
   dplyr::summarise(
     InitialN = MeanN[Year == min(Year)],
     FinalN = MeanN[Year == 8],
@@ -477,9 +480,9 @@ fit_score = pop_time %>%
     Total_error = Error_initial + Error_final
   )
 # Plot
-ggplot(fit_score, aes(x = !!sym(param2), y = !!sym(param3), fill = Total_error)) +
+ggplot(fit_score, aes(x = !!sym(param1), y = !!sym(param2), fill = Total_error)) +
   geom_tile() +
-  facet_wrap(~.data[[param1]]) +
+  # facet_wrap(~.data[[param1]]) +
   scale_fill_viridis_c(
     option = "C",
     direction = -1
@@ -490,13 +493,13 @@ ggplot(fit_score, aes(x = !!sym(param2), y = !!sym(param3), fill = Total_error))
 png(here("data",
          "rangeshifter",
          "tests",
-         "test_disp_5", # UPDATE HERE
+         "test_resist_1", # UPDATE HERE
          "plot",
          "heatmap.png"),
     width = 2000, height = 1000, res = 300, type="cairo")
-ggplot(fit_score, aes(x = !!sym(param2), y = !!sym(param3), fill = Total_error)) +
+ggplot(fit_score, aes(x = !!sym(param1), y = !!sym(param2), fill = Total_error)) +
   geom_tile() +
-  facet_wrap(~.data[[param1]]) +
+  # facet_wrap(~.data[[param1]]) +
   scale_fill_viridis_c(
     option = "C",
     direction = -1
@@ -509,7 +512,7 @@ fit_score = pop_time %>%
   dplyr::group_by(
     !!sym(param1),
     !!sym(param2),
-    !!sym(param3)
+    # !!sym(param3)
   ) %>%
   dplyr::summarise(
     N0 = MeanN[Year == 0],
@@ -519,11 +522,11 @@ fit_score = pop_time %>%
   dplyr::mutate(
     RMSE = sqrt(((N0 - initial_popsize)^2 + (N8 - final_popsize)^2) / 2))
 # heatmap RMSE
-ggplot(fit_score, aes(x = !!sym(param2),
-                      y = !!sym(param3),
+ggplot(fit_score, aes(x = !!sym(param1),
+                      y = !!sym(param2),
                       fill = RMSE)) +
   geom_tile() +
-  facet_grid(~.data[[param1]]) +
+  # facet_grid(~.data[[param1]]) +
   scale_fill_viridis_c(
     option = "C",
     direction = -1) +
@@ -536,32 +539,34 @@ fit_score %>%
 
 ##### Patch abundance -----
 pop_patch = pop_all %>%
-  dplyr::group_by(PatchID, !!sym(param1), !!sym(param2), !!sym(param3), Year) %>%
+  dplyr::group_by(PatchID, !!sym(param1), !!sym(param2), Year) %>%
   dplyr::summarise(MeanN = mean(NInd),.groups = "drop")
 # Join patch name
-patch_list = c("Aldeia_I_1",
-               "Aldeia_I_2",
-               "Sta_Helena",
-               "Imbau_I_2",
-               "Afetiva",
-               "Nova_Esperanca_2",
-               "Pirineus_111",
-               "Poco_das_Antas",
+patch_list = c("Vendaval",
                "Rio_Vermelho",
-               "Uniao_N_2")
+               "Boa_Esperanca_II",
+               "Imbau_I_2",
+               "Sta_Helena_II",
+               "Sta_Helena_I",
+               "Sta_Helena",
+               "Aldeia_I_1",
+               "Aldeia_I_2",
+               "Poco_das_Antas",
+               "Uniao_N_2",
+               "Nova_Esperanca_2",
+               "Afetiva",
+               "Pirineus_114")
 pop_patch = pop_patch %>% 
-  dplyr::left_join(patch_corres_id, by=c("PatchID" = "unique_id")) %>% 
-  dplyr::rename(patch_name = patch_id) %>% 
-  dplyr::filter(!is.na(patch_name)) %>% 
-  dplyr::filter(patch_name %in% patch_list)
+  dplyr::left_join(patch_corres_id, by=c("PatchID" = "cut_patch_id")) %>% # Update patch id variable here 
+  dplyr::filter(!is.na(uncut_patch_name)) %>% 
+  dplyr::filter(uncut_patch_name %in% patch_list)
 
 ### Compare with patch abundance over time
 # Select parameters and years
 sim_sel = pop_patch %>%
   dplyr::filter(
-    Step_mortality == 0.01,
-    DP == 5,
-    PR == 2,
+    Emig_prob == 0.035,
+    PR == 5,
     Year %in% c(0, 8, 13, 17) # Years of interest
   )
 
@@ -569,7 +574,7 @@ sim_sel = pop_patch %>%
 sim_sel = sim_sel %>%
   dplyr::mutate(
     FragName = stringr::str_remove(
-      patch_name,
+      uncut_patch_name,
       "_\\d+$"
     )
   )
@@ -621,7 +626,7 @@ cor(comparison$SimN, comparison$RealN)
 png(here("data",
          "rangeshifter",
          "tests",
-         "test_disp_5", # UPDATE HERE
+         "test_resist_1", # UPDATE HERE
          "plot",
          "corr_patch_simvsreal.png"),
     width = 2000, height = 1000, res = 300, type="cairo")
@@ -660,7 +665,7 @@ comparison_long = comparison %>%
 png(here("data",
          "rangeshifter",
          "tests",
-         "test_disp_5", # UPDATE HERE
+         "test_resist_1", # UPDATE HERE
          "plot",
          "corr_patch_simvsreal2.png"),
     width = 2000, height = 1000, res = 300, type="cairo")

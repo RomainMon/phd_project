@@ -229,7 +229,8 @@ plot(
     "#32a65e", "#ad975a", "#519799","#FFFFB2", "#0000FF", "#d4271e","purple","orange"
   )
 )
-
+freq(rasters_mspa_alt[[36]])
+freq(rasters_lf[[36]])
 
 #### Get patches ------
 
@@ -720,50 +721,50 @@ table(
 # Hence, we apply dilatation-erosion afterwards
 # E.g., without dilatation-erosion, Afetiva remains disconnected from its corridor...
 
-# Select patches to dilate-erode (based on previous patch name definition)
-targets = c("Afetiva", "Rio_Vermelho")
-
-patches_dilat = purrr::map(
-  patches_names,
-  ~ {
-    
-    x = .x
-    
-    ## 1. Select target patches
-    target = x %>%
-      dplyr::filter(patch_id %in% targets) %>%
-      sf::st_buffer(50)
-    
-    if (nrow(target) == 0) return(x)
-    
-    ## 2. Find all patches touching ANY target
-    touching = x[
-      sf::st_intersects(x, target, sparse = FALSE)[, 1],
-    ]
-    
-    ## 3. Merge them all into one geometry
-    merged_geom = touching %>%
-      sf::st_union() %>%
-      sf::st_as_sf()
-    
-    ## 4. Keep attributes from first target
-    merged_patch = target[1, ]
-    sf::st_geometry(merged_patch) = sf::st_geometry(merged_geom)
-    
-    ## 5. Remove original affected patches
-    remaining = x[
-      !sf::st_intersects(x, target, sparse = FALSE)[, 1],
-    ]
-    
-    ## 6. Recombine
-    dplyr::bind_rows(remaining, merged_patch) %>%
-      sf::st_make_valid()
-  }
-)
-
-# visualize
-plot(rasters_lf[[36]], col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e", "purple", "orange"))
-plot(sf::st_geometry(patches_dilat[[36]]), col="darkgreen", add=TRUE)
+# # Select patches to dilate-erode (based on previous patch name definition)
+# targets = c("Afetiva", "Rio_Vermelho")
+# 
+# patches_dilat = purrr::map(
+#   patches_names,
+#   ~ {
+#     
+#     x = .x
+#     
+#     ## 1. Select target patches
+#     target = x %>%
+#       dplyr::filter(patch_id %in% targets) %>%
+#       sf::st_buffer(50)
+#     
+#     if (nrow(target) == 0) return(x)
+#     
+#     ## 2. Find all patches touching ANY target
+#     touching = x[
+#       sf::st_intersects(x, target, sparse = FALSE)[, 1],
+#     ]
+#     
+#     ## 3. Merge them all into one geometry
+#     merged_geom = touching %>%
+#       sf::st_union() %>%
+#       sf::st_as_sf()
+#     
+#     ## 4. Keep attributes from first target
+#     merged_patch = target[1, ]
+#     sf::st_geometry(merged_patch) = sf::st_geometry(merged_geom)
+#     
+#     ## 5. Remove original affected patches
+#     remaining = x[
+#       !sf::st_intersects(x, target, sparse = FALSE)[, 1],
+#     ]
+#     
+#     ## 6. Recombine
+#     dplyr::bind_rows(remaining, merged_patch) %>%
+#       sf::st_make_valid()
+#   }
+# )
+# 
+# # visualize
+# plot(rasters_lf[[36]], col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e", "purple", "orange"))
+# plot(sf::st_geometry(patches_dilat[[36]]), col="darkgreen", add=TRUE)
 
 #### Patch selection ------
 # # 1) Filter patches occupied by GLTs (regions, census)
@@ -842,7 +843,9 @@ plot(sf::st_geometry(patches_dilat[[36]]), col="darkgreen", add=TRUE)
 # plot(st_geometry(regions_sf), add=TRUE, col="yellow", lwd=2) # GLT groups
 
 
-#### Export patches ----------
+#### Export data ----------
+
+##### Patches ------
 base_path = here("outputs", "data", "patches_rshifter")
 purrr::walk2(
   patches_names_good,
@@ -854,6 +857,24 @@ purrr::walk2(
   }
 )
 
+##### Raster ----
+# Define output folder
+output_dir = here("outputs", "data", "landscape_rshifter")
+
+# Export each raster with year in the filename
+for (i in seq_along(rasters_lf)) {
+  year_i = years[i]
+  output_path = file.path(output_dir, paste0("raster_rshifter_", year_i, ".tif"))
+  
+  message("  - Writing raster for year ", year_i)
+  
+  terra::writeRaster(
+    rasters_lf[[i]],
+    filename = output_path,
+    overwrite = TRUE, # Overwrite existing files or not
+    wopt = list(datatype = "INT1U", gdal = c("COMPRESS=LZW"))
+  )
+}
 
 ### 1b) - Vector metrics on UMMPs patches -----
 # Here, we work with patches as sets of patches within a UMMP (i.e., isolated populations)

@@ -11,7 +11,7 @@ library(terra)
 
 ### Import data -------
 #### Rasters reclassified ----
-base_path = here("outputs", "data", "MapBiomas", "MSPA", "reclass_w_MSPA")
+base_path = here("outputs", "data", "landscape_rshifter")
 raster_files = list.files(base_path, pattern = "\\.tif$", full.names = TRUE)
 
 # Extract years
@@ -20,14 +20,14 @@ years = stringr::str_extract(basename(raster_files), "(?<!\\d)\\d{4}(?!\\d)")
 raster_df = data.frame(file = raster_files, year = as.numeric(years)) %>%
   dplyr::arrange(year)
 # Load rasters in chronological order
-rasters_reclass_mspa = lapply(raster_df$file, terra::rast)
+rasters_rshifter = lapply(raster_df$file, terra::rast)
 years = raster_df$year
 # Check
-for (i in seq_along(rasters_reclass_mspa)) {
+for (i in seq_along(rasters_rshifter)) {
   cat("Year", years[i], " → raster name:", basename(raster_df$file[i]), "\n")
 }
-names(rasters_reclass_mspa) = years
-plot(rasters_reclass_mspa[['2024']], col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e", "orange"))
+names(rasters_rshifter) = years
+plot(rasters_rshifter[['2024']], col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e", "purple","orange"))
 
 #### GLT distribution ----
 # 2013-2018
@@ -56,7 +56,7 @@ years = vector_df$year
 for (i in seq_along(patches)) {
   cat("Year", years[i], " → raster name:", basename(vector_df$file[i]), "\n")
 }
-plot(rasters_reclass_mspa[[36]], col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e", "orange"))
+plot(rasters_rshifter[[36]], col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e", "purple","orange"))
 plot(sf::st_geometry(patches[[36]]), col=NA, add=TRUE)
 names(patches) = vector_df$year # Name by year
 
@@ -70,82 +70,17 @@ plot(patches_cut)
 stepping_stones = terra::rast(here("outputs", "data", "patches_cut", "TooSmallPatches_2005.tif"))
 plot(stepping_stones)
 
-#### Elevation ----
-topo_r = terra::rast(here("data", "geo", "TOPODATA", "work", "topo_bbox.tif"))
-plot(topo_r)
-
 ### Maps -----
-
-#### Patches --------
-# IMPORTANT : patches should have an integer value corresponding to patch id, and background must be set to 0
-
-
-##### IF VECTOR -> Rasterize patches -----
-
-# Create a permanent numeric ID
-patches = lapply(patches, function(x){
-  x %>%
-    mutate(unique_id = row_number())
-})
-anyDuplicated(patches[['2005']]$lyr.1) # Duplicated ids
-anyDuplicated(patches[['2005']]$patch_id) # GOOD but not integer value
-anyDuplicated(patches[['2005']]$unique_id) # ALL GOOD
-
-# Raster
-patch_rasters = vector("list", length(patches))
-names(patch_rasters) = names(patches)
-
-for (yr in names(patches)) {
-  
-  cat("Rasterizing patches:", yr, "\n")
-  
-  # Template raster
-  r_template = rasters_reclass_mspa[[yr]]
-  
-  # Convert to SpatVector
-  p = terra::vect(patches[[yr]])
-  
-  # Rasterize using unique patch IDs
-  r_patch = terra::rasterize(
-    p,
-    r_template,
-    field = "unique_id",
-    background = 0
-  )
-  
-  # Preserve nodata cells from template
-  r_patch[is.na(r_template)] = -999
-  
-  patch_rasters[[yr]] = r_patch
-}
-
-##### IF RASTER ----
-# Select patches 2005
-# patches2005_r = patch_rasters[['2005']]
-patches2005_r = patches_cut
-plot(patches2005_r)
-unique(patches2005_r) # Unique id per patch?
 
 #### Landscape --------
 
-##### Selected landscape -----
-lulc_2005 = rasters_reclass_mspa[['2005']]
-
-##### Overlay patches ----
-# It is necessary to overlay patches if patches are different from base raster (e.g., due to dilatation-erosion)
-# Any patch cell becomes habitat (=1)
-# Cells belonging to a patch
-lulc_2005[patches2005_r > 0] = 1
-# Preserve NoData
-lulc_2005[patches2005_r == -999] = -999
-plot(lulc_2005)
-
 ##### Reclass rasters (binary) ----
-# IMPORTANT : the basis landscape should have integer values (with matrix = 1, NAs = -999)
+# IMPORTANT : the basis landscape should have integer values 
+# WITH MATRIX = 1, NAs = -999
 reclass <- function(xx) {
   habitat <- 1
   corridor <- 33
-  background <- c(2, 3, 4, 5, 6)
+  background <- c(2, 3, 4, 5, 6, 10)
   
   # Make a copy of original values
   v <- xx[]
@@ -156,7 +91,7 @@ reclass <- function(xx) {
   # Assign habitat first using original values
   xx[v == habitat] <- 2
   
-  ## Assign corridor
+  # Assign corridor
   xx[v == corridor] <- 2
   
   # Then assign background
@@ -166,8 +101,7 @@ reclass <- function(xx) {
 }
 
 ## Apply to all rasters
-rasters_rshifter = lapply(rasters_reclass_mspa, reclass)
-r2005 = rasters_rshifter[['2005']]
+rasters_binary = lapply(rasters_rshifter, reclass)
 
 ##### Reclass rasters (all land uses) -----
 # IMPORTANT : the basis landscape should have integer values (with matrix = 1, NAs = -999)
@@ -202,61 +136,152 @@ reclass <- function(xx) {
   return(xx)
 }
 
-## Apply
-lulc_2005_resist = reclass(lulc_2005)
-plot(lulc_2005_resist, col=c("white","darkgreen","orange","lightgreen","yellow","blue","red"))
+## Apply to all rasters
+rasters_resist = lapply(rasters_rshifter, reclass)
 
-##### Overlay -----
-### High forests
-# GLTs do not occupy forests above 500 m -> they are reclassified 
-reclass_high_forest = function(r, topo, forest_value,
-                               elev_threshold,
-                               new_value) {
+
+##### Select landscape of interest ------
+r2005 = rasters_binary[['2005']]
+plot(r2005, col=c("white","gray","darkgreen"))
+freq(r2005)
+
+
+##### Overlay stepping stones -----
+# Small patches are considered stepping stones
+r2005[stepping_stones == 1] = 2
+freq(r2005)
+
+
+#### Patches --------
+# IMPORTANT : patches should have an integer value corresponding to patch id
+# Background must be set to 0
+# IF NOT: message error "Found Patch NA in valid habitat cell"
+
+##### IF VECTOR -> Rasterize patches -----
+### We rasterize patches based on a unique id (numeric value)
+### Then, we create a correspondence table to store unique patchs ids with their patches original ids (names, such as Afetiva, etc.
+
+# Create a permanent numeric ID in vector patches
+patches = lapply(patches, function(x){
+  x %>%
+    mutate(unique_id = row_number())
+})
+anyDuplicated(patches[['2005']]$lyr.1) # Duplicated ids
+anyDuplicated(patches[['2005']]$patch_id) # GOOD but not integer value
+anyDuplicated(patches[['2005']]$unique_id) # ALL GOOD
+
+# Vector patches
+patches2005_sf = patches[['2005']]
+
+# Correspondence table between patch name and id
+patch_corres_id = patches2005_sf %>%
+  sf::st_drop_geometry() %>%
+  dplyr::select(patch_id, unique_id)
+
+# Rasterize
+patch_rasters = vector("list", length(patches))
+names(patch_rasters) = names(patches)
+
+for (yr in names(patches)) {
   
-  # Align DEM if needed
-  if (!compareGeom(r, topo, stopOnError = FALSE)) {
-    topo = terra::resample(topo, r, method = "bilinear")
-  }
+  cat("Rasterizing patches:", yr, "\n")
   
-  r_out = r
+  # Template raster
+  r_template = rasters_rshifter[[yr]]
   
-  # Forest cells above threshold
-  idx = r == forest_value & topo > elev_threshold
+  # Convert to SpatVector
+  p = terra::vect(patches[[yr]])
   
-  r_out[idx] = new_value
+  # Rasterize using unique patch IDs
+  r_patch = terra::rasterize(
+    p,
+    r_template,
+    field = "unique_id",
+    background = 0
+  )
   
-  return(r_out)
+  # Preserve nodata cells from template
+  r_patch[is.na(r_template)] = -999
+  
+  patch_rasters[[yr]] = r_patch
 }
 
-r2005 = reclass_high_forest(r2005, topo = topo_r, 
-                                       forest_value = 2, 
-                                       elev_threshold = 500, 
-                                       new_value = 1)
-plot(r2005)
+## Raster patches
+patches2005_r = patch_rasters[['2005']]
 
-### Stepping stones
-# Small patches are considered stepping stones and take another resistance value
-plot(stepping_stones)
-r2005[stepping_stones == 1] = 2
+##### IF RASTER ----
+### Patches are already rasterized
+### -> We need a correspondence between raster patches and vector patches (e.g., 1087 is in Poço das Antas...)
+### raster patch ID → original vector patch ID, based on which vector polygon contains/intersects the raster cells belonging to that raster patch.
+### one-to-many correspondence if because one vector patch can contain several raster patches (in the case of previous patch-cutting, Queru et al. 2026)
 
-##### Plot ----
-plot(r2005)
+### Select patches 2005
+patches2005_r = patches_cut
+unique(patches2005_r) # Unique id per patch?
+
+# NA → 0, except where the landscape itself is -999
+patches2005_r[is.na(patches2005_r) & r2005 != -999] <- 0
+
+# Preserve true NoData
+patches2005_r[r2005 == -999] <- -999
+
+# Plot
+plot(patches2005_r)
+
+### Correspondence with vectors (join patch_id)
+## Vectorize cut patches
+patches_cut_v = terra::as.polygons(
+  patches_cut,
+  dissolve = TRUE,
+  values = TRUE
+)
+
+# Convert to sf
+patches_cut_sf = sf::st_as_sf(patches_cut_v)
+plot(patches_cut_sf)
+
+# Rename the id explicitly
+patches_cut_sf = patches_cut_sf %>%
+  dplyr::rename(cut_patch_id = id)
+
+# Spatial intersection with vector patches
+#! one cut patch may get several patches ids
+patch_intersection = sf::st_intersection(
+  patches_cut_sf,
+  patches2005_sf
+)
+
+# We only keep the ID of the VECTOR PATCH with highest overlap with the RASTER PATCH
+patch_intersection = patch_intersection %>%
+  dplyr::mutate(
+    intersection_area = sf::st_area(geometry)
+  )
+
+# Select the vector patch with the largest intersection
+patch_correspondence = patch_intersection %>%
+  sf::st_drop_geometry() %>%
+  dplyr::group_by(cut_patch_id) %>%
+  dplyr::slice_max(
+    order_by = intersection_area,
+    n = 1,
+    with_ties = FALSE
+  ) %>%
+  dplyr::ungroup() %>% 
+  dplyr::select(-intersection_area) %>% 
+  dplyr::rename(uncut_patch_id = unique_id) %>% 
+  dplyr::rename(uncut_patch_name = patch_id)
+
 
 #### Species distribution --------
+# We select patches occupied by GLTs at a given moment
+
 # IMPORTANT : species distribution file should only contain either 0 (species absent) or 1 (species present)
 # Species distribution:
 # 1 = species present
 # 0 = species absent
 # -999 = no data
 
-patches2005 = patches[['2005']]
-
-### Correspondence table between patch name and id
-patch_corres_id = patches2005 %>%
-  sf::st_drop_geometry() %>%
-  dplyr::select(patch_id, unique_id)
-
-# Select patches
+### Select patches -----
 # Compare the patches occupied in 2005 (see Holst et al. 2006) with patches names (given in 01o_patch_prep)
 # In Holst et al. 2006, occupied patches are V:
 # V -> Vendaval
@@ -271,7 +296,7 @@ patch_corres_id = patches2005 %>%
 # SER -> Pirineus
 # We ignore patches where GLTs were removed through translocation (south west)
 
-patches2005_select = patches2005 %>% 
+patches2005_select = patches2005_sf %>% 
   dplyr::filter(patch_id %in% c("Vendaval",
                                 "Rio_Vermelho",
                                 "Boa_Esperanca_II",
@@ -286,12 +311,12 @@ patches2005_select = patches2005 %>%
                                 "Nova_Esperanca_2",
                                 "Afetiva",
                                 "Pirineus_114")) # Check Pirineus name in QGIS!
-plot(sf::st_geometry(patches2005))
+plot(sf::st_geometry(patches2005_sf))
 plot(sf::st_geometry(patches2005_select), col="darkgreen", add=TRUE)
 
 ## To raster
 # Reference raster
-template = lulc_2005_resist
+template = r2005
 # Create a 0-valued raster with same geometry
 values(template) = 0
 # Rasterize selected patches as 1
@@ -309,89 +334,139 @@ patch_w_glt_2005[patch_w_glt_2005 > 0] = 1
 patch_w_glt_2005[patch_w_glt_2005 == 0] = 0
 
 # Restore no-data cells from landscape
-patch_w_glt_2005[lulc_2005_resist == -999] = -999
+patch_w_glt_2005[r2005 == -999] = -999
 plot(patch_w_glt_2005, col=c("white","gray","darkgreen"))
 
+
 #### Resample (OPTIONAL) -----
-# RangeShifter prefers integer resolutions (e.g., 30 m)
-res(patches2005_r)
-res(r2005)
-res(patch_w_glt_2005)
+# # RangeShifter prefers integer resolutions (e.g., 30 m)
+# res(patches2005_r)
+# res(r2005)
+# res(patch_w_glt_2005)
+# 
+# # Patches
+# r = patches2005_r
+# 
+# xmin = floor(xmin(r) / 30) * 30
+# xmax = ceiling(xmax(r) / 30) * 30
+# ymin = floor(ymin(r) / 30) * 30
+# ymax = ceiling(ymax(r) / 30) * 30
+# 
+# template30 = rast(
+#   xmin = xmin,
+#   xmax = xmax,
+#   ymin = ymin,
+#   ymax = ymax,
+#   resolution = 30,
+#   crs = crs(r)
+# )
+# 
+# patches2005_r30 = resample(
+#   r,
+#   template30,
+#   method = "near"
+# )
+# 
+# res(patches2005_r30) # should be exactly 30 30
+# 
+# # Landscape
+# r = lulc_2005_resist
+# 
+# xmin = floor(xmin(r) / 30) * 30
+# xmax = ceiling(xmax(r) / 30) * 30
+# ymin = floor(ymin(r) / 30) * 30
+# ymax = ceiling(ymax(r) / 30) * 30
+# 
+# template30 = rast(
+#   xmin = xmin,
+#   xmax = xmax,
+#   ymin = ymin,
+#   ymax = ymax,
+#   resolution = 30,
+#   crs = crs(r)
+# )
+# 
+# lulc_2005_resist_r30 = resample(
+#   r,
+#   template30,
+#   method = "near"
+# )
+# 
+# res(lulc_2005_resist_r30) # should be exactly 30 30
+# 
+# # Species distribution
+# r = patch_w_glt_2005
+# 
+# xmin = floor(xmin(r) / 30) * 30
+# xmax = ceiling(xmax(r) / 30) * 30
+# ymin = floor(ymin(r) / 30) * 30
+# ymax = ceiling(ymax(r) / 30) * 30
+# 
+# template30 = rast(
+#   xmin = xmin,
+#   xmax = xmax,
+#   ymin = ymin,
+#   ymax = ymax,
+#   resolution = 30,
+#   crs = crs(r)
+# )
+# 
+# patch_w_glt_2005_r30 = resample(
+#   r,
+#   template30,
+#   method = "near"
+# )
+# 
+# res(patch_w_glt_2005_r30) # should be exactly 30 30
 
-# Patches
-r = patches2005_r
+#### Checks ----
+land = r2005
+patch = patches2005_r
 
-xmin = floor(xmin(r) / 30) * 30
-xmax = ceiling(xmax(r) / 30) * 30
-ymin = floor(ymin(r) / 30) * 30
-ymax = ceiling(ymax(r) / 30) * 30
+# 1. Geometry
+print(compareGeom(land, patch, stopOnError = FALSE))
 
-template30 = rast(
-  xmin = xmin,
-  xmax = xmax,
-  ymin = ymin,
-  ymax = ymax,
-  resolution = 30,
-  crs = crs(r)
+# 2. Number of cells
+cat("Landscape cells:", ncell(land), "\n")
+cat("Patch cells:", ncell(patch), "\n")
+
+# 3. Habitat cells without patch
+habitat_no_patch = land == 2 & patch <= 0
+
+cat(
+  "Habitat cells without patch:",
+  sum(values(habitat_no_patch), na.rm = TRUE),
+  "\n"
 )
 
-patches2005_r30 = resample(
-  r,
-  template30,
-  method = "near"
+# It's OK if cells are considered habitat outside patches (it could be corridors or stepping stones)
+
+# 4. Habitat cells with NA patch
+habitat_patch_NA = land == 2 & is.na(patch)
+
+cat(
+  "Habitat cells with NA patch:",
+  sum(values(habitat_patch_NA), na.rm = TRUE),
+  "\n"
 )
 
-res(patches2005_r30) # should be exactly 30 30
+# 5. Matrix cells incorrectly assigned to patches
+matrix_with_patch = land == 1 & patch > 0
 
-# Landscape
-r = lulc_2005_resist
-
-xmin = floor(xmin(r) / 30) * 30
-xmax = ceiling(xmax(r) / 30) * 30
-ymin = floor(ymin(r) / 30) * 30
-ymax = ceiling(ymax(r) / 30) * 30
-
-template30 = rast(
-  xmin = xmin,
-  xmax = xmax,
-  ymin = ymin,
-  ymax = ymax,
-  resolution = 30,
-  crs = crs(r)
+cat(
+  "Matrix cells assigned to a patch:",
+  sum(values(matrix_with_patch), na.rm = TRUE),
+  "\n"
 )
 
-lulc_2005_resist_r30 = resample(
-  r,
-  template30,
-  method = "near"
+# 6. NoData landscape cells with patch
+nodata_with_patch = land == -999 & patch > 0
+
+cat(
+  "NoData cells assigned to a patch:",
+  sum(values(nodata_with_patch), na.rm = TRUE),
+  "\n"
 )
-
-res(lulc_2005_resist_r30) # should be exactly 30 30
-
-# Species distribution
-r = patch_w_glt_2005
-
-xmin = floor(xmin(r) / 30) * 30
-xmax = ceiling(xmax(r) / 30) * 30
-ymin = floor(ymin(r) / 30) * 30
-ymax = ceiling(ymax(r) / 30) * 30
-
-template30 = rast(
-  xmin = xmin,
-  xmax = xmax,
-  ymin = ymin,
-  ymax = ymax,
-  resolution = 30,
-  crs = crs(r)
-)
-
-patch_w_glt_2005_r30 = resample(
-  r,
-  template30,
-  method = "near"
-)
-
-res(patch_w_glt_2005_r30) # should be exactly 30 30
 
 #### Export -------
 ### IMPORTANT: all NAs values must take an integer value (e.g., -999)
@@ -439,9 +514,10 @@ writeRaster(
   NAflag = -999
 )
 
-# Correspondence table
+# (Optional) Correspondence table
+# CHOOSE THE PROPER CORRESPONDENCE TABLE (depending on the patches used)
 write.csv(
-  patch_corres_id,
+  patch_correspondence,
   file.path(output_dir, "patch_corres_id_2005.csv"),
   row.names = FALSE
 )
