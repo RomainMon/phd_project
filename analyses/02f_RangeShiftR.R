@@ -60,7 +60,7 @@ library(readxl)
 
 ### Director path ----
 
-dirpath = "data/rangeshifter/tests/test_resist_1/" # UPDATE HERE !!!
+dirpath = "data/rangeshifter/tests/test_patch_cut_3/" # UPDATE HERE !!!
 ## Create the RS folder structure, if it doesn’t yet exist
 # dir.create(file.path(dirpath, "Inputs"), showWarnings = TRUE)
 # dir.create(file.path(dirpath, "Outputs"), showWarnings = TRUE)
@@ -101,7 +101,7 @@ terra::unique(patch_w_glt)
 # getLocalisedEquilPop() runs a quick simulation of a closed and localised population (i.e. without dispersal and in a single idealised patch) for a given vector of potential 1/b values (argument DensDep_values) and based on our defined Demography() module.
 # The getLocalisedEquilPop() function uses absolute values of individuals in the local population (since there is not spatial extent).
 # WHILE what we need are relative values of 1/b as individuals per hectare.
-# We choose to simulate a hypothetical patch of our landscape, and want to determine the value of 1/b that is needed to observe e.g. 100 individuals in 1 ha (e.g., our empirical observation of how many individuals were maximally observed in woodland patches)
+# We choose to simulate a hypothetical patch of our landscape, and want to determine the value of 1/b that is needed to observe e.g. 100 individuals in 1 ha (e.g., our empirical observation of how many individuals were maximally observed in patches)
 # Thus, we aim to find the 1/b parameter that would yield a maximum local population abundance of 100 individuals. 
 # We can now assess the localised equilibrium population size for different values of 1/b and see how the density dependence plays out.
 
@@ -129,10 +129,13 @@ par(mfrow=c(1,1))
 eq_pop = getLocalisedEquilPop(demog = demo, DensDep_values = c(0.05, 0.06, 0.07, 0.08, 0.09, 0.095, 0.1, 0.2, 0.3)) #  absolute values of individuals
 # Select the value that reaches the desired threshold
 colSums(eq_pop)
+# The mean GLT density per patch is 0.086 ind/ha (Ruiz-Miranda et al. 2019)
+# NOTE: 8,6 individus / 100 ha (1 km²) = 0,086 individu/ha.
+# This value corresponds to the 4th or 5th column (0.08 or 0.09)
 
 # calculate proportion of all stages excluding the new-born juvenile (stage 0) population, 
 # which can't be initialised:
-eq_pop = getLocalisedEquilPop(demog = demo, DensDep_values = 0.089, plot=F)
+eq_pop = getLocalisedEquilPop(demog = demo, DensDep_values = 0.089, plot=F) # Put DensDep_values
 prop_stgs = eq_pop[-1]/sum(eq_pop[-1])
 round(prop_stgs,2)
 
@@ -148,7 +151,7 @@ real_data %>%
 patch_corres_id = readr::read_csv(here("data", 
                                        "rangeshifter", 
                                        "tests", 
-                                       "test_resist_1", # UPDATE HERE!!!
+                                       "test_patch_cut_3", # UPDATE HERE!!!
                                        "Inputs", 
                                        "patch_corres_id_2005.csv"),
                                 col_types = readr::cols(cut_patch_id = readr::col_integer()))
@@ -158,11 +161,150 @@ patch_corres_id = readr::read_csv(here("data",
 metadata = read_excel(here("data", 
                            "rangeshifter", 
                            "tests", 
-                           "test_resist_1",  # UPDATE HERE!!!
+                           "test_patch_cut_3",  # UPDATE HERE!!!
                            "test_parameters.xlsx"),
                       sheet="test1")
 
-#### Loop -----
+
+#### Loop (WITHOUT DISPERSAL) -----
+
+for(i in 1:nrow(metadata)) {
+  
+  densdep = metadata$DensDep[i]
+  indshacell = metadata$IndsHaCell[i]
+  ad_survival = metadata$Ad_survival[i]
+  juv_survival = metadata$Juv_survival[i]
+  
+  id_simulation = metadata$Id_simul[i]
+  
+  # Print progression
+  cat("\n========================================\n")
+  cat(sprintf("Simulation %d/%d (ID: %d)\n",
+              i, nrow(metadata), id_simulation))
+  cat(sprintf("  DensDep = %.3f | Juv suvival = %.3f | Adult suvival = %.3f | IndsHaCell = %.3f\n",
+              densdep, juv_survival, ad_survival, indshacell))
+  cat("========================================\n\n")
+  
+  ##### 1) Simulation -----
+  # This module is used to set general simulation parameters (e.g. simulation ID, number of replicates, and number of years to simulate) and to control output types (plus some more specific settings).
+  sim = Simulation(Simulation = id_simulation, # Update simulation id
+                   Replicates = 20, # Number of replicates
+                   Years = 95, # Number of years
+                   OutIntPop = 1, # Whether to export population files 
+                   OutIntOcc = 0, # Whether to export occupancy files
+                   OutIntRange = 0, # Whether to export range files
+                   OutIntInd = 0, # Whether to export individual files
+                   OutIntConn = 0, # Whether to export connectivity files (n individuals from patch i to patch j)
+                   SMSHeatMap = FALSE, # Produce SMS heat map raster as output?
+                   ReturnPopDataFrame = TRUE, # Return population data to R as data frame (most suitable for patch based models)?
+                   CreatePopFile = TRUE # Create population output file? Defaults to TRUE.
+  ) 
+  
+  ##### 2) Landscape -----
+  # DynamicLandYears: For a dynamic landscape, DynamicLandYears lists the years in which the corresponding habitat maps in LandscapeFile and - if applicable - their respective patch and/or costs maps (in PatchFile,CostsFile) are loaded and used in the simulation
+  # demogScaleLayersFile: List of vectors with file names of additional landscape layers which can be used to locally scale certain demographic rates and thus allow them to vary spatially. The list must contain equally sized vectors providing file names, one vector for each element in DynamicLandYears, which are interpreted as stacked layers. Can only be used in combination with habitat quality maps, i.e. when HabPercent=TRUE. It must contain percentage values ranging from 0 to 100
+  real_land = ImportedLandscape(
+    LandscapeFile = "raster_reclass_2005.txt",
+    PatchFile = "patches_2005.txt",
+    Resolution = 28.35578,
+    Nhabitats = 2, # Number of land covers. UPDATE DEPENDING ON THE LANDSCAPE
+    K_or_DensDep = c(0, densdep), # Density dependence of the modeled species and is given in units of the nb of individuals/ha (for each land cover). If combined with a StageStructured model, K_or_DensDep will be used as the strength of demographic density dependence b-1. If combined with a non-structured model, K_or_DensDep will be interpreted as limiting carrying capacity K
+    SpDistFile = "patches_w_glt_2005.txt",
+    SpDistResolution = 28.35578
+  )
+  
+  ##### 3) Demography ----
+  # To make a stage-structured model, we have to additionally create a stage-structure sub-module within the Demography module. 
+  # We can use ‘+’ to add the StageStructure sub-module.
+  mat = matrix(c(0, 0, 2,
+                 juv_survival, 0, 0,
+                 0, 0.56, ad_survival),
+               nrow=3, byrow=T)
+  
+  # Stage structure
+  # NB: we can import matrix of layer indices for the three demographic rates (fecundity/development/survival) if they are spatially varying with the parameters FecLayer, DevLayer, SurvLayer
+  # FecStageWtsMatrix, DevStageWtsMatrix, SurvStageWtsMatrix: Stage-dependent weights in density dependence of fecundity / development / survival.
+  # PostDestructn: In a dynamic landscape, determine if all individuals of a population should die (FALSE, default) or disperse (TRUE) if its patch gets destroyed.
+  stg = StageStructure(Stages = 3, # Nb of life stages
+                       TransMatrix = mat,
+                       MaxAge = 20, # Maximum age
+                       RepSeasons = 1, # Nb of reproduction events per year
+                       RepInterval = 0, # Nb of reproductive seasons which must be missed following a reproduction attempt, before another reproduction attempt may occur
+                       PRep = 1, # Probability of reproducing in subsequent reproductive seasons
+                       SurvSched = 1, #Scheduling of Survival. When should survival and development occur? 0 = At reproduction, 1 = Between reproductive events (default), 2 = Annually (only for RepSeasons>1)
+                       FecDensDep = T, # Density-dependence on fecundity?
+                       DevDensDep = F, # Density-dependence on development?
+                       SurvDensDep = F # Density-dependence on survival?
+  ) 
+  
+  # Female-only models assume that males are not limiting, and that the population dynamics are driven only by females. 
+  # It also means that sexes are not modelled explicitly and it is not possible to account for behaviours like mate-finding in the settlement decisions; females will settle in suitable habitat patches and then will automatically be able to attempt reproduction.
+  # IF ReproductionType=2, specify arguments PropMales and Harem
+  demo = Demography(StageStruct = stg, # corresponding parameter object generated by StageStructure, which holds all demographic parameters
+                    ReproductionType = 0 # 0 = asexual / only female model (default); 1 = simple sexual model; 2 = sexual model with explicit mating system
+  ) 
+  
+  ##### 4) Dispersal -----
+  ## Emigration
+  emig = Emigration(EmigProb = 0,
+                    StageDep = F,
+                    DensDep = F)
+  
+  ## Transfer
+  transfer = DispersalKernel(Distances = matrix(c(100),nrow=1),
+                             StageDep = F)
+  
+  ## Settlement
+  # Settle = 0 means 'die when unsuitable' for DispersalKernel and 'always settle when suitable' for Movement process
+  settle = Settlement(StageDep = F,
+                      Settle = 0,
+                      FindMate = F,
+                      DensDep = F)
+  
+  ## Dispersal
+  disp = Dispersal(Emigration = emig,
+                   Transfer = transfer,
+                   Settlement = settle)
+  
+  ##### 5) Genetics ----
+  # The genetics module controls the heritability and evolution of traits and is needed if inter-individual variability is enabled (IndVar = TRUE) e.g. for at least one dispersal trait
+  
+  ##### 6) Initialise -----
+  # calculate proportion of all stages excluding the new-born juvenile (stage 0) population, 
+  # which can't be initialised:
+  eq_pop = getLocalisedEquilPop(demog = demo, DensDep_values = densdep, plot=F)
+  prop_stgs = eq_pop[-1]/sum(eq_pop[-1])
+  prop_stgs = round(prop_stgs,2)
+  
+  ## Initialise
+  init = Initialise(InitType = 1,  # InitType = 0: Free initialisation according to habitat map (default) (set FreeType), InitType = 1: From loaded species distribution map (set SpType), InitType = 2: From initial individuals list file
+                    SpType = 0, # SpType = 0: All suitable cells within all distribution presence cells (default), SpType = 1: All suitable cells within some randomly chosen presence cells; set number of cells to initialise in NrCells.
+                    InitDens = 2, # Number of individuals to be seeded in each cell/patch. InitDens = 0: At K_or_DensDep, InitDens = 1: At half K_or_DensDep (default), InitDens = 2: Set the number of individuals per cell/hectare to initialise in IndsHaCell.
+                    IndsHaCell = indshacell, # Initial density in inds/ha
+                    PropStages = c(0, prop_stgs), # For StageStructured models only: Proportion of individuals initialised in each stage. Requires a vector of length equal to the number of stages
+                    InitAge = 2 # Initial age distribution within each stage. InitAge = 0: Minimum age for the respective stage. InitAge = 1 : Age randomly sampled between the minimum and the maximum age for the respective stage. InitAge = 2: According to a quasi-equilibrium distribution
+  )
+  
+  ##### 7) Parameter master -----
+  s = RSsim(
+    simul = sim,
+    land = real_land,
+    demog = demo,
+    dispersal = disp,
+    init = init
+  )
+  
+  # SIMULATION
+  RunRS(s, dirpath)
+  #id_simulation = id_simulation +1
+}
+
+# IF THE SIMULATION DOES NOT RUN
+# traceback()
+
+
+#### Loop (WITH DISPERSAL) -----
+
 for(i in 1:nrow(metadata)) {
   
   densdep = metadata$DensDep[i]
@@ -335,7 +477,7 @@ pop_files = list.files(
   here("data",
        "rangeshifter",
        "tests",
-       "test_resist_1", # UPDATE HERE !!!
+       "test_patch_cut_3", # UPDATE HERE !!!
        "Outputs"),
   pattern = "_Pop\\.txt$",
   full.names = TRUE
@@ -370,22 +512,22 @@ pop_all = dplyr::left_join(
 # UPDATE HERE
 param1 <- "Emig_prob"
 param2 <- "PR"
-# param3 <- "DP"
+param3 <- "Step_mortality"
 
 ##### Line plot ------
 ### Plot
 pop_total = pop_all %>%
-  dplyr::group_by(Id_simul, !!sym(param1), !!sym(param2), Rep, Year) %>%
+  dplyr::group_by(Id_simul, !!sym(param1), !!sym(param2), !!sym(param3), Rep, Year) %>% # Add parameters here (depending on how many are tested)
   dplyr::summarise(NInd = sum(NInd), .groups = "drop")
 pop_time = pop_total %>%
-  dplyr::group_by(!!sym(param1), !!sym(param2), Year) %>%
+  dplyr::group_by(!!sym(param1), !!sym(param2), !!sym(param3), Year) %>%
   dplyr::summarise(MeanN = mean(NInd),.groups = "drop")
 ggplot(pop_time, aes(Year, MeanN, colour = factor(!!sym(param1)))) + # Parameter that varies as colour
   geom_line(linewidth = 1) +
   # Faceting
   facet_grid(
     rows = vars(!!sym(param2)), # Parameter that varies
-    # cols = vars(!!sym(param3)), # Other parameter that varies
+    cols = vars(!!sym(param3)), # Other parameter that varies
     scales = "free_y") +
   # Vertical reference years
   geom_vline(
@@ -406,7 +548,7 @@ ggplot(pop_time, aes(Year, MeanN, colour = factor(!!sym(param1)))) + # Parameter
 png(here("data",
          "rangeshifter",
          "tests",
-         "test_resist_1", # UPDATE HERE
+         "test_patch_cut_3", # UPDATE HERE
          "plot",
          "evol_pop.png"), # UPDATE HERE
     width = 3000, height = 3000, res = 300, type="cairo")
@@ -415,7 +557,7 @@ ggplot(pop_time, aes(Year, MeanN, colour = factor(!!sym(param1)))) + # Parameter
   # Faceting
   facet_grid(
     rows = vars(!!sym(param2)), # Parameter that varies
-    # cols = vars(!!sym(param3)), # Other parameter that varies
+    cols = vars(!!sym(param3)), # Other parameter that varies
     scales = "free_y") +
   # Vertical reference years
   geom_vline(
@@ -441,22 +583,22 @@ initial_popsize = 1600 # Adjust
 final_popsize = 3706 # Adjust
 initial_pop = pop_time %>%
   dplyr::filter(Year == min(pop_time$Year)) %>%
-  dplyr::filter(abs(MeanN - initial_popsize) < 500)  # Adjust tolerance
+  dplyr::filter(abs(MeanN - initial_popsize) < 150)  # Adjust tolerance
 final_pop = pop_time %>%
   dplyr::filter(Year == 8) %>% # 2014
-  dplyr::filter(abs(MeanN - final_popsize) < 500)  # Adjust tolerance
+  dplyr::filter(abs(MeanN - final_popsize) < 150)  # Adjust tolerance
 
 # Get the parameter combinations for initial and final populations
 initial_params = initial_pop %>%
   dplyr::select(!!sym(param1),
                 !!sym(param2),
-                # !!sym(param3)
+                !!sym(param3)
                 ) %>%
   dplyr::distinct()
 final_params = final_pop %>%
   dplyr::select(!!sym(param1),
                 !!sym(param2),
-                # !!sym(param3)
+                !!sym(param3)
                 ) %>%
   dplyr::distinct()
 # Find the intersection
@@ -466,7 +608,7 @@ dplyr::inner_join(initial_params, final_params)
 fit_score = pop_time %>%
   dplyr::group_by(!!sym(param1),
                   !!sym(param2),
-                  # !!sym(param3)
+                  !!sym(param3)
                   ) %>%
   dplyr::summarise(
     InitialN = MeanN[Year == min(Year)],
@@ -482,7 +624,7 @@ fit_score = pop_time %>%
 # Plot
 ggplot(fit_score, aes(x = !!sym(param1), y = !!sym(param2), fill = Total_error)) +
   geom_tile() +
-  # facet_wrap(~.data[[param1]]) +
+  facet_wrap(~.data[[param3]]) +
   scale_fill_viridis_c(
     option = "C",
     direction = -1
@@ -493,18 +635,19 @@ ggplot(fit_score, aes(x = !!sym(param1), y = !!sym(param2), fill = Total_error))
 png(here("data",
          "rangeshifter",
          "tests",
-         "test_resist_1", # UPDATE HERE
+         "test_patch_cut_3", # UPDATE HERE
          "plot",
          "heatmap.png"),
     width = 2000, height = 1000, res = 300, type="cairo")
 ggplot(fit_score, aes(x = !!sym(param1), y = !!sym(param2), fill = Total_error)) +
   geom_tile() +
-  # facet_wrap(~.data[[param1]]) +
+  facet_wrap(~.data[[param3]]) +
   scale_fill_viridis_c(
     option = "C",
     direction = -1
   ) +
   theme_bw()
+
 dev.off()
 
 ## RMSE
@@ -512,7 +655,7 @@ fit_score = pop_time %>%
   dplyr::group_by(
     !!sym(param1),
     !!sym(param2),
-    # !!sym(param3)
+    !!sym(param3)
   ) %>%
   dplyr::summarise(
     N0 = MeanN[Year == 0],
@@ -526,7 +669,7 @@ ggplot(fit_score, aes(x = !!sym(param1),
                       y = !!sym(param2),
                       fill = RMSE)) +
   geom_tile() +
-  # facet_grid(~.data[[param1]]) +
+  facet_grid(~.data[[param3]]) +
   scale_fill_viridis_c(
     option = "C",
     direction = -1) +
@@ -539,7 +682,7 @@ fit_score %>%
 
 ##### Patch abundance -----
 pop_patch = pop_all %>%
-  dplyr::group_by(PatchID, !!sym(param1), !!sym(param2), Year) %>%
+  dplyr::group_by(PatchID, !!sym(param1), !!sym(param2), !!sym(param3), Year) %>% # Add parameters here (depending on how many are tested)
   dplyr::summarise(MeanN = mean(NInd),.groups = "drop")
 # Join patch name
 patch_list = c("Vendaval",
@@ -565,12 +708,13 @@ pop_patch = pop_patch %>%
 # Select parameters and years
 sim_sel = pop_patch %>%
   dplyr::filter(
-    Emig_prob == 0.035,
-    PR == 5,
+    Emig_prob == 0.035, # First parameter value
+    PR == 10, # Second parameter value
+    Step_mortality == 0.001, # Third parameter value
     Year %in% c(0, 8, 13, 17) # Years of interest
   )
 
-# Remove suffixes from patches ids
+# Remove suffixes from patches ids and create a variable "FragName" resembling UMMP name
 sim_sel = sim_sel %>%
   dplyr::mutate(
     FragName = stringr::str_remove(
@@ -626,7 +770,7 @@ cor(comparison$SimN, comparison$RealN)
 png(here("data",
          "rangeshifter",
          "tests",
-         "test_resist_1", # UPDATE HERE
+         "test_patch_cut_3", # UPDATE HERE
          "plot",
          "corr_patch_simvsreal.png"),
     width = 2000, height = 1000, res = 300, type="cairo")
@@ -665,7 +809,7 @@ comparison_long = comparison %>%
 png(here("data",
          "rangeshifter",
          "tests",
-         "test_resist_1", # UPDATE HERE
+         "test_patch_cut_3", # UPDATE HERE
          "plot",
          "corr_patch_simvsreal2.png"),
     width = 2000, height = 1000, res = 300, type="cairo")
