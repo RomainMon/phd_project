@@ -113,6 +113,7 @@ reclass <- function(xx) {
   agri <- 4
   water <- 5
   built <- 6
+  high_for <- 10
   
   # Make a copy of original values
   v <- xx[]
@@ -127,8 +128,8 @@ reclass <- function(xx) {
   xx[v == corridor] <- 3
   
   # Assign matrix land uses
-  xx[v %in% c(notforest,wetlands)] <- 1
-  xx[v == agri] <- 4
+  xx[v == agri] <- 1
+  xx[v %in% c(notforest,wetlands,high_for)] <- 4
   xx[v == water] <- 5
   xx[v == built] <- 6
   
@@ -141,14 +142,15 @@ rasters_resist = lapply(rasters_rshifter, reclass)
 
 
 ##### Select landscape of interest ------
-r2005 = rasters_binary[['2005']]
-plot(r2005, col=c("white","gray","darkgreen"))
+r2005 = rasters_resist[['2005']]
+# plot(r2005, col=c("white","gray","darkgreen")) # Binary raster
+plot(r2005, col=c("white","yellow","darkgreen","green","brown","blue","red"))
 freq(r2005)
 
 
 ##### Overlay stepping stones -----
 # Small patches are considered stepping stones
-r2005[stepping_stones == 1] = 2
+r2005[stepping_stones == 1] = 3 # Adjust the value depending on the type of landscape (binary or resistance-based)
 freq(r2005)
 
 
@@ -157,9 +159,8 @@ freq(r2005)
 # Background must be set to 0
 # IF NOT: message error "Found Patch NA in valid habitat cell"
 
-##### IF VECTOR -> Rasterize patches -----
-### We rasterize patches based on a unique id (numeric value)
-### Then, we create a correspondence table to store unique patchs ids with their patches original ids (names, such as Afetiva, etc.
+##### IF VECTOR -----
+### We create a correspondence table to store unique patchs ids with their patches original ids (names, such as Afetiva, etc.
 
 # Create a permanent numeric ID in vector patches
 patches = lapply(patches, function(x){
@@ -178,6 +179,7 @@ patch_corres_id = patches2005_sf %>%
   sf::st_drop_geometry() %>%
   dplyr::select(patch_id, unique_id)
 
+### We rasterize patches based on a unique id (numeric value)
 # Rasterize
 patch_rasters = vector("list", length(patches))
 names(patch_rasters) = names(patches)

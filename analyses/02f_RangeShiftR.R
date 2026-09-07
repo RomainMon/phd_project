@@ -3,10 +3,6 @@
 # Objective: Running RangeShiftR simulations
 #------------------------------------------------#
 
-###################################################
-### BEFORE RUNNING EACH SIMULATION, UPDATE DIRPATH
-###################################################
-
 ### Load packages ------
 library(RangeShiftR)
 library(here)
@@ -63,13 +59,12 @@ library(readxl)
 
 # List with components stored
 test_config = list(
-  test_name = "test_patch_cut_3", # Name of the folder
+  test_name = "test_resist_1", # Name of the folder
   
   # Parameters tested with sensitivity analysis (i.e., those varying during simulations)
   parameters = c(
-    "Emig_prob",
-    "PR",
-    "Step_mortality"
+    "Cost1",
+    "Cost3"
   )
 )
 
@@ -77,7 +72,8 @@ dirpath = here(
   "data",
   "rangeshifter",
   "tests",
-  test_config$test_name
+  test_config$test_name,
+  "/"
 )
 
 ## Create the RS folder structure, if it doesn’t yet exist
@@ -344,6 +340,14 @@ for(i in 1:nrow(metadata)) {
   dp = metadata$DP[i]
   step_mortality = metadata$Step_mortality[i]
   
+  nhab = metadata$Nhab[i]
+  costs = c(metadata$Cost1[i],
+            metadata$Cost2[i],
+            metadata$Cost3[i],
+            metadata$Cost4[i],
+            metadata$Cost5[i],
+            metadata$Cost6[i])
+  
   id_simulation = metadata$Id_simul[i]
   
   # Print progression
@@ -354,6 +358,8 @@ for(i in 1:nrow(metadata)) {
               densdep, juv_survival, ad_survival, indshacell))
   cat(sprintf("  EmigProb = %.3f | Perceptual range = %.3f | Memory size = %.3f | Directional persistence = %.3f | Step mortality = %.3f\n",
               emig_prob, pr, ms, dp, step_mortality))
+  cat(sprintf("  Nhab = %.3f | Costs = %.3f\n",
+              nhab, costs))
   cat("========================================\n\n")
   
   ##### 1) Simulation -----
@@ -378,8 +384,8 @@ for(i in 1:nrow(metadata)) {
     LandscapeFile = "raster_reclass_2005.txt",
     PatchFile = "patches_2005.txt",
     Resolution = 28.35578,
-    Nhabitats = 2, # Number of land covers. UPDATE DEPENDING ON THE LANDSCAPE
-    K_or_DensDep = c(0, densdep), # Density dependence of the modeled species and is given in units of the nb of individuals/ha (for each land cover). If combined with a StageStructured model, K_or_DensDep will be used as the strength of demographic density dependence b-1. If combined with a non-structured model, K_or_DensDep will be interpreted as limiting carrying capacity K
+    Nhabitats = nhab, # Number of land covers
+    K_or_DensDep = c(0, densdep, 0, 0, 0, 0), # Density dependence of the modeled species and is given in units of the nb of individuals/ha (for each land cover). If combined with a StageStructured model, K_or_DensDep will be used as the strength of demographic density dependence b-1. If combined with a non-structured model, K_or_DensDep will be interpreted as limiting carrying capacity K
     SpDistFile = "patches_w_glt_2005.txt",
     SpDistResolution = 28.35578
   )
@@ -436,7 +442,7 @@ for(i in 1:nrow(metadata)) {
                  DP = dp, # Directional persistence: tendency to follow a CRW. Must be >= 1 (default to 1)
                  GoalType = 0, # Goal bias type (i.e., a tendency to move towards a particular destination). 0 = None, 2 = Dispersal bias (i.e., moving away from the natal location)
                  IndVar = F, # Individual variability in SMS traits?
-                 Costs = c(50,1), # Landscape resistance to movement (for each land cover)
+                 Costs = costs, # Landscape resistance to movement (for each land cover)
                  StepMort = step_mortality, # Per-step mortality probability. Constant or habitat-specific
                  StraightenPath = T # Straigten path after decision not to settle in a patch?
   )
@@ -539,18 +545,20 @@ params_tested = test_config$parameters
 
 ##### Line plot ------
 ### Plot
+# Population size by siumation
 pop_total = pop_all %>%
   dplyr::group_by(Id_simul, 
                   dplyr::across(dplyr::all_of(params_tested)),
                   Rep, 
                   Year) %>%
   dplyr::summarise(NInd = sum(NInd), .groups = "drop")
+# Mean population size across tested parameters
 pop_time = pop_total %>%
   dplyr::group_by(dplyr::across(dplyr::all_of(params_tested)),
                   Year) %>%
   dplyr::summarise(MeanN = mean(NInd),.groups = "drop")
 
-# Plot
+# Plot evolution of population size
 ggplot(
   pop_time,
   aes(
@@ -563,7 +571,7 @@ ggplot(
   # Faceting
   facet_grid(
     cols = vars(.data[[params_tested[2]]]),
-    rows = vars(.data[[params_tested[3]]]),
+    # rows = vars(.data[[params_tested[3]]]),
     scales = "free_y") +
   # Vertical reference years
   geom_vline(
@@ -587,7 +595,7 @@ png(here("data",
          test_config$test_name,
          "plot",
          "evol_pop.png"),
-    width = 3000, height = 3000, res = 300, type="cairo")
+    width = 3000, height = 1500, res = 300, type="cairo")
 # Plot
 ggplot(
   pop_time,
@@ -601,7 +609,7 @@ ggplot(
   # Faceting
   facet_grid(
     cols = vars(.data[[params_tested[2]]]),
-    rows = vars(.data[[params_tested[3]]]),
+    # rows = vars(.data[[params_tested[3]]]),
     scales = "free_y") +
   # Vertical reference years
   geom_vline(
@@ -623,24 +631,36 @@ dev.off()
 ##### Comparison with long-term data -----
 ### Identify good parameters by comparing with real pop
 ## Identify parameters that provide the same initial and final pop. size
-initial_popsize = 1600 # Adjust
-final_popsize = 3706 # Adjust
+pop2005 = 1600 # Adjust
+pop2013 = 3706 # Adjust
+pop2022 = 4869 # Adjust
 initial_pop = pop_time %>%
-  dplyr::filter(Year == min(pop_time$Year)) %>%
-  dplyr::filter(abs(MeanN - initial_popsize) < 200)  # Adjust tolerance
-final_pop = pop_time %>%
+  dplyr::filter(Year == min(pop_time$Year)) %>% # 2005
+  dplyr::filter(abs(MeanN - pop2005) < 200)  # Adjust tolerance
+pop_date1 = pop_time %>%
   dplyr::filter(Year == 8) %>% # 2013
-  dplyr::filter(abs(MeanN - final_popsize) < 200)  # Adjust tolerance
+  dplyr::filter(abs(MeanN - pop2013) < 200)  # Adjust tolerance
+pop_date2 = pop_time %>%
+  dplyr::filter(Year == 17) %>% # 2022
+  dplyr::filter(abs(MeanN - pop2022) < 500)  # Adjust tolerance
 
-# Get the parameter combinations for initial and final populations
+# Get the parameter combinations for 2005 and 2013
 initial_params = initial_pop %>%
   dplyr::select(dplyr::all_of(params_tested)) %>%
   dplyr::distinct()
-final_params = final_pop %>%
+params_date1 = pop_date1 %>%
+  dplyr::select(dplyr::all_of(params_tested)) %>%
+  dplyr::distinct()
+params_date2 = pop_date2 %>%
   dplyr::select(dplyr::all_of(params_tested)) %>%
   dplyr::distinct()
 # Find the intersection
-dplyr::inner_join(initial_params, final_params)
+# Intersection between two dates
+dplyr::inner_join(initial_params, params_date1) 
+# Between three dates
+initial_params %>%
+  dplyr::inner_join(params_date1, by = params_tested) %>%
+  dplyr::inner_join(params_date2, by = params_tested)
 
 ## Heatmap plot
 fit_score = pop_time %>%
@@ -651,8 +671,8 @@ fit_score = pop_time %>%
     .groups = "drop"
   ) %>%
   dplyr::mutate(
-    Error_initial = abs(InitialN - initial_popsize),
-    Error_final = abs(FinalN - final_popsize),
+    Error_initial = abs(InitialN - pop2005),
+    Error_final = abs(FinalN - pop2013),
     # total distance from observed values
     Total_error = Error_initial + Error_final
   )
@@ -666,7 +686,7 @@ ggplot(
   )
 ) +
   geom_tile() +
-  facet_wrap(vars(.data[[params_tested[3]]])) +
+  # facet_wrap(vars(.data[[params_tested[3]]])) +
   scale_fill_viridis_c(
     option = "C",
     direction = -1
@@ -691,7 +711,7 @@ ggplot(
   )
 ) +
   geom_tile() +
-  facet_wrap(vars(.data[[params_tested[3]]])) +
+  # facet_wrap(vars(.data[[params_tested[3]]])) +
   scale_fill_viridis_c(
     option = "C",
     direction = -1
@@ -701,7 +721,11 @@ ggplot(
 dev.off()
 
 ## RMSE
-fit_score = pop_time %>%
+# Note: RMSE is frequently used to assess differences between predicted and real values
+# Calculation: square root of the mean of the squares of the deviations
+
+## Based on 2005 and 2013 populations sizes
+fit_score_t1t2 = pop_time %>%
   dplyr::group_by(dplyr::across(dplyr::all_of(params_tested))) %>%
   dplyr::summarise(
     N0 = MeanN[Year == 0],
@@ -709,30 +733,63 @@ fit_score = pop_time %>%
     .groups = "drop"
   ) %>%
   dplyr::mutate(
-    RMSE = sqrt(((N0 - initial_popsize)^2 + (N8 - final_popsize)^2) / 2))
+    RMSE = sqrt(
+      ((N0 - pop2005)^2 +
+         (N8 - pop2013)^2) / 2
+    )
+  )
 # Rank the best options
-fit_score %>%
+fit_score_t1t2 %>%
   dplyr::arrange(RMSE) %>%
   dplyr::slice(1:10)
 # Best option
-best_fit = fit_score %>%
+fit_score_t1t2 %>%
   dplyr::arrange(RMSE) %>%
   dplyr::slice(1)
 
-#### Best parameters ----
+## Based on 2005, 2013 and 2022 populations sizes
+fit_score_t1t2t3 = pop_time %>%
+  dplyr::group_by(dplyr::across(dplyr::all_of(params_tested))) %>%
+  dplyr::summarise(
+    N0 = MeanN[Year == 0],
+    N8 = MeanN[Year == 8],
+    N17 = MeanN[Year == 17],
+    .groups = "drop"
+  ) %>%
+  dplyr::mutate(
+    RMSE = sqrt(
+      ((N0 - pop2005)^2 +
+         (N8 - pop2013)^2 +
+         (N17 - pop2022)^2) / 3
+    ))
+# Rank the best options
+fit_score_t1t2t3 %>%
+  dplyr::arrange(RMSE) %>%
+  dplyr::slice(1:10)
+# Best option
+fit_score_t1t2t3 %>%
+  dplyr::arrange(RMSE) %>%
+  dplyr::slice(1)
+
+
+
+### Best parameters
+# Choose between 2005-2013 fit or 2005-2013-2022 fit
+best_fit = fit_score_t1t2t3 %>%
+  dplyr::arrange(RMSE) %>%
+  dplyr::slice(1)
 best_values = best_fit %>%
   dplyr::select(dplyr::all_of(params_tested))
 
 #### Patch occupancy -----
-# Number of simulated patches occupied in 2013
-# using the optimal parameter combination
+## Number of simulated patches occupied in 2013
 occ_patches_sim_2013 = pop_all %>%
   dplyr::semi_join(
-    best_values,
+    best_values, # using the optimal parameter combination
     by = params_tested
   ) %>%
   dplyr::filter(
-    NInd > 0
+    NInd > 0 # Remove patches unoccupied
   ) %>%
   dplyr::distinct(
     Rep,
@@ -806,7 +863,7 @@ missing_patches_2013 = real_patches %>%
 
 # Percentage of missing patches
 percent_missing_patches_2013 = nrow(missing_patches_2013) / nrow(real_patches)
-percent_missing_patches_2013
+percent_missing_patches_2013 # Print the result
 
 
 #### Patch abundance -----
@@ -817,7 +874,7 @@ pop_patch = pop_all %>%
   dplyr::summarise(MeanN = mean(NInd),.groups = "drop")
 
 ## Join patch name
-# names of the patches used for simulations until "test_patch_cut_1"
+# names of the patches used for simulations (until "test_patch_cut_1")
 # i.e., patches irrespective of forest elevation
 # patch_list = c("Aldeia_I_1",
 #                "Aldeia_I_2",
@@ -830,7 +887,7 @@ pop_patch = pop_all %>%
 #                "Rio_Vermelho",
 #                "Uniao_N_2")
 
-# names of the patches used for simulations starting from "test_patch_cut_1"
+# names of the patches used for simulations (starting from "test_patch_cut_1")
 # i.e., patches of forests <500 m
 patch_list = c("Vendaval",
                "Rio_Vermelho",
@@ -1005,14 +1062,17 @@ summary = read_excel(here("data",
 
 #### Information to add manually ----
 
-test_aim = "Determining Emig_prob, PR, Step_mortality for patches cut with Queru et al. 2026 procedure"
-test_remarks = "When PR is low (1), pop size decreases after reaching 2022; when intermediate (5), pop size increases until 2022, then remains stable; when high (10), pop size reaches the three references (2005, 2014, 2022), then reaches a threshold with slight (emig_prob = 0.035) or more important growth rates (emig_prob = 0.1); Very minor impacts of step_mortality; Pop size reaches 5000 in the last scenario only"
+test_aim = "Introducing resistance landscapes; Determining the impact of resistance landscapes on demographic parameters"
+test_remarks = "Small influence of varying costs on pop size"
 
 #### Test name -----
 test_name = basename(normalizePath(dirpath))
 
 #### Dispersal ----
 dispersal = "Y" # With "Y" or "N" depending on whether dispersal is included in simulations
+
+#### Hab -----
+hab = "Agriculture;Forest;Corridors & stepping stones;Wetlands & Forests>500m;Water;Built-up"
 
 #### Tested parameters -----
 # Put all the parameters that are listed in the metadata file
@@ -1025,9 +1085,24 @@ tested_parameters = c(
   "PR",
   "MS",
   "DP",
-  "Step_mortality"
+  "Step_mortality",
+  "Nhab",
+  "Cost1",
+  "Cost2",
+  "Cost3",
+  "Cost4",
+  "Cost5",
+  "Cost6"
 )
 
+# Make sure the format in the summary table is character
+summary = summary %>%
+  dplyr::mutate(
+    dplyr::across(
+      dplyr::all_of(tested_parameters),
+      as.character
+    ))
+    
 # Put tested parameters into format
 # If several values, paste with ; / if not tested, NA
 format_tested_values = function(x) {
@@ -1100,6 +1175,21 @@ new_summary = dplyr::tibble(
     format_tested_values(metadata$Step_mortality),
   
   'Dispersal Y/N' = dispersal,
+  
+  'Nhab' = format_tested_values(metadata$Nhab),
+  'Hab' = hab,
+  'Cost1' =
+    format_tested_values(metadata$Cost1),
+  'Cost2' =
+    format_tested_values(metadata$Cost2),
+  'Cost3' =
+    format_tested_values(metadata$Cost3),
+  'Cost4' =
+    format_tested_values(metadata$Cost4),
+  'Cost5' =
+    format_tested_values(metadata$Cost5),
+  'Cost6' =
+    format_tested_values(metadata$Cost6),
   
   'Optimal_param' = optimal_param,
   
