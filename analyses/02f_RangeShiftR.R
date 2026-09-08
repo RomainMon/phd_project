@@ -59,12 +59,12 @@ library(readxl)
 
 # List with components stored
 test_config = list(
-  test_name = "test_resist_1", # Name of the folder
+  test_name = "test_resist_3", # Name of the folder
   
   # Parameters tested with sensitivity analysis (i.e., those varying during simulations)
   parameters = c(
-    "Cost1",
-    "Cost3"
+    "IndsHaCell",
+    "PR"
   )
 )
 
@@ -356,10 +356,10 @@ for(i in 1:nrow(metadata)) {
               i, nrow(metadata), id_simulation))
   cat(sprintf("  DensDep = %.3f | Juv suvival = %.3f | Adult suvival = %.3f | IndsHaCell = %.3f\n",
               densdep, juv_survival, ad_survival, indshacell))
-  cat(sprintf("  EmigProb = %.3f | Perceptual range = %.3f | Memory size = %.3f | Directional persistence = %.3f | Step mortality = %.3f\n",
-              emig_prob, pr, ms, dp, step_mortality))
-  cat(sprintf("  Nhab = %.3f | Costs = %.3f\n",
-              nhab, costs))
+  cat(sprintf("  EmigProb = %.3f | Perceptual range = %.3f | Memory size = %.3f | Directional persistence = %.3f | Nhab = %.3f | Step mortality = %.3f\n",
+              emig_prob, pr, ms, dp, nhab, step_mortality))
+  cat(sprintf("  Costs = %.3f\n",
+              costs))
   cat("========================================\n\n")
   
   ##### 1) Simulation -----
@@ -774,12 +774,20 @@ fit_score_t1t2t3 %>%
 
 
 ### Best parameters
-# Choose between 2005-2013 fit or 2005-2013-2022 fit
-best_fit = fit_score_t1t2t3 %>%
+# Using RMSE
+best_fit = fit_score_t1t2t3 %>% # Choose between 2005-2013 fit or 2005-2013-2022 fit
   dplyr::arrange(RMSE) %>%
   dplyr::slice(1)
 best_values = best_fit %>%
   dplyr::select(dplyr::all_of(params_tested))
+
+# Manual selections
+best_fit = fit_score_t1t2t3 %>%
+  dplyr::filter(PR == 10,
+                IndsHaCell == 0.08)
+best_values = best_fit %>% 
+  dplyr::select(PR, IndsHaCell)
+
 
 #### Patch occupancy -----
 ## Number of simulated patches occupied in 2013
@@ -864,6 +872,7 @@ missing_patches_2013 = real_patches %>%
 # Percentage of missing patches
 percent_missing_patches_2013 = nrow(missing_patches_2013) / nrow(real_patches)
 percent_missing_patches_2013 # Print the result
+# Note: these are the patches occupied in 2013 only
 
 
 #### Patch abundance -----
@@ -1062,8 +1071,8 @@ summary = read_excel(here("data",
 
 #### Information to add manually ----
 
-test_aim = "Introducing resistance landscapes; Determining the impact of resistance landscapes on demographic parameters"
-test_remarks = "Small influence of varying costs on pop size"
+test_aim = "Determining PR and IndsHaCell for resistance landscapes"
+test_remarks = "Increasing PR increases the number of occupied patches"
 
 #### Test name -----
 test_name = basename(normalizePath(dirpath))
