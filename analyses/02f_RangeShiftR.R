@@ -59,12 +59,12 @@ library(readxl)
 
 # List with components stored
 test_config = list(
-  test_name = "test_resist_3", # Name of the folder
+  test_name = "test_resist_4", # Name of the folder
   
   # Parameters tested with sensitivity analysis (i.e., those varying during simulations)
   parameters = c(
-    "IndsHaCell",
-    "PR"
+    "PR",
+    "DP"
   )
 )
 
@@ -368,11 +368,11 @@ for(i in 1:nrow(metadata)) {
                    Replicates = 20, # Number of replicates
                    Years = 95, # Number of years
                    OutIntPop = 1, # Whether to export population files 
-                   OutIntOcc = 0, # Whether to export occupancy files
-                   OutIntRange = 0, # Whether to export range files
+                   OutIntOcc = 1, # Whether to export occupancy files
+                   OutIntRange = 1, # Whether to export range files
                    OutIntInd = 0, # Whether to export individual files
                    OutIntConn = 0, # Whether to export connectivity files (n individuals from patch i to patch j)
-                   SMSHeatMap = FALSE, # Produce SMS heat map raster as output?
+                   SMSHeatMap = TRUE, # Produce SMS heat map raster as output?
                    ReturnPopDataFrame = TRUE, # Return population data to R as data frame (most suitable for patch based models)?
                    CreatePopFile = TRUE # Create population output file? Defaults to TRUE.
                    ) 
@@ -501,6 +501,7 @@ for(i in 1:nrow(metadata)) {
 # traceback()
 
 ### Results -----
+
 #### Population -----
 
 ##### Files -------
@@ -781,12 +782,12 @@ best_fit = fit_score_t1t2t3 %>% # Choose between 2005-2013 fit or 2005-2013-2022
 best_values = best_fit %>%
   dplyr::select(dplyr::all_of(params_tested))
 
-# Manual selections
-best_fit = fit_score_t1t2t3 %>%
-  dplyr::filter(PR == 10,
-                IndsHaCell == 0.08)
-best_values = best_fit %>% 
-  dplyr::select(PR, IndsHaCell)
+# Manual selection
+# best_fit = fit_score_t1t2t3 %>%
+#   dplyr::filter(PR == 10,
+#                 DP == 5)
+# best_values = best_fit %>% 
+#   dplyr::select(PR, DP)
 
 
 #### Patch occupancy -----
@@ -1062,6 +1063,200 @@ patch_summary = comparison %>%
   )
 
 
+#### RangeShiftR plots -----
+# Require the different components of the simulations
+densdep = 0.088
+indshacell = 0.085
+ad_survival = 0.89
+juv_survival = 1
+emig_prob = 0.035
+pr = 10
+ms = 10
+dp = 5
+step_mortality = 0.001
+
+##### Simulation -----
+sim = Simulation(Simulation = 1, # Update simulation id
+                 Replicates = 20, # Number of replicates
+                 Years = 95, # Number of years
+                 OutIntPop = 1, # Whether to export population files 
+                 OutIntOcc = 0, # Whether to export occupancy files
+                 OutIntRange = 0, # Whether to export range files
+                 OutIntInd = 0, # Whether to export individual files
+                 OutIntConn = 0, # Whether to export connectivity files (n individuals from patch i to patch j)
+                 SMSHeatMap = FALSE, # Produce SMS heat map raster as output?
+                 ReturnPopDataFrame = TRUE, # Return population data to R as data frame (most suitable for patch based models)?
+                 CreatePopFile = TRUE # Create population output file? Defaults to TRUE.
+) 
+
+##### Landscape -----
+real_land = ImportedLandscape(
+  LandscapeFile = "raster_reclass_2005.txt",
+  PatchFile = "patches_2005.txt",
+  Resolution = 28.35578,
+  Nhabitats = 6, # Number of land covers
+  K_or_DensDep = c(0, densdep, 0, 0, 0, 0), # Density dependence of the modeled species and is given in units of the nb of individuals/ha (for each land cover). If combined with a StageStructured model, K_or_DensDep will be used as the strength of demographic density dependence b-1. If combined with a non-structured model, K_or_DensDep will be interpreted as limiting carrying capacity K
+  SpDistFile = "patches_w_glt_2005.txt",
+  SpDistResolution = 28.35578
+)
+
+##### Demography
+mat = matrix(c(0, 0, 2,
+               juv_survival, 0, 0,
+               0, 0.56, ad_survival),
+             nrow=3, byrow=T)
+
+# Stage structure
+stg = StageStructure(Stages = 3, # Nb of life stages
+                     TransMatrix = mat,
+                     MaxAge = 20, # Maximum age
+                     RepSeasons = 1, # Nb of reproduction events per year
+                     RepInterval = 0, # Nb of reproductive seasons which must be missed following a reproduction attempt, before another reproduction attempt may occur
+                     PRep = 1, # Probability of reproducing in subsequent reproductive seasons
+                     SurvSched = 1, #Scheduling of Survival. When should survival and development occur? 0 = At reproduction, 1 = Between reproductive events (default), 2 = Annually (only for RepSeasons>1)
+                     FecDensDep = T, # Density-dependence on fecundity?
+                     DevDensDep = F, # Density-dependence on development?
+                     SurvDensDep = F # Density-dependence on survival?
+) 
+
+demo = Demography(StageStruct = stg, # corresponding parameter object generated by StageStructure, which holds all demographic parameters
+                  ReproductionType = 0 # 0 = asexual / only female model (default); 1 = simple sexual model; 2 = sexual model with explicit mating system
+) 
+
+##### Dispersal -----
+## Emigration
+emig = Emigration(EmigProb = emig_prob, # Matrix containing all parameters (#columns) to determine emigration probabilities for each stage/sex (#rows). Its structure depends on the other parameters, see the Details. If the emigration probability is constant (i.e. DensDep, IndVar, StageDep, SexDep = FALSE), EmigProb can take a single numeric. Defaults to 0
+                  SexDep = F, # Sex-dependent emigration probability?
+                  StageDep = F, # Stage-dependent emigration probability?
+                  DensDep = F, # Density-dependent emigration probability?
+                  IndVar = F # Individual variability in emigration traits?
+) 
+
+## Transfer (movement of an individual departing from its natal patch towards a potential new patch)
+transfer = SMS(PR = pr, # Perceptual range in nb of cells (must be integer)
+               PRMethod = 1, # Method to evaluate the effective cost of a particular step from the landscape within the perceptual range: 1 = Arithmetic mean, 2 = Harmonic mean, 3 = Weighted arithmetic mean
+               MemSize = ms, # Memory size (nb of previous steps over which to calculate current direction to apply directional persistence). Default = 1, max = 14
+               DP = dp, # Directional persistence: tendency to follow a CRW. Must be >= 1 (default to 1)
+               GoalType = 0, # Goal bias type (i.e., a tendency to move towards a particular destination). 0 = None, 2 = Dispersal bias (i.e., moving away from the natal location)
+               IndVar = F, # Individual variability in SMS traits?
+               Costs = c(50,1,5,20,100,100), # Landscape resistance to movement (for each land cover)
+               StepMort = step_mortality, # Per-step mortality probability. Constant or habitat-specific
+               StraightenPath = T # Straigten path after decision not to settle in a patch?
+)
+
+## Settlement (or immigration)
+settle = Settlement(StageDep = F, # Stage-dependent settlement requirements?
+                    SexDep = F, # Sex-dependent settlement requirements?
+                    Settle = 0, # CODES (dor DispersalKernel) or PROBA (for Movement processes if DensDep = TRUE) for all stages, sexes. Default = 0 (i.e. 'die when unsuitable' for DispersalKernel and 'always settle when suitable' for Movement process)
+                    FindMate = F, # Mating requirements to settle? FALSE if female-only model
+                    DensDep = F, # For movement processes only: Density-dep settlement probability?
+                    IndVar = F, # For movement processes only: Individual variability in settlement probability traits?
+                    MinSteps = 0, # For movement processes only: min number of steps
+                    MaxSteps = pr*2, # For movement processes only: max number of steps
+                    MaxStepsYear = 0 # For movement processes and stage-structured population only: max nb of steps per year IF >1 reproductive season. IF 0:  every individual completes the dispersal phase in one year, i.e. between two successive reproduction phases.
+)
+
+## Dispersal
+disp = Dispersal(Emigration = emig,
+                 Transfer = transfer,
+                 Settlement = settle)
+
+##### Initialise -----
+eq_pop = getLocalisedEquilPop(demog = demo, DensDep_values = densdep, plot=F)
+prop_stgs = eq_pop[-1]/sum(eq_pop[-1])
+prop_stgs = round(prop_stgs,2)
+
+## Initialise
+init = Initialise(InitType = 1,  # InitType = 0: Free initialisation according to habitat map (default) (set FreeType), InitType = 1: From loaded species distribution map (set SpType), InitType = 2: From initial individuals list file
+                  SpType = 0, # SpType = 0: All suitable cells within all distribution presence cells (default), SpType = 1: All suitable cells within some randomly chosen presence cells; set number of cells to initialise in NrCells.
+                  InitDens = 2, # Number of individuals to be seeded in each cell/patch. InitDens = 0: At K_or_DensDep, InitDens = 1: At half K_or_DensDep (default), InitDens = 2: Set the number of individuals per cell/hectare to initialise in IndsHaCell.
+                  IndsHaCell = indshacell, # Initial density in inds/ha
+                  PropStages = c(0, prop_stgs), # For StageStructured models only: Proportion of individuals initialised in each stage. Requires a vector of length equal to the number of stages
+                  InitAge = 2 # Initial age distribution within each stage. InitAge = 0: Minimum age for the respective stage. InitAge = 1 : Age randomly sampled between the minimum and the maximum age for the respective stage. InitAge = 2: According to a quasi-equilibrium distribution
+)
+
+##### Parameter master -----
+s = RSsim(
+  simul = sim,
+  land = real_land,
+  demog = demo,
+  dispersal = disp,
+  init = init
+)
+
+#### Plots ------
+plotAbundance(s, dirpath) # Pop abundance
+plotOccupancy(s, dirpath) # occupied patches
+
+# Occupancy
+# We plot the mean occupancy probability for each patch in year 100
+# + the mean time to colonisation
+terra::plot(landsc, col=c("#f0ffb3","darkgreen","green","#04170a","blue","red"))
+# Store underlying landscape map display for later:
+bg = function(main=NULL){
+  terra::plot(landsc, axes=F, legend=F, col=c("#f0ffb3","darkgreen","green","#04170a","blue","red"),
+              main=ifelse(is.null(main),"",main))
+}
+# as well as the extent of the landscape:
+e = terra::ext(landsc)
+
+# calculates the mean occupancy probability of given years as well as the time to colonisation for all replicates
+col_stats_a = ColonisationStats(s, dirpath, years = 95, maps = T) # LONG
+# mean occupancy probability in year 100
+head(col_stats_a$occ_prob)
+# time to colonisation
+head(col_stats_a$col_time)
+
+# If enabled, the function ColonisationStats() returns a raster stack with the mean occupancy probabilities of the given years as well as a raster with the mean time to colonisation over all replicates. 
+# map occupancy probability
+mycol_occprob = colorRampPalette(c('#c54e3d','#f3f7e8','#5b7a4f'))
+terra::plot(col_stats_a$map_occ_prob, axes=F, range=c(0,1), col=mycol_occprob(10), type="continuous")
+# map occupancy probability on landscape background
+bg() 
+terra::plot(col_stats_a$map_occ_prob, axes=F, range=c(0,1), col=mycol_occprob(10), type="continuous", plg=list(x="bottom", ext=c(e$xmin+400, e$xmax-400, e$ymin-150, e$ymin-50)), add =T)
+
+# map colonisation time
+mycol_coltime = colorRampPalette(c('#c54e3d','#e1a6a1','#f3f7e8','#b1c8a7','#5b7a4f'))
+terra::plot(col_stats_a$map_col_time, axes=F, breaks=c(-9,seq(-9,100,length=11)), col=c('grey',mycol_coltime(20)), type="continuous")
+# map colonisation time on landscape background
+bg() 
+terra::plot(col_stats_a$map_col_time, axes=F, breaks=c(-9,seq(-9,100,length=11)), col=c('grey',mycol_coltime(20)), type="continuous", plg=list(x="bottom", ext=c(e$xmin+400, e$xmax-400, e$ymin-150, e$ymin-50)), add =T)
+
+# Heatmap
+# the dispersal heatmap can be used to assess those parts of the landscape matrix that are frequently used for dispersal, whether it was successful or not
+# Let’s first look at one replicate only and plot it:
+library(viridis)
+terra::plot(terra::rast(paste0(dirpath,"Output_Maps/Batch1_Sim1_Land1_Rep0_Visits.txt")),
+     col=magma(9), axes=F)
+
+# Because movement is stochastic, the number of visits per cell and the colonisation of empty patches are different for each replicate. 
+# In order to take into account this variance, we average over all replicates and plot the resulting heatmap
+# create a raster stack with all replicates as layers
+heatmaps_stack <- terra::rast()
+for(rep in 0:(s@simul@Replicates-1)){
+  heatmaps_stack <- c(heatmaps_stack, 
+                      terra::rast(paste0(dirpath, "Output_Maps/Batch", 
+                                         s@control@batchnum, "_Sim", 
+                                         s@simul@Simulation, "_Land", 
+                                         s@land@LandNum,"_Rep",rep ,"_Visits.txt")))
+}
+
+# average over all layers
+heatmaps_mean = terra::mean(heatmaps_stack)
+
+# We create a non-linear color scale, in which the color changes more rapidly for small numbers of visits than higher ones:
+# create exponential color scale
+res <- 20
+exp <- 3
+lim <- max(terra::values(heatmaps_mean), na.rm = T)
+my.at <- seq(1,lim^(1/exp),length.out=res)^exp
+
+bg()
+terra::plot(heatmaps_mean, 
+     col=hcl.colors(res, "Inferno", rev = T, alpha=.8),
+     breaks = my.at, axes=F, type="continuous", add=T, legend=F)
+
+
 ### Append results -----
 # Load an Excel sheet with the parameters to test
 summary = read_excel(here("data", 
@@ -1071,8 +1266,8 @@ summary = read_excel(here("data",
 
 #### Information to add manually ----
 
-test_aim = "Determining PR and IndsHaCell for resistance landscapes"
-test_remarks = "Increasing PR increases the number of occupied patches"
+test_aim = "Validating results with occupancy maps and heatmaps"
+test_remarks = "Some patches remain unoccupied (Cambucas, Gavioes) while Pirineus is occupied everywhere (untrue)"
 
 #### Test name -----
 test_name = basename(normalizePath(dirpath))
