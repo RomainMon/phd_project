@@ -59,12 +59,13 @@ library(readxl)
 
 # List with components stored
 test_config = list(
-  test_name = "test_resist_4", # Name of the folder
+  test_name = "test_resist_5", # Name of the folder
   
   # Parameters tested with sensitivity analysis (i.e., those varying during simulations)
   parameters = c(
-    "PR",
-    "DP"
+    "IndsHaCell",
+    "Emig_prob",
+    "PR"
   )
 )
 
@@ -572,7 +573,7 @@ ggplot(
   # Faceting
   facet_grid(
     cols = vars(.data[[params_tested[2]]]),
-    # rows = vars(.data[[params_tested[3]]]),
+    rows = vars(.data[[params_tested[3]]]),
     scales = "free_y") +
   # Vertical reference years
   geom_vline(
@@ -610,7 +611,7 @@ ggplot(
   # Faceting
   facet_grid(
     cols = vars(.data[[params_tested[2]]]),
-    # rows = vars(.data[[params_tested[3]]]),
+    rows = vars(.data[[params_tested[3]]]),
     scales = "free_y") +
   # Vertical reference years
   geom_vline(
@@ -687,7 +688,7 @@ ggplot(
   )
 ) +
   geom_tile() +
-  # facet_wrap(vars(.data[[params_tested[3]]])) +
+  facet_wrap(vars(.data[[params_tested[3]]])) +
   scale_fill_viridis_c(
     option = "C",
     direction = -1
@@ -712,7 +713,7 @@ ggplot(
   )
 ) +
   geom_tile() +
-  # facet_wrap(vars(.data[[params_tested[3]]])) +
+  facet_wrap(vars(.data[[params_tested[3]]])) +
   scale_fill_viridis_c(
     option = "C",
     direction = -1
@@ -776,7 +777,7 @@ fit_score_t1t2t3 %>%
 
 ### Best parameters
 # Using RMSE
-best_fit = fit_score_t1t2t3 %>% # Choose between 2005-2013 fit or 2005-2013-2022 fit
+best_fit = fit_score_t1t2 %>% # Choose between 2005-2013 fit or 2005-2013-2022 fit
   dplyr::arrange(RMSE) %>%
   dplyr::slice(1)
 best_values = best_fit %>%
@@ -1066,7 +1067,7 @@ patch_summary = comparison %>%
 #### RangeShiftR plots -----
 # Require the different components of the simulations
 densdep = 0.088
-indshacell = 0.085
+indshacell = 0.08
 ad_survival = 0.89
 juv_survival = 1
 emig_prob = 0.035
@@ -1266,8 +1267,8 @@ summary = read_excel(here("data",
 
 #### Information to add manually ----
 
-test_aim = "Validating results with occupancy maps and heatmaps"
-test_remarks = "Some patches remain unoccupied (Cambucas, Gavioes) while Pirineus is occupied everywhere (untrue)"
+test_aim = "The Pirineus patch was cut with the watershed; testing dispersal parameters with this new delimitation"
+test_remarks = "Without the whole Pirineus patch, the pop size is below the 2005-2013 levels"
 
 #### Test name -----
 test_name = basename(normalizePath(dirpath))

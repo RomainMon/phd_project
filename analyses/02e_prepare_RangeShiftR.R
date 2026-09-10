@@ -68,7 +68,7 @@ plot(patches_cut)
 #### Stepping stones (raster) -------
 # These correspond to raster patches created WITH Queru's et al. (2026) identification of small patches
 stepping_stones = terra::rast(here("outputs", "data", "patches_cut", "TooSmallPatches_2005.tif"))
-plot(stepping_stones)
+plot(stepping_stones, col="orange")
 
 ### Maps -----
 
@@ -283,7 +283,7 @@ patch_correspondence = patch_intersection %>%
 # 0 = species absent
 # -999 = no data
 
-### Select patches -----
+#### Select patches -----
 # Compare the patches occupied in 2005 (see Holst et al. 2006) with patches names (given in 01o_patch_prep)
 # In Holst et al. 2006, occupied patches are V:
 # V -> Vendaval
@@ -312,7 +312,7 @@ patches2005_select = patches2005_sf %>%
                                 "Uniao_N_2",
                                 "Nova_Esperanca_2",
                                 "Afetiva",
-                                "Pirineus_114")) # Check Pirineus name in QGIS!
+                                "Pirineus_114")) # Check names in QGIS!
 plot(sf::st_geometry(patches2005_sf))
 plot(sf::st_geometry(patches2005_select), col="darkgreen", add=TRUE)
 
@@ -480,7 +480,7 @@ cat(
 output_dir = here("data", 
                   "rangeshifter", 
                   "tests", 
-                  "test_resist_1", # UPDATE HERE
+                  "test_resist_5", # UPDATE HERE
                   "Inputs")
 
 # Landscape

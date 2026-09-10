@@ -101,6 +101,12 @@ pipelines_sf = sf::st_as_sf(pipelines)
 plot(rasters_mspa[[36]], col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e", "orange"))
 plot(sf::st_geometry(pipelines_sf), add=TRUE, lwd=1.5)
 
+# Import watershed
+watershed = terra::vect(here("data", "geo", "AMLD", "hidrografia", "Rio_Sao_Joao_Watershed.shp"))
+watershed_sf = sf::st_as_sf(watershed)
+plot(rasters_mspa[[36]], col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e", "orange"))
+plot(sf::st_geometry(watershed_sf), add=TRUE, lwd=1.5)
+
 # ### Dilatation-erosion --------
 # # Here, we apply dilatation-erosion on habitats (value = 1)
 # # This section is based on Mailys Queru's work
@@ -716,6 +722,103 @@ table(
   )
 )
 
+
+#### Clip patches with the watershed -------
+# Here, we clip the northern patch (Pirineus) which is continuous but only occupied in its southern range (in the RJ watershed)
+# Select Pirineus using the area
+patches_2005 = patches_names_good[[17]]
+
+pirineus = patches_2005 %>%
+  dplyr::mutate(area = sf::st_area(geometry)) %>%
+  dplyr::slice_max(area, n = 1, with_ties = FALSE)
+
+plot(sf::st_geometry(patches_2005))
+plot(sf::st_geometry(pirineus), add = TRUE, col = "red")
+plot(sf::st_geometry(watershed_sf), add = TRUE, border = "blue", lwd = 2)
+
+# Cut all Pirineus patches
+patches_names_good_cut = lapply(
+  patches_names_good,
+  function(patches) {
+    
+    # Select all Pirineus patches
+    pirineus_all = patches %>%
+      dplyr::filter(grepl("^Pirineus_", patch_id))
+    
+    # Largest Pirineus patch
+    pirineus = pirineus_all %>%
+      dplyr::mutate(area = sf::st_area(geometry)) %>%
+      dplyr::slice_max(
+        order_by = area,
+        n = 1,
+        with_ties = FALSE
+      ) %>% 
+      dplyr::select(-area)
+    
+    # Original ID
+    original_patch_id = pirineus$patch_id
+    
+    # Find next available Pirineus ID in this year
+    pirineus_numbers = as.numeric(
+      sub(
+        "^Pirineus_",
+        "",
+        patches$patch_id[
+          grepl("^Pirineus_[0-9]+$", patches$patch_id)
+        ]
+      )
+    )
+    
+    # The new id to be given is Pirineus_XXX (this value is the next value available after the max given)
+    new_patch_id = paste0(
+      "Pirineus_",
+      max(pirineus_numbers, na.rm = TRUE) + 1
+    )
+    
+    
+    # Cut
+    pirineus_inside = sf::st_intersection(
+      pirineus,
+      watershed_sf
+    ) %>%
+      dplyr::mutate(
+        patch_id = original_patch_id
+      )
+    
+    pirineus_outside = sf::st_difference(
+      pirineus,
+      watershed_sf
+    ) %>%
+      dplyr::mutate(
+        patch_id = new_patch_id
+      )
+    
+    
+    # Replace original patch by the two pieces
+    patches %>%
+      dplyr::filter(patch_id != original_patch_id) %>%
+      dplyr::bind_rows(
+        pirineus_inside,
+        pirineus_outside
+      )  %>%
+      dplyr::select(
+        -dplyr::matches("area", ignore.case = TRUE)
+      ) %>%
+      dplyr::select(-c(arfea, ID)) 
+  }
+)
+
+# Check
+patches_2005 = patches_names_good_cut[[17]]
+
+pirineus = patches_2005 %>%
+  dplyr::mutate(area = sf::st_area(geometry)) %>%
+  dplyr::slice_max(area, n = 1, with_ties = FALSE)
+
+plot(sf::st_geometry(patches_2005))
+plot(sf::st_geometry(pirineus), add = TRUE, col = "red")
+plot(sf::st_geometry(watershed_sf), add = TRUE, border = "blue", lwd = 2)
+
 #### Patch dilatation-erosion -------
 # Dilatation-erosion on all the raster (as above) may result in connecting close but disconnected patches (see: Boa Esperanca, two close patches but actually connected by a CORRIDOR)
 # Hence, we apply dilatation-erosion afterwards
@@ -848,7 +951,7 @@ table(
 ##### Patches ------
 base_path = here("outputs", "data", "patches_rshifter")
 purrr::walk2(
-  patches_names_good,
+  patches_names_good_cut,
   years,
   ~ {
     output_path = file.path(base_path, paste0("patches_rshifter_", .y, ".gpkg"))

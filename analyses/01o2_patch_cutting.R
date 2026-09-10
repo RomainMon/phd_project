@@ -120,7 +120,7 @@ HabitatLayer = binary_rasters[["2005"]]
 ### OPTIONAL STEP - Perform a DILATATION EROSION on habitat map, to remove the small gaps and spurs
 # Do you want to perform a dilatation-erosion step? If yes, set TRUE. This additional step allows to fill smal gaps in habitat
 # Default value is FALSE
-DilatationErosionChoice =  FALSE # TRUE
+DilatationErosionChoice =  FALSE
 # Set here the threshold value for dilatation - erosion, ie the maximum distance from habitat to be dilated (m)
 # e.g : threshold = 100, resolution = 100, dilation will be performed on one pixel)
 # DilatationThreshold has to be a a strictly positive integer
@@ -251,8 +251,8 @@ DistanceToGoal = 0.1
 # between bounds_min * mean_patch_size_of_too_large_patches/mean_wanted_patch_size and bounds_max * mean_patch_size_of_too_large_patches/mean_wanted_patch_size  
 
 # rep defines how many times the procedure should be repeated (drawing N points, cutting, and assessing percent of patch that fall within
-# the desired path size range) for each points number. This process includes some stochasticity, so each repetition will be a bit different, 
-# and increasing rep will help see this potential varaibility. Yet, increasing rep will also lead to higher calculatio time; default is 1
+# the desired patch size range) for each points number. This process includes some stochasticity, so each repetition will be a bit different, 
+# and increasing rep will help see this potential variability. Yet, increasing rep will also lead to higher calculatio time; default is 1
 
 ## USE THE FUNCTION
 NbOpt = find_random_nb_opt_based_on_range(too_large_p = TooLargePatches,
