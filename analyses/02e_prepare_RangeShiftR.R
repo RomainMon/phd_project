@@ -309,10 +309,13 @@ patches2005_select = patches2005_sf %>%
                                 "Aldeia_I_1",
                                 "Aldeia_I_2",
                                 "Poco_das_Antas",
+                                "Poco.das.Antas_192", # Cambucas
                                 "Uniao_N_2",
+                                "Uniao_S",
                                 "Nova_Esperanca_2",
                                 "Afetiva",
-                                "Pirineus_114")) # Check names in QGIS!
+                                "Pirineus_114",
+                                "Sao_Joao_II")) # Check names in QGIS!
 plot(sf::st_geometry(patches2005_sf))
 plot(sf::st_geometry(patches2005_select), col="darkgreen", add=TRUE)
 
