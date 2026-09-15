@@ -14,7 +14,7 @@ library(rstudioapi)
 library(here)
 library(dplyr)
 
-### import functions
+### Import functions -----
 source(here("R","mailys_queru","fct_dilatation_erosion.R"))
 source(here("R","mailys_queru","fct_tesselation_and_cutting.R"))
 source(here("R","mailys_queru","fct_situation_report_patches_RM.R")) # <- Replaced with my version
@@ -176,7 +176,7 @@ smallest_patches
 
 ### Thresholds
 MiniArea = 20000 #m²
-MaxiArea = 1500000 #m² # According to the literature on GLT home range (Lucas et al. 2019, Dietz et al. 1997)
+MaxiArea = 1500000 #m² # According to the literature on GLT home range (~21 ha to 150 ha, mean = 45-60 ha) (Lucas et al. 2019, Dietz et al. 1997)
 
 
 #### ESTETHIC PREFERENCES -----

@@ -856,14 +856,14 @@ patches_names_good_cut2 = lapply(
 
     aldeia = aldeia_all %>%
       dplyr::mutate(
-        area_tmp = as.numeric(sf::st_area(geometry))
+        area_patch = as.numeric(sf::st_area(geometry))
       ) %>%
       dplyr::slice_max(
-        order_by = area_tmp,
+        order_by = area_patch,
         n = 1,
         with_ties = FALSE
       ) %>%
-      dplyr::select(-area_tmp)
+      dplyr::select(-area_patch)
     
     # Original ID
     original_patch_id = aldeia$patch_id[[1]]
@@ -927,7 +927,7 @@ patches_names_good_cut2 = lapply(
     ) %>%
       sf::st_as_sf()
     
-    # Remove very small numerical slivers
+    # Remove very small elements
     polygons_extracted = polygons_extracted %>%
       dplyr::mutate(
         split_area = as.numeric(sf::st_area(geometry))
@@ -940,34 +940,34 @@ patches_names_good_cut2 = lapply(
     }
     
     # If more than two pieces were produced, retain the two
-    # largest pieces and dissolve smaller slivers into the nearest
+    # largest pieces and dissolve smaller elements into the nearest
     # main piece
     if (nrow(polygons_extracted) > 2) {
       
       polygons_extracted = polygons_extracted %>%
         dplyr::arrange(dplyr::desc(split_area))
       
-      main_parts = polygons_extracted[1:2, ]
-      slivers = polygons_extracted[3:nrow(polygons_extracted), ]
+      main_parts = polygons_extracted[1:2, ] # Two main elements
+      elements = polygons_extracted[3:nrow(polygons_extracted), ] # Other tiny elements
       
-      # Find the closest main piece for each sliver
-      sliver_centroids = sf::st_centroid(slivers)
+      # Find the closest main piece for each element
+      element_centroids = sf::st_centroid(elements)
       
       nearest_main = sf::st_nearest_feature(
-        sliver_centroids,
+        element_centroids,
         main_parts
       )
       
-      slivers$main_id = nearest_main
+      elements$main_id = nearest_main
       main_parts$main_id = seq_len(nrow(main_parts))
       
       polygons_extracted = dplyr::bind_rows(
         main_parts %>%
           dplyr::select(main_id, geometry),
-        slivers %>%
+        elements %>%
           dplyr::select(main_id, geometry)
       ) %>%
-        dplyr::group_by(main_id) %>%
+        dplyr::group_by(main_id) %>% # Regroup all
         dplyr::summarise(
           geometry = sf::st_union(geometry),
           .groups = "drop"
@@ -983,7 +983,7 @@ patches_names_good_cut2 = lapply(
       dplyr::mutate(
         centroid_y = centroid_coords[, "Y"]
       ) %>%
-      dplyr::arrange(centroid_y)
+      dplyr::arrange(centroid_y) # Arrange by Y
     
     # Assign IDs
     polygons_extracted = polygons_extracted %>%

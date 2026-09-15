@@ -212,7 +212,7 @@ for (yr in names(patches)) {
 patches2005_r = patch_rasters[['2005']]
 
 ##### IF RASTER ----
-### Patches are already rasterized
+### i.e., Patches are already rasterized (e.g., using Queru et al. 2026 procedure)
 ### -> We need a correspondence between raster patches and vector patches (e.g., 1087 is in Poço das Antas...)
 ### raster patch ID → original vector patch ID, based on which vector polygon contains/intersects the raster cells belonging to that raster patch.
 ### one-to-many correspondence if because one vector patch can contain several raster patches (in the case of previous patch-cutting, Queru et al. 2026)
@@ -308,6 +308,7 @@ patches2005_select = patches2005_sf %>%
                                 "Sta_Helena",
                                 "Aldeia_I_1",
                                 "Aldeia_I_2",
+                                "Aldeia_I_3",
                                 "Poco_das_Antas",
                                 "Poco.das.Antas_192", # Cambucas
                                 "Uniao_N_2",
@@ -483,7 +484,7 @@ cat(
 output_dir = here("data", 
                   "rangeshifter", 
                   "tests", 
-                  "test_resist_5", # UPDATE HERE
+                  "test_resist_8", # UPDATE HERE
                   "Inputs")
 
 # Landscape
@@ -520,7 +521,7 @@ writeRaster(
 )
 
 # (Optional) Correspondence table
-# CHOOSE THE PROPER CORRESPONDENCE TABLE (depending on the patches used)
+# CHOOSE THE PROPER CORRESPONDENCE TABLE (depending on the type of patches used)
 write.csv(
   patch_correspondence,
   file.path(output_dir, "patch_corres_id_2005.csv"),
