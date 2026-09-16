@@ -59,12 +59,13 @@ library(readxl)
 
 # List with components stored
 test_config = list(
-  test_name = "test_resist_8", # Name of the folder
+  test_name = "test_resist_10", # Name of the folder
   
   # Parameters tested with sensitivity analysis (i.e., those varying during simulations)
   parameters = c(
-    "IndsHaCell",
-    "PR"
+    "DensDep",
+    "PR",
+    "DP"
   )
 )
 
@@ -368,8 +369,8 @@ for(i in 1:nrow(metadata)) {
                    Replicates = 20, # Number of replicates
                    Years = 95, # Number of years
                    OutIntPop = 1, # Whether to export population files 
-                   OutIntOcc = 1, # Whether to export occupancy files
-                   OutIntRange = 1, # Whether to export range files
+                   OutIntOcc = 5, # Whether to export occupancy files (every X year)
+                   OutIntRange = 5, # Whether to export range files (every X year)
                    OutIntInd = 0, # Whether to export individual files
                    OutIntConn = 0, # Whether to export connectivity files (n individuals from patch i to patch j)
                    SMSHeatMap = TRUE, # Produce SMS heat map raster as output?
@@ -572,7 +573,7 @@ ggplot(
   # Faceting
   facet_grid(
     cols = vars(.data[[params_tested[2]]]),
-    # rows = vars(.data[[params_tested[3]]]),
+    rows = vars(.data[[params_tested[3]]]),
     scales = "free_y") +
   # Vertical reference years
   geom_vline(
@@ -610,7 +611,7 @@ ggplot(
   # Faceting
   facet_grid(
     cols = vars(.data[[params_tested[2]]]),
-    # rows = vars(.data[[params_tested[3]]]),
+    rows = vars(.data[[params_tested[3]]]),
     scales = "free_y") +
   # Vertical reference years
   geom_vline(
@@ -687,7 +688,7 @@ ggplot(
   )
 ) +
   geom_tile() +
-  # facet_wrap(vars(.data[[params_tested[3]]])) +
+  facet_wrap(vars(.data[[params_tested[3]]])) +
   scale_fill_viridis_c(
     option = "C",
     direction = -1
@@ -712,7 +713,7 @@ ggplot(
   )
 ) +
   geom_tile() +
-  # facet_wrap(vars(.data[[params_tested[3]]])) +
+  facet_wrap(vars(.data[[params_tested[3]]])) +
   scale_fill_viridis_c(
     option = "C",
     direction = -1
@@ -896,7 +897,7 @@ pop_patch = pop_all %>%
 #                "Rio_Vermelho",
 #                "Uniao_N_2")
 
-# names of the patches used for simulations (starting from "test_patch_cut_1")
+# names of the patches used for simulations
 # i.e., patches of forests <500 m
 patch_list = c("Vendaval",
                "Rio_Vermelho",
@@ -1063,13 +1064,15 @@ patch_summary = comparison %>%
 
 
 #### RangeShiftR plots -----
+# Works for simulations with fixed parameters!
+
 # Require the different components of the simulations
-densdep = 0.088
-indshacell = 0.085
+densdep = 0.09
+indshacell = 0.08
 ad_survival = 0.89
 juv_survival = 1
 emig_prob = 0.035
-pr = 10
+pr = 15
 ms = 10
 dp = 5
 step_mortality = 0.001
@@ -1183,9 +1186,10 @@ s = RSsim(
   init = init
 )
 
-#### Plots ------
-plotAbundance(s, dirpath) # Pop abundance
-plotOccupancy(s, dirpath) # occupied patches
+##### Plots ------
+plotAbundance(s, dirpath) # Pop size: Uses the RangeShiftR output data 'range' to generate abundance time series. Plots the mean abundance over all replicates, and optionally the standard deviation and/or the single replicates.
+plotOccupancy(s, dirpath) # Occupied patches: Uses the RangeShiftR output data 'range' to generate occupancy time series. Plots the mean occupancy over all replicates, and optionally the standard deviation and/or the single replicates.
+
 
 # Occupancy
 # We plot the mean occupancy probability for each patch in year 100
@@ -1265,8 +1269,8 @@ summary = read_excel(here("data",
 
 #### Information to add manually ----
 
-test_aim = "Patches were recut with another threshold (max home range 150 ha)"
-test_remarks = "Pop sizes are now back to normal -> test DensDep, PR, IndsHaCell"
+test_aim = "Testing PR, DP and DensDep"
+test_remarks = ""
 
 #### Test name -----
 test_name = basename(normalizePath(dirpath))
