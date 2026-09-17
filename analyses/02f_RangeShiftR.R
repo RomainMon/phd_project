@@ -59,13 +59,12 @@ library(readxl)
 
 # List with components stored
 test_config = list(
-  test_name = "test_resist_10", # Name of the folder
+  test_name = "test_resist_13", # Name of the folder
   
   # Parameters tested with sensitivity analysis (i.e., those varying during simulations)
   parameters = c(
-    "DensDep",
-    "PR",
-    "DP"
+    "IndsHaCell",
+    "Juv_survival"
   )
 )
 
@@ -337,9 +336,17 @@ for(i in 1:nrow(metadata)) {
   
   emig_prob = metadata$Emig_prob[i]
   pr = metadata$PR[i]
+  pr_meth = metadata$PR_meth[i]
   ms = metadata$MS[i]
   dp = metadata$DP[i]
   step_mortality = metadata$Step_mortality[i]
+  max_nb_steps = metadata$Max_nb_steps[i]
+  goal_type = metadata$Goal_type[i]
+  goal_bias = if (goal_type != 0) {
+    metadata$Goal_bias[i]
+  } else {
+    NULL
+  }
   
   nhab = metadata$Nhab[i]
   costs = c(metadata$Cost1[i],
@@ -357,8 +364,8 @@ for(i in 1:nrow(metadata)) {
               i, nrow(metadata), id_simulation))
   cat(sprintf("  DensDep = %.3f | Juv suvival = %.3f | Adult suvival = %.3f | IndsHaCell = %.3f\n",
               densdep, juv_survival, ad_survival, indshacell))
-  cat(sprintf("  EmigProb = %.3f | Perceptual range = %.3f | Memory size = %.3f | Directional persistence = %.3f | Nhab = %.3f | Step mortality = %.3f\n",
-              emig_prob, pr, ms, dp, nhab, step_mortality))
+  cat(sprintf("  EmigProb = %.3f | Perceptual range = %.3f | PR method = %.3f | Memory size = %.3f | Directional persistence = %.3f | Nhab = %.3f | Step mortality = %.3f | Goal type = %.3f\n",
+              emig_prob, pr, pr_meth, ms, dp, nhab, step_mortality, goal_type))
   cat(sprintf("  Costs = %.3f\n",
               costs))
   cat("========================================\n\n")
@@ -437,16 +444,36 @@ for(i in 1:nrow(metadata)) {
   # - Stochastic movement simulator (SMS): use SMS
   # - Correlated random walk (CRW): use CorrRW
   # IMPORTANT: the dispersal resistance of each land type is set by the argument Costs
-  transfer = SMS(PR = pr, # Perceptual range in nb of cells (must be integer)
-                 PRMethod = 1, # Method to evaluate the effective cost of a particular step from the landscape within the perceptual range: 1 = Arithmetic mean, 2 = Harmonic mean, 3 = Weighted arithmetic mean
-                 MemSize = ms, # Memory size (nb of previous steps over which to calculate current direction to apply directional persistence). Default = 1, max = 14
-                 DP = dp, # Directional persistence: tendency to follow a CRW. Must be >= 1 (default to 1)
-                 GoalType = 0, # Goal bias type (i.e., a tendency to move towards a particular destination). 0 = None, 2 = Dispersal bias (i.e., moving away from the natal location)
-                 IndVar = F, # Individual variability in SMS traits?
-                 Costs = costs, # Landscape resistance to movement (for each land cover)
-                 StepMort = step_mortality, # Per-step mortality probability. Constant or habitat-specific
-                 StraightenPath = T # Straigten path after decision not to settle in a patch?
-  )
+  if (goal_type != 0) {
+  
+    transfer = SMS(PR = pr, # Perceptual range in nb of cells (must be integer)
+                   PRMethod = pr_meth, # Method to evaluate the effective cost of a particular step from the landscape within the perceptual range: 1 = Arithmetic mean, 2 = Harmonic mean, 3 = Weighted arithmetic mean
+                   MemSize = ms, # Memory size (nb of previous steps over which to calculate current direction to apply directional persistence). Default = 1, max = 14
+                   DP = dp, # Directional persistence: tendency to follow a CRW. Must be >= 1 (default to 1)
+                   GoalType = 2, # Goal bias type (i.e., a tendency to move towards a particular destination). 0 = None, 2 = Dispersal bias (i.e., moving away from the natal location)
+                   GoalBias = goal_bias, # Must be ≥ 1.0
+                   AlphaDB = 1, # decay rate (slope) of the dispersal bias
+                   BetaDB = 100000, # inflection point (in terms of number of steps taken) of the dispersal bias
+                   # -> If it is desired that there is negligible decay in dispersal bias (i.e. the individual maintains a tendency to move away from its natal location indefinitely), then retain the default values (1.0 and 100000)
+                   IndVar = F, # Individual variability in SMS traits?
+                   Costs = costs, # Landscape resistance to movement (for each land cover)
+                   StepMort = step_mortality, # Per-step mortality probability. Constant or habitat-specific
+                   StraightenPath = T # Straigten path after decision not to settle in a patch?
+    )
+  
+  } else {
+    
+    transfer = SMS(PR = pr, # Perceptual range in nb of cells (must be integer)
+                   PRMethod = pr_meth, # Method to evaluate the effective cost of a particular step from the landscape within the perceptual range: 1 = Arithmetic mean, 2 = Harmonic mean, 3 = Weighted arithmetic mean
+                   MemSize = ms, # Memory size (nb of previous steps over which to calculate current direction to apply directional persistence). Default = 1, max = 14
+                   DP = dp, # Directional persistence: tendency to follow a CRW. Must be >= 1 (default to 1)
+                   GoalType = 0, # Goal bias type (i.e., a tendency to move towards a particular destination). 0 = None, 2 = Dispersal bias (i.e., moving away from the natal location)
+                   IndVar = F, # Individual variability in SMS traits?
+                   Costs = costs, # Landscape resistance to movement (for each land cover)
+                   StepMort = step_mortality, # Per-step mortality probability. Constant or habitat-specific
+                   StraightenPath = T # Straigten path after decision not to settle in a patch?
+    )
+  }
   
   ## Settlement (or immigration)
   settle = Settlement(StageDep = F, # Stage-dependent settlement requirements?
@@ -456,7 +483,7 @@ for(i in 1:nrow(metadata)) {
                       DensDep = F, # For movement processes only: Density-dep settlement probability?
                       IndVar = F, # For movement processes only: Individual variability in settlement probability traits?
                       MinSteps = 0, # For movement processes only: min number of steps
-                      MaxSteps = pr*2, # For movement processes only: max number of steps
+                      MaxSteps = pr*max_nb_steps, # For movement processes only: max number of steps
                       MaxStepsYear = 0 # For movement processes and stage-structured population only: max nb of steps per year IF >1 reproductive season. IF 0:  every individual completes the dispersal phase in one year, i.e. between two successive reproduction phases.
   )
   
@@ -502,6 +529,44 @@ for(i in 1:nrow(metadata)) {
 # traceback()
 
 ### Results -----
+# RangeShifter can produce eight different types of outputs, or nine for patch-based models.
+# All the output files will be named with a standard name reporting the simulation number (here assumed to be 0) and the type of output.
+# all the set parameters will be automatically written to a text file Sim0_Parameters.txt.
+
+## Range: 
+# - Total number of individuals (NInds) 
+# - Total number of individuals in each stage (NInd_stageX); these columns will be present only in case of stage-structured models; 
+# - Total number of juveniles born (NJuvs); only in case of stage-structured models
+# - Total number of cells (NOccupCells) or total number of patches (NOccupPatches) occupied  by a population capable of breeding: for a stage-structured population, individuals of the breeding stage(s) must be present, and for a sexual model, both sexes must be present 
+# - Ratio between occupied and suitable cells or patches (OccupSuit) 
+# - Species’ range, in term of maximum and minimum coordinates (min_X, max_X, min_Y,  max_Y) of cells / patches occupied by breeding populations (as above)
+
+## Occupancy files: This output reports the cell / patch probability of occupancy by a breeding population. This is only permissible for multiple replicates.
+# - Occupancy.txt: This file contains a list of all the cells in the landscape (x and y  coordinates) or of all the patches (PatchID). The remaining columns give the occupancy probability of the cell / patch at defined time steps. The occupancy probability is obtained by dividing the number of times (replicates) that the cell / patch has been occupied in a given year by the total number of replicates.
+# - Occupancy_stats.txt: Summary occupancy statistics, i.e. the mean ratio between  occupied and suitable cells (Mean_OccupSuit) and its standard error (Std_error) at the set time interval.
+
+## Population files: statistics regarding each population present in the landscape at a given time interval.
+# - Species number (Species); not yet used, always zero 
+# - Number of individuals in the population (NInd). In the case of a stage-structured population, the number of individuals in each stage (NInd_stageX). If the reproduction is sexual, these columns will be replaced by the number of females (Nfemales_stageX) and of males (Nmales_stageX) in each stage. In the case of sexual model without stage structure, two columns will indicate the number of females (Nfemales) and of males (Nmales) in the population. 
+# - In the case of a stage-structured population, the number of juveniles born (NJuvs). If the  reproduction is sexual, these columns will be replaced by the number of females juveniles (NJuvFemales) and males (NJuvMales).
+
+## Individuals
+
+## Genetics
+
+## Traits
+
+## Connectivity matrix: available for a patch-based model only. It presents counts of the number of individuals successfully dispersing from each patch to each other patch for each year
+# - ID number of natal patch (StartPatch)
+# - ID number of settlement patch (EndPatch)
+# - Number of individuals dispersing from StartPatch to EndPatch (NInds)
+
+## Heatmaps
+# When the transfer model is SMS, an additional optional output is a series of maps showing how many times each matrix cell (i.e. cells in the landscape which are not suitable for breeding) has been visited by a dispersing individual across the whole time period of the model. 
+# These heat maps may be useful, for example, for identifying corridors which are heavily used during the dispersal phase.
+
+## Log files
+# When running in batch mode, an additional output file BatchNN_RS_log.csv (where NN is the batch number) will be created automatically. In it is listed the time taken (in seconds) to run each simulation in the batch.
 
 #### Population -----
 
@@ -513,7 +578,7 @@ pop_files = list.files(
        "tests",
        test_config$test_name,
        "Outputs"),
-  pattern = "_Pop\\.txt$",
+  pattern = "_Pop\\.txt$", # Population files
   full.names = TRUE
 )
 
@@ -547,25 +612,31 @@ params_tested = test_config$parameters
 
 ##### Line plot ------
 ### Plot
-# Population size by siumation
+# Population size by simulation
 pop_total = pop_all %>%
   dplyr::group_by(Id_simul, 
                   dplyr::across(dplyr::all_of(params_tested)),
                   Rep, 
                   Year) %>%
-  dplyr::summarise(NInd = sum(NInd), .groups = "drop")
+  dplyr::summarise(NInd = sum(NInd), # N Adults (Stage 1 + Stage 2)
+                   NJuvs = sum(NJuvs), # N Juveniles
+                   NTot = NInd+NJuvs, # Total population
+                   .groups = "drop")
 # Mean population size across tested parameters
 pop_time = pop_total %>%
   dplyr::group_by(dplyr::across(dplyr::all_of(params_tested)),
                   Year) %>%
-  dplyr::summarise(MeanN = mean(NInd),.groups = "drop")
+  dplyr::summarise(MeanN_Ind = mean(NInd), 
+                   MeanN_Juvs = mean(NJuvs),
+                   MeanN_Tot = mean(NTot),
+                   .groups = "drop")
 
 # Plot evolution of population size
 ggplot(
   pop_time,
   aes(
     x = Year,
-    y = MeanN,
+    y = MeanN_Juvs, # Choose the proper count
     colour = factor(.data[[params_tested[1]]])
   )
 ) +
@@ -573,7 +644,7 @@ ggplot(
   # Faceting
   facet_grid(
     cols = vars(.data[[params_tested[2]]]),
-    rows = vars(.data[[params_tested[3]]]),
+    # rows = vars(.data[[params_tested[3]]]),
     scales = "free_y") +
   # Vertical reference years
   geom_vline(
@@ -603,7 +674,7 @@ ggplot(
   pop_time,
   aes(
     x = Year,
-    y = MeanN,
+    y = MeanN_Ind,
     colour = factor(.data[[params_tested[1]]])
   )
 ) +
@@ -611,7 +682,7 @@ ggplot(
   # Faceting
   facet_grid(
     cols = vars(.data[[params_tested[2]]]),
-    rows = vars(.data[[params_tested[3]]]),
+    # rows = vars(.data[[params_tested[3]]]),
     scales = "free_y") +
   # Vertical reference years
   geom_vline(
@@ -638,13 +709,13 @@ pop2013 = 3706 # Adjust
 pop2022 = 4869 # Adjust
 initial_pop = pop_time %>%
   dplyr::filter(Year == min(pop_time$Year)) %>% # 2005
-  dplyr::filter(abs(MeanN - pop2005) < 200)  # Adjust tolerance
+  dplyr::filter(abs(MeanN_Tot - pop2005) < 500)  # Adjust tolerance
 pop_date1 = pop_time %>%
   dplyr::filter(Year == 8) %>% # 2013
-  dplyr::filter(abs(MeanN - pop2013) < 200)  # Adjust tolerance
+  dplyr::filter(abs(MeanN_Tot - pop2013) < 500)  # Adjust tolerance
 pop_date2 = pop_time %>%
   dplyr::filter(Year == 17) %>% # 2022
-  dplyr::filter(abs(MeanN - pop2022) < 500)  # Adjust tolerance
+  dplyr::filter(abs(MeanN_Tot - pop2022) < 500)  # Adjust tolerance
 
 # Get the parameter combinations for 2005 and 2013
 initial_params = initial_pop %>%
@@ -668,8 +739,8 @@ initial_params %>%
 fit_score = pop_time %>%
   dplyr::group_by(dplyr::across(dplyr::all_of(params_tested))) %>%
   dplyr::summarise(
-    InitialN = MeanN[Year == min(Year)],
-    FinalN = MeanN[Year == 8],
+    InitialN = MeanN_Tot[Year == min(Year)],
+    FinalN = MeanN_Tot[Year == 8],
     .groups = "drop"
   ) %>%
   dplyr::mutate(
@@ -688,7 +759,7 @@ ggplot(
   )
 ) +
   geom_tile() +
-  facet_wrap(vars(.data[[params_tested[3]]])) +
+  # facet_wrap(vars(.data[[params_tested[3]]])) +
   scale_fill_viridis_c(
     option = "C",
     direction = -1
@@ -713,7 +784,7 @@ ggplot(
   )
 ) +
   geom_tile() +
-  facet_wrap(vars(.data[[params_tested[3]]])) +
+  # facet_wrap(vars(.data[[params_tested[3]]])) +
   scale_fill_viridis_c(
     option = "C",
     direction = -1
@@ -730,8 +801,8 @@ dev.off()
 fit_score_t1t2 = pop_time %>%
   dplyr::group_by(dplyr::across(dplyr::all_of(params_tested))) %>%
   dplyr::summarise(
-    N0 = MeanN[Year == 0],
-    N8 = MeanN[Year == 8],
+    N0 = MeanN_Tot[Year == 0],
+    N8 = MeanN_Tot[Year == 8],
     .groups = "drop"
   ) %>%
   dplyr::mutate(
@@ -753,9 +824,9 @@ fit_score_t1t2 %>%
 fit_score_t1t2t3 = pop_time %>%
   dplyr::group_by(dplyr::across(dplyr::all_of(params_tested))) %>%
   dplyr::summarise(
-    N0 = MeanN[Year == 0],
-    N8 = MeanN[Year == 8],
-    N17 = MeanN[Year == 17],
+    N0 = MeanN_Tot[Year == 0],
+    N8 = MeanN_Tot[Year == 8],
+    N17 = MeanN_Tot[Year == 17],
     .groups = "drop"
   ) %>%
   dplyr::mutate(
@@ -784,13 +855,15 @@ best_values = best_fit %>%
 
 # Manual selection
 # best_fit = fit_score_t1t2t3 %>%
-#   dplyr::filter(PR == 10,
-#                 DP == 5)
-# best_values = best_fit %>% 
-#   dplyr::select(PR, DP)
+#   dplyr::filter(PR_meth == 2,
+#                 Max_nb_steps == 4)
+# best_values = best_fit %>%
+#   dplyr::select(PR_meth, Max_nb_steps)
 
 
 #### Patch occupancy -----
+# We check patch occupancy using the best values
+
 ## Number of simulated patches occupied in 2013
 occ_patches_sim_2013 = pop_all %>%
   dplyr::semi_join(
@@ -877,11 +950,22 @@ percent_missing_patches_2013 # Print the result
 
 
 #### Patch abundance -----
+# We count population by patch using the right parameters
+
+# Population by patch
 pop_patch = pop_all %>%
+  dplyr::semi_join(
+    best_values, # using the optimal parameter combination
+    by = params_tested
+  ) %>%
   dplyr::group_by(PatchID, 
-                  dplyr::across(dplyr::all_of(params_tested)),
                   Year) %>% # Add parameters here (depending on how many are tested)
-  dplyr::summarise(MeanN = mean(NInd),.groups = "drop")
+  dplyr::summarise(MeanN = mean(NInd),
+                   MeanN_Juvs = mean(NJuvs),
+                   MeanN_Tot = mean(NInd+NJuvs),
+                   .groups = "drop")
+# First lines
+head(pop_patch)
 
 ## Join patch name
 # names of the patches used for simulations (until "test_patch_cut_1")
@@ -914,6 +998,7 @@ patch_list = c("Vendaval",
                "Afetiva",
                "Pirineus_114")
 
+# Only keep patches with known abundance
 pop_patch = pop_patch %>% 
   dplyr::left_join(patch_corres_id, by=c("PatchID" = "cut_patch_id")) %>% # Update patch id variable here (integer id)
   dplyr::rename(patch_id = uncut_patch_name) %>% 
@@ -922,10 +1007,6 @@ pop_patch = pop_patch %>%
 
 ### Compare with patch abundance over time
 sim_sel = pop_patch %>%
-  dplyr::semi_join(
-    best_values,
-    by = params_tested
-  ) %>% 
   dplyr::filter(
     Year %in% c(0, 8, 13, 17) # Years of interest
   )
@@ -945,6 +1026,8 @@ sim_frag = sim_sel %>%
   dplyr::group_by(FragName, Year) %>%
   dplyr::summarise(
     SimN = sum(MeanN),
+    SimN_Juv = sum(MeanN_Juvs),
+    SimN_Tot = sum(MeanN_Tot),
     .groups = "drop"
   )
 
@@ -979,6 +1062,7 @@ comparison = sim_frag %>%
 
 # Correlation
 cor(comparison$SimN, comparison$RealN)
+cor(comparison$SimN_Tot, comparison$RealN)
 
 # Plot
 png(here("data",
@@ -990,7 +1074,7 @@ png(here("data",
     width = 2000, height = 1000, res = 300, type="cairo")
 ggplot(
   comparison,
-  aes(x = RealN, y = SimN)
+  aes(x = RealN, y = SimN_Tot)
 ) +
   geom_point(size = 1) +
   geom_abline(
@@ -1012,10 +1096,10 @@ comparison_long = comparison %>%
     FragName,
     Year,
     RealN,
-    SimN
+    SimN_Tot
   ) %>%
   tidyr::pivot_longer(
-    c(RealN, SimN),
+    c(RealN, SimN_Tot),
     names_to = "Source",
     values_to = "N"
   )
@@ -1051,11 +1135,11 @@ patch_summary = comparison %>%
   dplyr::select(
     FragName,
     Year,
-    SimN
+    SimN_Tot
     ) %>%
   tidyr::pivot_wider(
     names_from = c(FragName, Year),
-    values_from = c(SimN),
+    values_from = c(SimN_Tot),
     names_glue = "{.value}_{FragName}_{Year}"
   ) %>%
   dplyr::rename_with(
@@ -1067,15 +1151,19 @@ patch_summary = comparison %>%
 # Works for simulations with fixed parameters!
 
 # Require the different components of the simulations
-densdep = 0.09
+densdep = 0.088
 indshacell = 0.08
 ad_survival = 0.89
 juv_survival = 1
-emig_prob = 0.035
-pr = 15
+emig_prob = 0.036
+pr = 10
 ms = 10
-dp = 5
+dp = 1
+pr_meth = 2
+max_nb_steps = 6
 step_mortality = 0.001
+goal_type = 2
+goal_bias = 10
 
 ##### Simulation -----
 sim = Simulation(Simulation = 1, # Update simulation id
@@ -1136,10 +1224,13 @@ emig = Emigration(EmigProb = emig_prob, # Matrix containing all parameters (#col
 
 ## Transfer (movement of an individual departing from its natal patch towards a potential new patch)
 transfer = SMS(PR = pr, # Perceptual range in nb of cells (must be integer)
-               PRMethod = 1, # Method to evaluate the effective cost of a particular step from the landscape within the perceptual range: 1 = Arithmetic mean, 2 = Harmonic mean, 3 = Weighted arithmetic mean
+               PRMethod = pr_meth, # Method to evaluate the effective cost of a particular step from the landscape within the perceptual range: 1 = Arithmetic mean, 2 = Harmonic mean, 3 = Weighted arithmetic mean
                MemSize = ms, # Memory size (nb of previous steps over which to calculate current direction to apply directional persistence). Default = 1, max = 14
                DP = dp, # Directional persistence: tendency to follow a CRW. Must be >= 1 (default to 1)
-               GoalType = 0, # Goal bias type (i.e., a tendency to move towards a particular destination). 0 = None, 2 = Dispersal bias (i.e., moving away from the natal location)
+               GoalType = goal_type, # Goal bias type (i.e., a tendency to move towards a particular destination). 0 = None, 2 = Dispersal bias (i.e., moving away from the natal location)
+               GoalBias = goal_bias, # Must be ≥ 1.0
+               AlphaDB = 1, # decay rate (slope) of the dispersal bias
+               BetaDB = 100000, # inflection point (in terms of number of steps taken) of the dispersal bias
                IndVar = F, # Individual variability in SMS traits?
                Costs = c(50,1,5,20,100,100), # Landscape resistance to movement (for each land cover)
                StepMort = step_mortality, # Per-step mortality probability. Constant or habitat-specific
@@ -1191,7 +1282,7 @@ plotAbundance(s, dirpath) # Pop size: Uses the RangeShiftR output data 'range' t
 plotOccupancy(s, dirpath) # Occupied patches: Uses the RangeShiftR output data 'range' to generate occupancy time series. Plots the mean occupancy over all replicates, and optionally the standard deviation and/or the single replicates.
 
 
-# Occupancy
+###### Occupancy -----
 # We plot the mean occupancy probability for each patch in year 100
 # + the mean time to colonisation
 terra::plot(landsc, col=c("#f0ffb3","darkgreen","green","#04170a","blue","red"))
@@ -1225,7 +1316,7 @@ terra::plot(col_stats_a$map_col_time, axes=F, breaks=c(-9,seq(-9,100,length=11))
 bg() 
 terra::plot(col_stats_a$map_col_time, axes=F, breaks=c(-9,seq(-9,100,length=11)), col=c('grey',mycol_coltime(20)), type="continuous", plg=list(x="bottom", ext=c(e$xmin+400, e$xmax-400, e$ymin-150, e$ymin-50)), add =T)
 
-# Heatmap
+###### Heatmap -----
 # the dispersal heatmap can be used to assess those parts of the landscape matrix that are frequently used for dispersal, whether it was successful or not
 # Let’s first look at one replicate only and plot it:
 library(viridis)
@@ -1246,6 +1337,24 @@ for(rep in 0:(s@simul@Replicates-1)){
 
 # average over all layers
 heatmaps_mean = terra::mean(heatmaps_stack)
+
+# quick plot
+# Keep only patch cells with values > 0
+patches_positive = terra::ifel(patch > 0, 1, NA)
+
+# Base heatmap
+terra::plot(
+  heatmaps_mean,
+  col = magma(9)
+)
+
+# Overlay patches in transparent grey
+terra::plot(
+  patches_positive,
+  col = adjustcolor("white", alpha.f = 0.50),
+  add = TRUE,
+  legend = FALSE
+)
 
 # We create a non-linear color scale, in which the color changes more rapidly for small numbers of visits than higher ones:
 # create exponential color scale
@@ -1269,8 +1378,8 @@ summary = read_excel(here("data",
 
 #### Information to add manually ----
 
-test_aim = "Testing PR, DP and DensDep"
-test_remarks = ""
+test_aim = "Testing IndsHaCell and Juv_survival using different pop counts (adults only, total individuals)"
+test_remarks = "Works best with Juv_survival = 1, IndsHaCell = 0.06 (or below that) IF we use the total of individuals (and not just adults); Pop collapses in the end due to juvenile collapsing"
 
 #### Test name -----
 test_name = basename(normalizePath(dirpath))
@@ -1290,9 +1399,13 @@ tested_parameters = c(
   "Juv_survival",
   "Emig_prob",
   "PR",
+  "PR_meth",
   "MS",
   "DP",
   "Step_mortality",
+  "Max_nb_steps",
+  "Goal_type",
+  "Goal_bias",
   "Nhab",
   "Cost1",
   "Cost2",
@@ -1346,11 +1459,11 @@ optimal_pop = pop_time %>%
     by = params_tested)
 pop_sizes = optimal_pop %>%
   dplyr::filter(Year %in% c(0, 8, 17, 95)) %>%
-  dplyr::select(Year, MeanN)
-pop_2005 = pop_sizes$MeanN[pop_sizes$Year == 0]
-pop_2013 = pop_sizes$MeanN[pop_sizes$Year == 8]
-pop_2022 = pop_sizes$MeanN[pop_sizes$Year == 17]
-pop_2100 = pop_sizes$MeanN[pop_sizes$Year == 95]
+  dplyr::select(Year, MeanN_Tot)
+pop_2005 = pop_sizes$MeanN_Tot[pop_sizes$Year == 0]
+pop_2013 = pop_sizes$MeanN_Tot[pop_sizes$Year == 8]
+pop_2022 = pop_sizes$MeanN_Tot[pop_sizes$Year == 17]
+pop_2100 = pop_sizes$MeanN_Tot[pop_sizes$Year == 95]
 
 #### RMSE -----
 rmse_pop_size = best_fit$RMSE
@@ -1374,12 +1487,21 @@ new_summary = dplyr::tibble(
     format_tested_values(metadata$Emig_prob),
   'PR' =
     format_tested_values(metadata$PR),
+  'PR_meth' =
+    format_tested_values(metadata$PR_meth),
   'MS' =
     format_tested_values(metadata$MS),
   'DP' =
     format_tested_values(metadata$DP),
   'Step_mortality' =
     format_tested_values(metadata$Step_mortality),
+  'Max_nb_steps' =
+    format_tested_values(metadata$Max_nb_steps),
+  'Goal_type' =
+    format_tested_values(metadata$Goal_type),
+  'Goal_bias' =
+    format_tested_values(metadata$Goal_bias),
+  
   
   'Dispersal Y/N' = dispersal,
   
