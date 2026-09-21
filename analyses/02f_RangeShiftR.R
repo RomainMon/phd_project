@@ -59,12 +59,12 @@ library(readxl)
 
 # List with components stored
 test_config = list(
-  test_name = "test_resist_13", # Name of the folder
+  test_name = "test_resist_14", # Name of the folder
   
   # Parameters tested with sensitivity analysis (i.e., those varying during simulations)
   parameters = c(
     "IndsHaCell",
-    "Juv_survival"
+    "DensDep"
   )
 )
 
@@ -120,7 +120,9 @@ terra::unique(patch_w_glt)
 # Thus, we aim to find the 1/b parameter that would yield a maximum local population abundance of 100 individuals. 
 # We can now assess the localised equilibrium population size for different values of 1/b and see how the density dependence plays out.
 
-# Pop. matrix
+### Pop. matrix 
+# Juv. survival = 0.56 (Ponchon et al. 2026)
+# Ad. survival = 0.89 (Ponchon et al. 2026)
 mat = matrix(c(0, 0, 2,
                1, 0, 0,
                0, 0.56, 0.89),
@@ -141,18 +143,21 @@ demo = Demography(StageStruct = stg,
 # Maximum individuals observed in a forest patch (see: Ruiz-Miranda et al. 2019)
 # ?getLocalisedEquilPop
 par(mfrow=c(1,1))
-eq_pop = getLocalisedEquilPop(demog = demo, DensDep_values = c(0.05, 0.06, 0.07, 0.08, 0.09, 0.095, 0.1, 0.2, 0.3)) #  absolute values of individuals
+eq_pop = getLocalisedEquilPop(demog = demo, 
+                              DensDep_values = c(0.05, 0.06, 0.07, 0.08, 0.09, 0.095, 0.1, 0.2, 0.3)) #  absolute values of individuals
 # Select the value that reaches the desired threshold
 colSums(eq_pop)
-# The mean GLT density per patch is 0.086 ind/ha (Ruiz-Miranda et al. 2019)
-# NOTE: 8,6 individus / 100 ha (1 km²) = 0,086 individu/ha.
-# This value corresponds to the 4th or 5th column (0.08 or 0.09)
+# The mean GLT density per patch (in 2014) is 0.086 ind/ha (Ruiz-Miranda et al. 2019)
+# GLT density ranges 1.7 inds/km² (0.017 inds/ha) (Gavioes) to 19.0 inds/km² (0.19 inds/ha) (Rio Vermelho, Imbau I) (Ruiz-Miranda et al. 2019)
+# NOTE: 8.6 inds / 100 ha (1 km²) = 0.086 inds/ha.
+# This value corresponds to the 4th or 5th column (1/b = 0.08 or 1/b = 0.09)
 
 # calculate proportion of all stages excluding the new-born juvenile (stage 0) population, 
 # which can't be initialised:
-eq_pop = getLocalisedEquilPop(demog = demo, DensDep_values = 0.089, plot=F) # Put DensDep_values
+eq_pop = getLocalisedEquilPop(demog = demo, DensDep_values = 0.088, plot=F) # Put DensDep_values
 prop_stgs = eq_pop[-1]/sum(eq_pop[-1])
 round(prop_stgs,2)
+
 
 ### SENSITIVITY ANALYSIS ----
 # Run simulations for several values for given parameters
@@ -374,13 +379,13 @@ for(i in 1:nrow(metadata)) {
   # This module is used to set general simulation parameters (e.g. simulation ID, number of replicates, and number of years to simulate) and to control output types (plus some more specific settings).
   sim = Simulation(Simulation = id_simulation, # Update simulation id
                    Replicates = 20, # Number of replicates
-                   Years = 95, # Number of years
+                   Years = 96, # Number of years
                    OutIntPop = 1, # Whether to export population files 
-                   OutIntOcc = 5, # Whether to export occupancy files (every X year)
-                   OutIntRange = 5, # Whether to export range files (every X year)
+                   OutIntOcc = 1, # Whether to export occupancy files (every X year)
+                   OutIntRange = 1, # Whether to export range files (every X year)
                    OutIntInd = 0, # Whether to export individual files
                    OutIntConn = 0, # Whether to export connectivity files (n individuals from patch i to patch j)
-                   SMSHeatMap = TRUE, # Produce SMS heat map raster as output?
+                   SMSHeatMap = FALSE, # Produce SMS heat map raster as output?
                    ReturnPopDataFrame = TRUE, # Return population data to R as data frame (most suitable for patch based models)?
                    CreatePopFile = TRUE # Create population output file? Defaults to TRUE.
                    ) 
@@ -570,7 +575,7 @@ for(i in 1:nrow(metadata)) {
 
 #### Population -----
 
-##### Files -------
+##### Pop files -------
 # stack all files
 pop_files = list.files(
   here("data",
@@ -582,13 +587,16 @@ pop_files = list.files(
   full.names = TRUE
 )
 
+# Read and stack all pop files
 pop_all = purrr::map_dfr(pop_files, function(f){
   
+  # Simulation id
   sim_id = stringr::str_extract(
     basename(f),
     "(?<=Sim)\\d+(?=_Land)"
   ) %>%  as.numeric()
   
+  # Read pop file
   read.table(
     f,
     header = TRUE,
@@ -598,6 +606,7 @@ pop_all = purrr::map_dfr(pop_files, function(f){
   
 })
 
+# Take a look at the dataset
 dplyr::glimpse(pop_all)
 
 ### Join tested parameter
@@ -610,7 +619,6 @@ pop_all = dplyr::left_join(
 ### Parameters tested
 params_tested = test_config$parameters
 
-##### Line plot ------
 ### Plot
 # Population size by simulation
 pop_total = pop_all %>%
@@ -621,8 +629,9 @@ pop_total = pop_all %>%
   dplyr::summarise(NInd = sum(NInd), # N Adults (Stage 1 + Stage 2)
                    NJuvs = sum(NJuvs), # N Juveniles
                    NTot = NInd+NJuvs, # Total population
-                   .groups = "drop")
-# Mean population size across tested parameters
+                   .groups = "drop") %>% 
+  dplyr::filter(Year != max(Year, na.rm = TRUE)) # Remove the last Year
+# Mean population size over time (by tested parameter)
 pop_time = pop_total %>%
   dplyr::group_by(dplyr::across(dplyr::all_of(params_tested)),
                   Year) %>%
@@ -636,7 +645,7 @@ ggplot(
   pop_time,
   aes(
     x = Year,
-    y = MeanN_Juvs, # Choose the proper count
+    y = MeanN_Tot, # Choose the proper count
     colour = factor(.data[[params_tested[1]]])
   )
 ) +
@@ -674,7 +683,7 @@ ggplot(
   pop_time,
   aes(
     x = Year,
-    y = MeanN_Ind,
+    y = MeanN_Tot,
     colour = factor(.data[[params_tested[1]]])
   )
 ) +
@@ -697,11 +706,11 @@ ggplot(
   annotate("text", x = 8, y = 3706, label = "2013", vjust = -1) +
   annotate("text", x = 17, y = 4869, label = "2022", vjust = -1) +
   theme_bw() +
-  labs(y = "Mean population size")
+  labs(y = "Mean population size (total)") # UPDATE according to indicator
 
 dev.off()
 
-##### Comparison with long-term data -----
+##### Comparison with long-term data
 ### Identify good parameters by comparing with real pop
 ## Identify parameters that provide the same initial and final pop. size
 pop2005 = 1600 # Adjust
@@ -730,7 +739,7 @@ params_date2 = pop_date2 %>%
 # Find the intersection
 # Intersection between two dates
 dplyr::inner_join(initial_params, params_date1) 
-# Between three dates
+## Between three dates
 initial_params %>%
   dplyr::inner_join(params_date1, by = params_tested) %>%
   dplyr::inner_join(params_date2, by = params_tested)
@@ -863,90 +872,228 @@ best_values = best_fit %>%
 
 #### Patch occupancy -----
 # We check patch occupancy using the best values
+### Number of simulated patches occupied
+# Using the Range file
 
-## Number of simulated patches occupied in 2013
-occ_patches_sim_2013 = pop_all %>%
-  dplyr::semi_join(
-    best_values, # using the optimal parameter combination
-    by = params_tested
-  ) %>%
-  dplyr::filter(
-    NInd > 0 # Remove patches unoccupied
-  ) %>%
-  dplyr::distinct(
-    Rep,
-    PatchID
-  ) %>%
-  dplyr::filter(
-    PatchID != 0 # Remove the matrix
-  )
+##### Range files -------
+# stack all files
+range_files = list.files(
+  here("data",
+       "rangeshifter",
+       "tests",
+       test_config$test_name,
+       "Outputs"),
+  pattern = "_Range\\.txt$", # Population files
+  full.names = TRUE
+)
 
-# Group by real patch name 
-occ_patches_sim_2013 = occ_patches_sim_2013 %>% 
-  dplyr::left_join(patch_corres_id, by=c("PatchID"="cut_patch_id")) %>% # We join the vector patches names (from the correspondence table between RangeShifter raster patches and vector patches)
-  dplyr::rename(patch_id = uncut_patch_name) %>% 
-  dplyr::select(Rep, patch_id) %>% # Keep one id
-  dplyr::distinct() # Remove duplicated lines (i.e., patches belonging to the same higher-level patch)
-
-# Number of replicates
-n_reps = dplyr::n_distinct(occ_patches_sim_2013$Rep)
+# Read and stack all pop files
+range_all = purrr::map_dfr(range_files, function(f){
   
-# Keep patches occupied in >= 95% of replicates
+  # Simulation id
+  sim_id = stringr::str_extract(
+    basename(f),
+    "(?<=Sim)\\d+(?=_Land)"
+  ) %>%  as.numeric()
+  
+  # Read pop file
+  read.table(
+    f,
+    header = TRUE,
+    sep = "\t"
+  ) %>%
+    dplyr::mutate(Id_simul = sim_id)
+  
+})
+
+# Take a look at the dataset
+dplyr::glimpse(range_all)
+
+### Join tested parameter
+range_all = dplyr::left_join(
+  range_all,
+  metadata,
+  by = "Id_simul"
+)
+
+### Parameters tested
+params_tested = test_config$parameters
+
+### Plot
+# Mean occupancy over time (by tested parameter)
+range_time = range_all %>%
+  dplyr::group_by(dplyr::across(dplyr::all_of(params_tested)),
+                  Year) %>%
+  dplyr::summarise(MeanNOccupPatches = mean(NOccupPatches),
+                   .groups = "drop")
+
+# Plot evolution of range
+ggplot(
+  range_time,
+  aes(
+    x = Year,
+    y = MeanNOccupPatches, # Choose the proper parameter
+    colour = factor(.data[[params_tested[1]]])
+  )
+) +
+  geom_line(linewidth = 1) +
+  # Faceting
+  facet_grid(
+    cols = vars(.data[[params_tested[2]]]),
+    # rows = vars(.data[[params_tested[3]]]),
+    scales = "free_y") +
+  theme_bw() +
+  labs(y = "Mean number of occupied patches")
+
+## Export plot
+png(here("data",
+         "rangeshifter",
+         "tests",
+         test_config$test_name,
+         "plot",
+         "evol_occ_patches.png"),
+    width = 3000, height = 1500, res = 300, type="cairo")
+# Plot
+ggplot(
+  range_time,
+  aes(
+    x = Year,
+    y = MeanNOccupPatches, # Choose the proper parameter
+    colour = factor(.data[[params_tested[1]]])
+  )
+) +
+  geom_line(linewidth = 1) +
+  # Faceting
+  facet_grid(
+    cols = vars(.data[[params_tested[2]]]),
+    # rows = vars(.data[[params_tested[3]]]),
+    scales = "free_y") +
+  theme_bw() +
+  labs(y = "Mean number of occupied patches")
+
+dev.off()
+
+##### Comparison with real data -----
+# i.e., Simulated patches occupied in 2013 VS patches known to be occupied
+occ_patches_sim_2013 = pop_all %>%
+  dplyr::filter(
+    PatchID != 0, # Remove the matrix
+    Year == 8 # Keep 2013
+  ) %>% 
+  # We join the vector patches names (from the correspondence table between RangeShifter raster patches and vector patches)
+  dplyr::left_join(patch_corres_id, 
+                   by=c("PatchID"="cut_patch_id") # The patch id is here the cut patch id
+                   ) %>% 
+  dplyr::rename(patch_id = uncut_patch_name) %>% # Real patch id
+  dplyr::group_by(patch_id,
+                  Id_simul, 
+                  dplyr::across(dplyr::all_of(params_tested)),
+                  Rep) %>% 
+  dplyr::summarise(NIndTot = sum(NInd+NJuvs),
+                .groups="drop")
+
+
+## Patches occupied in >= 95% of replicates
+# Number of replicates
+n_reps = 20
 occ_patches_sim_2013 = occ_patches_sim_2013 %>%
-  dplyr::group_by(patch_id) %>% # Patch id column
+  dplyr::group_by(patch_id,
+                  Id_simul, 
+                  dplyr::across(dplyr::all_of(params_tested))) %>%
+  dplyr::filter(NIndTot > 0) %>% 
   dplyr::summarise(
     n_reps_occupied = dplyr::n_distinct(Rep),
     prop_replicates = n_reps_occupied / n_reps,
     .groups = "drop"
-    ) %>%
-  dplyr::filter(prop_replicates >= 0.95) %>%
-  dplyr::arrange(patch_id)
+    )
 
-# N patches occupied
-n_occ_patches_sim = occ_patches_sim_2013 %>% 
-  dplyr::summarise(dplyr::n_distinct(patch_id)) %>% 
-  as.integer()
-n_occ_patches_sim
+## Whether the patch is occupied in 2013 or not
+# TO COMPLETE
 
-### Proportion of observed 2013 occupied patches that are missing from the simulation
-# WARNING: here, we compare occupied patches with patches known to be occupied in 213
-# We base our comparison on patch_id (i.e., patch name)
-# It only works if patches are comparable (they share the same names)
 
-# Simulated patches occurring in >= 95% of replicates
-sim_patches = occ_patches_sim_2013 %>%
-  dplyr::mutate(Simulated = TRUE)
-
-# Validation patches
-real_patches = occ_patches2013 %>%
-  dplyr::select(patch_id) %>%
-  dplyr::distinct() %>%
-  dplyr::mutate(Validation = TRUE)
-
-# Compare visually the two lists
-patch_comparison = sim_patches %>%
-  dplyr::full_join(
-    real_patches,
-    by = "patch_id"
-  ) %>%
-  dplyr::mutate(
-    Simulated = dplyr::coalesce(Simulated, FALSE),
-    Validation = dplyr::coalesce(Validation, FALSE),
-    Common = Simulated & Validation
-  )
-patch_comparison %>% dplyr::filter(Common == FALSE)
-
-# Patches occupied in 2013 but not according to simulations
-missing_patches_2013 = real_patches %>%
-  dplyr::anti_join(
-    sim_patches,
-    by = "patch_id"
-  )
-
-# Percentage of missing patches
-percent_missing_patches_2013 = nrow(missing_patches_2013) / nrow(real_patches)
-percent_missing_patches_2013 # Print the result
-# Note: these are the patches occupied in 2013 only
+# # Occupied patches in 2013
+# occ_patches_sim_2013 = pop_all %>%
+#   dplyr::semi_join(
+#     best_values, # using the optimal parameter combination
+#     by = params_tested
+#   ) %>%
+#   dplyr::filter(
+#     NInd > 0 # Remove patches unoccupied
+#   ) %>%
+#   dplyr::distinct(
+#     Rep,
+#     PatchID
+#   ) %>%
+#   dplyr::filter(
+#     PatchID != 0 # Remove the matrix
+#   )
+# 
+# # Group by real patch name 
+# occ_patches_sim_2013 = occ_patches_sim_2013 %>% 
+#   dplyr::left_join(patch_corres_id, by=c("PatchID"="cut_patch_id")) %>% # We join the vector patches names (from the correspondence table between RangeShifter raster patches and vector patches)
+#   dplyr::rename(patch_id = uncut_patch_name) %>% 
+#   dplyr::select(Rep, patch_id) %>% # Keep one id
+#   dplyr::distinct() # Remove duplicated lines (i.e., patches belonging to the same higher-level patch)
+# 
+# # Number of replicates
+# n_reps = 20
+#   
+# # Keep patches occupied in >= 95% of replicates
+# occ_patches_sim_2013 = occ_patches_sim_2013 %>%
+#   dplyr::group_by(patch_id) %>% # Patch id column
+#   dplyr::summarise(
+#     n_reps_occupied = dplyr::n_distinct(Rep),
+#     prop_replicates = n_reps_occupied / n_reps,
+#     .groups = "drop"
+#     ) %>%
+#   dplyr::filter(prop_replicates >= 0.95) %>%
+#   dplyr::arrange(patch_id)
+# 
+# # N patches occupied
+# n_occ_patches_sim = occ_patches_sim_2013 %>% 
+#   dplyr::summarise(dplyr::n_distinct(patch_id)) %>% 
+#   as.integer()
+# n_occ_patches_sim
+# 
+# ### Proportion of observed 2013 occupied patches that are missing from the simulation
+# # WARNING: here, we compare occupied patches with patches known to be occupied in 213
+# # We base our comparison on patch_id (i.e., patch name)
+# # It only works if patches are comparable (they share the same names)
+# 
+# # Simulated patches occurring in >= 95% of replicates
+# sim_patches = occ_patches_sim_2013 %>%
+#   dplyr::mutate(Simulated = TRUE)
+# 
+# # Validation patches
+# real_patches = occ_patches2013 %>%
+#   dplyr::select(patch_id) %>%
+#   dplyr::distinct() %>%
+#   dplyr::mutate(Validation = TRUE)
+# 
+# # Compare visually the two lists
+# patch_comparison = sim_patches %>%
+#   dplyr::full_join(
+#     real_patches,
+#     by = "patch_id"
+#   ) %>%
+#   dplyr::mutate(
+#     Simulated = dplyr::coalesce(Simulated, FALSE),
+#     Validation = dplyr::coalesce(Validation, FALSE),
+#     Common = Simulated & Validation
+#   )
+# patch_comparison %>% dplyr::filter(Common == FALSE)
+# 
+# # Patches occupied in 2013 but not according to simulations
+# missing_patches_2013 = real_patches %>%
+#   dplyr::anti_join(
+#     sim_patches,
+#     by = "patch_id"
+#   )
+# 
+# # Percentage of missing patches
+# percent_missing_patches_2013 = nrow(missing_patches_2013) / nrow(real_patches)
+# percent_missing_patches_2013 # Print the result
+# # Note: these are the patches occupied in 2013 only
 
 
 #### Patch abundance -----
@@ -1025,7 +1172,7 @@ sim_sel = sim_sel %>%
 sim_frag = sim_sel %>%
   dplyr::group_by(FragName, Year) %>%
   dplyr::summarise(
-    SimN = sum(MeanN),
+    SimN_Ad = sum(MeanN),
     SimN_Juv = sum(MeanN_Juvs),
     SimN_Tot = sum(MeanN_Tot),
     .groups = "drop"
@@ -1061,7 +1208,7 @@ comparison = sim_frag %>%
   dplyr::filter(Survey != "n_glt_2018") # Remove YF data
 
 # Correlation
-cor(comparison$SimN, comparison$RealN)
+cor(comparison$SimN_Ad, comparison$RealN)
 cor(comparison$SimN_Tot, comparison$RealN)
 
 # Plot
@@ -1147,7 +1294,199 @@ patch_summary = comparison %>%
   )
 
 
-#### RangeShiftR plots -----
+### Append results -----
+# Load an Excel sheet with the parameters to test
+summary = read_excel(here("data", 
+                           "rangeshifter", 
+                           "tests", 
+                           "Summary_tests.xlsx"))
+
+#### Information to add manually ----
+
+test_aim = "Testing IndsHaCell and DensDep using different pop counts (adults only, total individuals)"
+test_remarks = "The number of juveniles collapses because all juveniles become adults the last year but do not reproduce - hence 0; Best parameters for the WHOLE population = DensDep 0.88, IndsHaCell ~ 0.05-0.055"
+
+#### Test name -----
+test_name = basename(normalizePath(dirpath))
+
+#### Dispersal ----
+dispersal = "Y" # With "Y" or "N" depending on whether dispersal is included in simulations
+
+#### Hab -----
+hab = "Agriculture;Forest;Corridors & stepping stones;Wetlands & Forests>500m;Water;Built-up"
+
+#### Tested parameters -----
+# Put all the parameters that are listed in the metadata file
+tested_parameters = c(
+  "DensDep",
+  "IndsHaCell",
+  "Ad_survival",
+  "Juv_survival",
+  "Emig_prob",
+  "PR",
+  "PR_meth",
+  "MS",
+  "DP",
+  "Step_mortality",
+  "Max_nb_steps",
+  "Goal_type",
+  "Goal_bias",
+  "Nhab",
+  "Cost1",
+  "Cost2",
+  "Cost3",
+  "Cost4",
+  "Cost5",
+  "Cost6"
+)
+
+# Make sure the format in the summary table is character
+summary = summary %>%
+  dplyr::mutate(
+    dplyr::across(
+      dplyr::all_of(tested_parameters),
+      as.character
+    ))
+    
+# Put tested parameters into format
+# If several values, paste with ; / if not tested, NA
+format_tested_values = function(x) {
+  
+  x = unique(x[!is.na(x)])
+  
+  if (length(x) == 0) {
+    return(NA_character_)
+  }
+  
+  paste(x, collapse = ";")
+}
+
+# Run
+tested_values = sapply(
+  metadata[tested_parameters],
+  format_tested_values
+)
+
+# Put the combination into format
+# Example: DensDep=0.08; IndsHaCell=0.095; Ad_survival=0.92
+optimal_param = paste(
+  names(best_fit)[names(best_fit) %in% tested_parameters],
+  best_fit[1, names(best_fit) %in% tested_parameters],
+  sep = "=",
+  collapse = "; "
+)
+
+#### Pop size -----
+# Extract pop sizes for the combination of parameters
+optimal_pop = pop_time %>%
+  dplyr::semi_join(
+    best_values,
+    by = params_tested)
+pop_sizes = optimal_pop %>%
+  dplyr::filter(Year %in% c(0, 8, 17, 95)) %>%
+  dplyr::select(Year, MeanN_Tot) # Select the proper indicator
+pop_2005 = pop_sizes$MeanN_Tot[pop_sizes$Year == 0]
+pop_2013 = pop_sizes$MeanN_Tot[pop_sizes$Year == 8]
+pop_2022 = pop_sizes$MeanN_Tot[pop_sizes$Year == 17]
+pop_2100 = pop_sizes$MeanN_Tot[pop_sizes$Year == 95]
+
+#### RMSE -----
+rmse_pop_size = best_fit$RMSE
+
+#### Stack all info ----
+
+new_summary = dplyr::tibble(
+  
+  'Test' = test_name,
+  'Aim' = test_aim,
+  
+  'DensDep' =
+    format_tested_values(metadata$DensDep),
+  'IndsHaCell' =
+    format_tested_values(metadata$IndsHaCell),
+  'Ad_survival' =
+    format_tested_values(metadata$Ad_survival),
+  'Juv_survival' =
+    format_tested_values(metadata$Juv_survival),
+  'Emig_prob' =
+    format_tested_values(metadata$Emig_prob),
+  'PR' =
+    format_tested_values(metadata$PR),
+  'PR_meth' =
+    format_tested_values(metadata$PR_meth),
+  'MS' =
+    format_tested_values(metadata$MS),
+  'DP' =
+    format_tested_values(metadata$DP),
+  'Step_mortality' =
+    format_tested_values(metadata$Step_mortality),
+  'Max_nb_steps' =
+    format_tested_values(metadata$Max_nb_steps),
+  'Goal_type' =
+    format_tested_values(metadata$Goal_type),
+  'Goal_bias' =
+    format_tested_values(metadata$Goal_bias),
+  
+  
+  'Dispersal Y/N' = dispersal,
+  
+  'Nhab' = format_tested_values(metadata$Nhab),
+  'Hab' = hab,
+  'Cost1' =
+    format_tested_values(metadata$Cost1),
+  'Cost2' =
+    format_tested_values(metadata$Cost2),
+  'Cost3' =
+    format_tested_values(metadata$Cost3),
+  'Cost4' =
+    format_tested_values(metadata$Cost4),
+  'Cost5' =
+    format_tested_values(metadata$Cost5),
+  'Cost6' =
+    format_tested_values(metadata$Cost6),
+  
+  'Optimal_param' = optimal_param,
+  
+  'Pop_size_2005' = pop_2005,
+  'Pop_size_2013' = pop_2013,
+  'Pop_size_2022' = pop_2022,
+  'Pop_size_2100' = pop_2100,
+  
+  'RMSE_pop_size' = rmse_pop_size,
+
+  'Patch_occ_2013' = n_occ_patches_sim,
+  'Miss_patches_2013_%' = percent_missing_patches_2013,
+  
+  'Remarks' = test_remarks
+)
+
+#### Append to existing summary ----
+
+# New information
+new_summary = dplyr::bind_cols(
+  new_summary,
+  patch_summary
+)
+
+# Add to previous summary
+summary = dplyr::bind_rows(
+  summary,
+  new_summary
+)
+
+#### Save --------
+writexl::write_xlsx(
+  summary,
+  here(
+    "data",
+    "rangeshifter",
+    "tests",
+    "Summary_tests.xlsx"
+  )
+)
+
+
+### RangeShiftR plots -----
 # Works for simulations with fixed parameters!
 
 # Require the different components of the simulations
@@ -1321,7 +1660,7 @@ terra::plot(col_stats_a$map_col_time, axes=F, breaks=c(-9,seq(-9,100,length=11))
 # Let’s first look at one replicate only and plot it:
 library(viridis)
 terra::plot(terra::rast(paste0(dirpath,"Output_Maps/Batch1_Sim1_Land1_Rep0_Visits.txt")),
-     col=magma(9), axes=F)
+            col=magma(9), axes=F)
 
 # Because movement is stochastic, the number of visits per cell and the colonisation of empty patches are different for each replicate. 
 # In order to take into account this variance, we average over all replicates and plot the resulting heatmap
@@ -1365,197 +1704,5 @@ my.at <- seq(1,lim^(1/exp),length.out=res)^exp
 
 bg()
 terra::plot(heatmaps_mean, 
-     col=hcl.colors(res, "Inferno", rev = T, alpha=.8),
-     breaks = my.at, axes=F, type="continuous", add=T, legend=F)
-
-
-### Append results -----
-# Load an Excel sheet with the parameters to test
-summary = read_excel(here("data", 
-                           "rangeshifter", 
-                           "tests", 
-                           "Summary_tests.xlsx"))
-
-#### Information to add manually ----
-
-test_aim = "Testing IndsHaCell and Juv_survival using different pop counts (adults only, total individuals)"
-test_remarks = "Works best with Juv_survival = 1, IndsHaCell = 0.06 (or below that) IF we use the total of individuals (and not just adults); Pop collapses in the end due to juvenile collapsing"
-
-#### Test name -----
-test_name = basename(normalizePath(dirpath))
-
-#### Dispersal ----
-dispersal = "Y" # With "Y" or "N" depending on whether dispersal is included in simulations
-
-#### Hab -----
-hab = "Agriculture;Forest;Corridors & stepping stones;Wetlands & Forests>500m;Water;Built-up"
-
-#### Tested parameters -----
-# Put all the parameters that are listed in the metadata file
-tested_parameters = c(
-  "DensDep",
-  "IndsHaCell",
-  "Ad_survival",
-  "Juv_survival",
-  "Emig_prob",
-  "PR",
-  "PR_meth",
-  "MS",
-  "DP",
-  "Step_mortality",
-  "Max_nb_steps",
-  "Goal_type",
-  "Goal_bias",
-  "Nhab",
-  "Cost1",
-  "Cost2",
-  "Cost3",
-  "Cost4",
-  "Cost5",
-  "Cost6"
-)
-
-# Make sure the format in the summary table is character
-summary = summary %>%
-  dplyr::mutate(
-    dplyr::across(
-      dplyr::all_of(tested_parameters),
-      as.character
-    ))
-    
-# Put tested parameters into format
-# If several values, paste with ; / if not tested, NA
-format_tested_values = function(x) {
-  
-  x = unique(x[!is.na(x)])
-  
-  if (length(x) == 0) {
-    return(NA_character_)
-  }
-  
-  paste(x, collapse = ";")
-}
-
-# Run
-tested_values = sapply(
-  metadata[tested_parameters],
-  format_tested_values
-)
-
-# Put the combination into format
-# Example: DensDep=0.08; IndsHaCell=0.095; Ad_survival=0.92
-optimal_param = paste(
-  names(best_fit)[names(best_fit) %in% tested_parameters],
-  best_fit[1, names(best_fit) %in% tested_parameters],
-  sep = "=",
-  collapse = "; "
-)
-
-#### Pop size -----
-# Extract pop sizes for the combination of parameters
-optimal_pop = pop_time %>%
-  dplyr::semi_join(
-    best_values,
-    by = params_tested)
-pop_sizes = optimal_pop %>%
-  dplyr::filter(Year %in% c(0, 8, 17, 95)) %>%
-  dplyr::select(Year, MeanN_Tot)
-pop_2005 = pop_sizes$MeanN_Tot[pop_sizes$Year == 0]
-pop_2013 = pop_sizes$MeanN_Tot[pop_sizes$Year == 8]
-pop_2022 = pop_sizes$MeanN_Tot[pop_sizes$Year == 17]
-pop_2100 = pop_sizes$MeanN_Tot[pop_sizes$Year == 95]
-
-#### RMSE -----
-rmse_pop_size = best_fit$RMSE
-
-#### Stack all info ----
-
-new_summary = dplyr::tibble(
-  
-  'Test' = test_name,
-  'Aim' = test_aim,
-  
-  'DensDep' =
-    format_tested_values(metadata$DensDep),
-  'IndsHaCell' =
-    format_tested_values(metadata$IndsHaCell),
-  'Ad_survival' =
-    format_tested_values(metadata$Ad_survival),
-  'Juv_survival' =
-    format_tested_values(metadata$Juv_survival),
-  'Emig_prob' =
-    format_tested_values(metadata$Emig_prob),
-  'PR' =
-    format_tested_values(metadata$PR),
-  'PR_meth' =
-    format_tested_values(metadata$PR_meth),
-  'MS' =
-    format_tested_values(metadata$MS),
-  'DP' =
-    format_tested_values(metadata$DP),
-  'Step_mortality' =
-    format_tested_values(metadata$Step_mortality),
-  'Max_nb_steps' =
-    format_tested_values(metadata$Max_nb_steps),
-  'Goal_type' =
-    format_tested_values(metadata$Goal_type),
-  'Goal_bias' =
-    format_tested_values(metadata$Goal_bias),
-  
-  
-  'Dispersal Y/N' = dispersal,
-  
-  'Nhab' = format_tested_values(metadata$Nhab),
-  'Hab' = hab,
-  'Cost1' =
-    format_tested_values(metadata$Cost1),
-  'Cost2' =
-    format_tested_values(metadata$Cost2),
-  'Cost3' =
-    format_tested_values(metadata$Cost3),
-  'Cost4' =
-    format_tested_values(metadata$Cost4),
-  'Cost5' =
-    format_tested_values(metadata$Cost5),
-  'Cost6' =
-    format_tested_values(metadata$Cost6),
-  
-  'Optimal_param' = optimal_param,
-  
-  'Pop_size_2005' = pop_2005,
-  'Pop_size_2013' = pop_2013,
-  'Pop_size_2022' = pop_2022,
-  'Pop_size_2100' = pop_2100,
-  
-  'RMSE_pop_size' = rmse_pop_size,
-
-  'Patch_occ_2013' = n_occ_patches_sim,
-  'Miss_patches_2013_%' = percent_missing_patches_2013,
-  
-  'Remarks' = test_remarks
-)
-
-#### Append to existing summary ----
-
-# New information
-new_summary = dplyr::bind_cols(
-  new_summary,
-  patch_summary
-)
-
-# Add to previous summary
-summary = dplyr::bind_rows(
-  summary,
-  new_summary
-)
-
-#### Save --------
-writexl::write_xlsx(
-  summary,
-  here(
-    "data",
-    "rangeshifter",
-    "tests",
-    "Summary_tests.xlsx"
-  )
-)
+            col=hcl.colors(res, "Inferno", rev = T, alpha=.8),
+            breaks = my.at, axes=F, type="continuous", add=T, legend=F)
