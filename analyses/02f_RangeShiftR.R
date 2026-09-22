@@ -9,6 +9,7 @@ library(here)
 library(purrr)
 library(ggplot2)
 library(readxl)
+library(tidyterra)
 
 ### Install RangeShiftR -----
 # pak::pak("RangeShifter/RangeShiftR-pkg/RangeShiftR@main") # REQUIRES RTOOLS (4.4 here)
@@ -182,6 +183,14 @@ patch_corres_id = readr::read_csv(here("data",
                                        "Inputs", 
                                        "patch_corres_id_2005.csv"),
                                 col_types = readr::cols(uncut_patch_id = readr::col_integer())) # PATCH INTEGER ID HERE
+
+#### GLT distribution
+glt_census = sf::st_read(here("data", "glt", "JDietz", "glt_distrib_2013_2018_2022.shp"))
+plot(glt_census)
+
+##### Group locations -----
+regions = sf::st_read(here("data", "geo", "APonchon", "GLT", "RegionsName.shp"))
+plot(regions)
 
 #### Parameters file ----
 # Load an Excel sheet with the parameters to test
@@ -609,19 +618,69 @@ pop_all = purrr::map_dfr(pop_files, function(f){
 # Take a look at the dataset
 dplyr::glimpse(pop_all)
 
+### WARNING: pop_all records pop size in patches WHENEVER one patch becomes occupied, not before
+#i.e. Patch A: Year 1–7 → no row
+# VS Year 8 → individuals
+## We complete the dataset
+pop_all_complete = pop_all %>% 
+  tidyr::complete(
+    PatchID,
+    Id_simul,
+    Rep,
+    Year,
+    fill = list(
+      NInd = 0,
+      NInd_stage1 = 0,
+      NInd_stage2 = 0,
+      NJuvs = 0
+    )
+  )
+dplyr::glimpse(pop_all_complete)
+
+## Quick check: Patch 138 before and after completing the dataset
+# Original data
+check_138_original = pop_all %>% 
+  dplyr::filter(PatchID == 138) %>% 
+  dplyr::summarise(
+    n_simulations = dplyr::n_distinct(Id_simul),
+    n_reps = dplyr::n_distinct(Rep),
+    n_years = dplyr::n_distinct(Year),
+    n_rows = dplyr::n(),
+    min_year = min(Year),
+    max_year = max(Year)
+  )
+
+# Completed data
+check_138_complete = pop_all_complete %>% 
+  dplyr::filter(PatchID == 138) %>% 
+  dplyr::summarise(
+    n_simulations = dplyr::n_distinct(Id_simul),
+    n_reps = dplyr::n_distinct(Rep),
+    n_years = dplyr::n_distinct(Year),
+    n_rows = dplyr::n(),
+    min_year = min(Year),
+    max_year = max(Year)
+  )
+
+check_138_original
+check_138_complete
+
+# Visual inspection
+pop_all_complete %>% 
+  dplyr::filter(PatchID == 138) %>% 
+  dplyr::arrange(Id_simul, Rep, Year)
+
 ### Join tested parameter
-pop_all = dplyr::left_join(
-  pop_all,
-  metadata,
-  by = "Id_simul"
-)
+pop_all_complete = pop_all_complete %>% 
+  dplyr::left_join(metadata, by = "Id_simul") %>% 
+  dplyr::select(-c(RepSeason, Ncells, Species)) # Remove unnecessary columns
 
 ### Parameters tested
 params_tested = test_config$parameters
 
 ### Plot
 # Population size by simulation
-pop_total = pop_all %>%
+pop_total = pop_all_complete %>%
   dplyr::group_by(Id_simul, 
                   dplyr::across(dplyr::all_of(params_tested)),
                   Rep, 
@@ -854,22 +913,6 @@ fit_score_t1t2t3 %>%
   dplyr::slice(1)
 
 
-### Best parameters
-# Using RMSE
-best_fit = fit_score_t1t2t3 %>% # Choose between 2005-2013 fit or 2005-2013-2022 fit
-  dplyr::arrange(RMSE) %>%
-  dplyr::slice(1)
-best_values = best_fit %>%
-  dplyr::select(dplyr::all_of(params_tested))
-
-# Manual selection
-# best_fit = fit_score_t1t2t3 %>%
-#   dplyr::filter(PR_meth == 2,
-#                 Max_nb_steps == 4)
-# best_values = best_fit %>%
-#   dplyr::select(PR_meth, Max_nb_steps)
-
-
 #### Patch occupancy -----
 # We check patch occupancy using the best values
 ### Number of simulated patches occupied
@@ -974,11 +1017,11 @@ ggplot(
 dev.off()
 
 ##### Comparison with real data -----
-# i.e., Simulated patches occupied in 2013 VS patches known to be occupied
-occ_patches_sim_2013 = pop_all %>%
+# Among patches known to be occupied in 2013, what proportion are not considered occupied by a given simulation/parameter combination, where simulated occupation = individuals present in >80% of the 20 replicates?
+occ_patches_sim = pop_all_complete %>%
   dplyr::filter(
     PatchID != 0, # Remove the matrix
-    Year == 8 # Keep 2013
+    Year == 8 | Year == 17 # Keep the correct year
   ) %>% 
   # We join the vector patches names (from the correspondence table between RangeShifter raster patches and vector patches)
   dplyr::left_join(patch_corres_id, 
@@ -986,133 +1029,395 @@ occ_patches_sim_2013 = pop_all %>%
                    ) %>% 
   dplyr::rename(patch_id = uncut_patch_name) %>% # Real patch id
   dplyr::group_by(patch_id,
-                  Id_simul, 
+                  Id_simul,
+                  Year,
                   dplyr::across(dplyr::all_of(params_tested)),
                   Rep) %>% 
   dplyr::summarise(NIndTot = sum(NInd+NJuvs),
                 .groups="drop")
+head(occ_patches_sim)
 
-
-## Patches occupied in >= 95% of replicates
+## Patch occupancy across replicates
 # Number of replicates
 n_reps = 20
-occ_patches_sim_2013 = occ_patches_sim_2013 %>%
+occ_patches_sim = occ_patches_sim %>%
   dplyr::group_by(patch_id,
                   Id_simul, 
+                  Year,
                   dplyr::across(dplyr::all_of(params_tested))) %>%
-  dplyr::filter(NIndTot > 0) %>% 
   dplyr::summarise(
-    n_reps_occupied = dplyr::n_distinct(Rep),
+    n_reps_occupied = sum(NIndTot > 0),
     prop_replicates = n_reps_occupied / n_reps,
     .groups = "drop"
+  )
+
+## Patch occupancy
+occ_patches_sim_YES = occ_patches_sim %>%
+  dplyr::group_by(patch_id,
+                  Id_simul, 
+                  Year,
+                  dplyr::across(dplyr::all_of(params_tested))) %>%
+  dplyr::filter(prop_replicates >= 0.80) %>% 
+  dplyr::ungroup()
+
+## Proportion of patches occupied and not occupied in simulations
+prop_missing = occ_patches_sim_YES %>% 
+  dplyr::group_by(Id_simul,
+                  Year,
+                  dplyr::across(dplyr::all_of(params_tested))) %>% 
+  dplyr::summarise(
+    
+    missing_patches = list(
+      setdiff(
+        occ_patches2013$patch_id,
+        patch_id
+      )
+    ),
+    
+    .groups = "drop"
+  ) %>% 
+  dplyr::mutate(
+    n_missing = lengths(missing_patches),
+    prop_missing = n_missing / nrow(occ_patches2013),
+    missing_patches = vapply(
+      missing_patches,
+      function(x) paste(x, collapse = "; "),
+      character(1)
     )
+  )
 
-## Whether the patch is occupied in 2013 or not
-# TO COMPLETE
+## Arrange proportions
+# Proportions of missing patches in 2013
+prop_missing_2013 = prop_missing %>% 
+  dplyr::filter(Year == 8) %>% 
+  dplyr::rename(prop_missing_2013 = prop_missing)
+# Proportions of missing patches in 2022
+prop_missing_2022 = prop_missing %>% 
+  dplyr::filter(Year == 17) %>% 
+  dplyr::rename(prop_missing_2022 = prop_missing)
 
 
-# # Occupied patches in 2013
-# occ_patches_sim_2013 = pop_all %>%
-#   dplyr::semi_join(
-#     best_values, # using the optimal parameter combination
-#     by = params_tested
-#   ) %>%
-#   dplyr::filter(
-#     NInd > 0 # Remove patches unoccupied
-#   ) %>%
-#   dplyr::distinct(
-#     Rep,
-#     PatchID
-#   ) %>%
-#   dplyr::filter(
-#     PatchID != 0 # Remove the matrix
-#   )
-# 
-# # Group by real patch name 
-# occ_patches_sim_2013 = occ_patches_sim_2013 %>% 
-#   dplyr::left_join(patch_corres_id, by=c("PatchID"="cut_patch_id")) %>% # We join the vector patches names (from the correspondence table between RangeShifter raster patches and vector patches)
-#   dplyr::rename(patch_id = uncut_patch_name) %>% 
-#   dplyr::select(Rep, patch_id) %>% # Keep one id
-#   dplyr::distinct() # Remove duplicated lines (i.e., patches belonging to the same higher-level patch)
-# 
-# # Number of replicates
-# n_reps = 20
-#   
-# # Keep patches occupied in >= 95% of replicates
-# occ_patches_sim_2013 = occ_patches_sim_2013 %>%
-#   dplyr::group_by(patch_id) %>% # Patch id column
-#   dplyr::summarise(
-#     n_reps_occupied = dplyr::n_distinct(Rep),
-#     prop_replicates = n_reps_occupied / n_reps,
-#     .groups = "drop"
-#     ) %>%
-#   dplyr::filter(prop_replicates >= 0.95) %>%
-#   dplyr::arrange(patch_id)
-# 
-# # N patches occupied
-# n_occ_patches_sim = occ_patches_sim_2013 %>% 
-#   dplyr::summarise(dplyr::n_distinct(patch_id)) %>% 
-#   as.integer()
-# n_occ_patches_sim
-# 
-# ### Proportion of observed 2013 occupied patches that are missing from the simulation
-# # WARNING: here, we compare occupied patches with patches known to be occupied in 213
-# # We base our comparison on patch_id (i.e., patch name)
-# # It only works if patches are comparable (they share the same names)
-# 
-# # Simulated patches occurring in >= 95% of replicates
-# sim_patches = occ_patches_sim_2013 %>%
-#   dplyr::mutate(Simulated = TRUE)
-# 
-# # Validation patches
-# real_patches = occ_patches2013 %>%
-#   dplyr::select(patch_id) %>%
-#   dplyr::distinct() %>%
-#   dplyr::mutate(Validation = TRUE)
-# 
-# # Compare visually the two lists
-# patch_comparison = sim_patches %>%
-#   dplyr::full_join(
-#     real_patches,
-#     by = "patch_id"
-#   ) %>%
-#   dplyr::mutate(
-#     Simulated = dplyr::coalesce(Simulated, FALSE),
-#     Validation = dplyr::coalesce(Validation, FALSE),
-#     Common = Simulated & Validation
-#   )
-# patch_comparison %>% dplyr::filter(Common == FALSE)
-# 
-# # Patches occupied in 2013 but not according to simulations
-# missing_patches_2013 = real_patches %>%
-#   dplyr::anti_join(
-#     sim_patches,
-#     by = "patch_id"
-#   )
-# 
-# # Percentage of missing patches
-# percent_missing_patches_2013 = nrow(missing_patches_2013) / nrow(real_patches)
-# percent_missing_patches_2013 # Print the result
-# # Note: these are the patches occupied in 2013 only
+#### Best fit ----
+## Add occupancy indicators
+fit_score_pop_occ = fit_score_t1t2t3 %>% 
+  dplyr::left_join(
+    prop_missing_2013 %>% 
+      dplyr::select(
+        dplyr::all_of(params_tested),
+        prop_missing_2013
+        ),
+    by = c(params_tested)
+  ) %>% 
+  dplyr::left_join(
+    prop_missing_2022 %>% 
+      dplyr::select(
+        dplyr::all_of(params_tested),
+        prop_missing_2022
+        ),
+    by = c(params_tested)
+  )
 
+## Rank the simulations 
+fit_score_pop_occ = fit_score_pop_occ %>%  # Choose between 2005-2013 fit or 2005-2013-2022 fit
+  dplyr::mutate(
+    rank_RMSE = dplyr::min_rank(RMSE),
+    rank_prop_missing_2013 = dplyr::min_rank(prop_missing_2013),
+    rank_prop_missing_2022 = dplyr::min_rank(prop_missing_2022),
+    rank_total = rank_RMSE + rank_prop_missing_2013 + rank_prop_missing_2022
+  )
+
+# Best combinations ordered
+fit_score_pop_occ %>% 
+  dplyr::arrange(rank_total) %>%
+  dplyr::select(
+    dplyr::all_of(params_tested),
+    N0,
+    N8,
+    N17,
+    rank_RMSE,
+    rank_prop_missing_2013,
+    rank_prop_missing_2022,
+    rank_total
+  ) %>% 
+  dplyr::slice_min(n=5, order_by = rank_total)
+
+# Extract best fit and values
+best_fit = fit_score_pop_occ %>%
+  dplyr::arrange(rank_total) %>%
+  dplyr::slice(2) # Select with slice(X) the row to keep
+best_values = best_fit %>%
+  dplyr::select(dplyr::all_of(params_tested))
+
+#### Map of patch occupancy -----
+# Vectorize raster patches
+patch_v = terra::as.polygons(patch)
+patch_sf = sf::st_as_sf(patch_v) %>% 
+  dplyr::rename(PatchID = id) %>% 
+  dplyr::filter(PatchID != 0)  # Remove matrix
+
+# Mean population size by patch/year across replicates
+pop_patch = pop_all_complete %>%
+  dplyr::semi_join(best_values,
+                   by = params_tested) %>% # We select the best combination of parameters
+  dplyr::filter(Year != max(Year, na.rm = TRUE), # Remove the last year
+                PatchID != 0) %>% # Remove the matrix 
+  dplyr::group_by(PatchID,
+                  Year) %>%
+  dplyr::summarise(MeanNInd = mean(NInd), # N Adults (Stage 1 + Stage 2)
+                   MeanNJuvs = mean(NJuvs), # N Juveniles
+                   MeanNTot = mean(NInd+NJuvs), # Total population
+                   .groups = "drop")
+dplyr::glimpse(pop_patch)
+
+# Complete missing patch/year combinations
+# i.e., some patches have NAs because in the original Pop files, they are discarded if they never have populations
+pop_patch = pop_patch %>% 
+  tidyr::complete(
+    PatchID = patch_sf$PatchID,
+    Year,
+    fill = list(
+      MeanNInd = 0,
+      MeanNJuvs = 0,
+      MeanNTot = 0
+    )
+  )
+# Check -> all patches should have the same number of years (i.e., years of simulations)
+pop_patch %>% 
+  dplyr::group_by(PatchID) %>% 
+  dplyr::summarise(n_rep = dplyr::n_distinct(Year))
+
+# Join population size to spatial patches
+patch_sf_pop = patch_sf %>% 
+  dplyr::left_join(
+    pop_patch,
+    by = "PatchID"
+  )
+
+### Map of occupancy at selected years
+years_to_plot = c(0, 8, 17, 95)
+
+patch_sf_occupancy = patch_sf_pop %>% 
+  dplyr::filter(Year %in% years_to_plot) %>% 
+  dplyr::mutate(
+    Occupancy = dplyr::if_else(
+      MeanNTot > 0,
+      "Occupied",
+      "Unoccupied"
+    )
+  )
+
+### Create maps
+# Creating a background
+coltb = data.frame(value=1:6, 
+                   col=c(
+                     "#FFFFB2",
+                     "#32a65e",
+                     "chartreuse",
+                     "darkgreen",
+                     "#0000FF",
+                     "#d4271e"
+                   ))
+landsc_factor = terra::as.factor(landsc)
+terra::coltab(landsc_factor) = coltb
+terra::has.colors(landsc_factor)
+
+## 2005
+# Patches
+patches_0 = patch_sf_pop %>% 
+  dplyr::filter(Year == 0)
+map2005 = ggplot() +
+  tidyterra::geom_spatraster(
+    data = landsc_factor,
+    use_coltab = TRUE,
+    show.legend = FALSE
+  ) +
+  # Occupied patches
+  geom_sf(
+    data = patches_0 %>% 
+      dplyr::filter(MeanNTot > 0),
+    fill = "#FF7B00",
+    colour = NA
+  ) +
+  # Regions
+  geom_sf(
+    data = regions,
+    shape = 23,
+    size = 1,
+    fill = "#E7FF00",
+    colour = "black",
+    stroke = 0.1
+  ) +
+  ggtitle("2005") +
+  theme_void()
+
+## 2013
+# Patches
+patches_8 = patch_sf_pop %>% 
+  dplyr::filter(Year == 8)
+map2013 = ggplot() +
+  tidyterra::geom_spatraster(
+    data = landsc_factor,
+    use_coltab = TRUE,
+    show.legend = FALSE
+  ) +
+  # Occupied patches
+  geom_sf(
+    data = patches_8 %>% 
+      dplyr::filter(MeanNTot > 0),
+    fill = "#FF7B00",
+    colour = NA
+  ) +
+  geom_sf(
+    data = glt_census %>% 
+      dplyr::filter(Detect2013 == "N"),
+    fill = NA,
+    colour = "black",
+    linewidth = 0.5
+  ) +
+  geom_sf(
+    data = glt_census %>% 
+      dplyr::filter(Detect2013 == "P"),
+    fill = NA,
+    colour = "#0CD6E8",
+    linewidth = 0.5
+  ) +
+  # Regions
+  geom_sf(
+    data = regions,
+    shape = 23,
+    size = 1,
+    fill = "#E7FF00",
+    colour = "black",
+    stroke = 0.1
+  ) +
+  ggtitle("2013") +
+  theme_void()
+
+## 2022
+# Patches
+patches_17 = patch_sf_pop %>% 
+  dplyr::filter(Year == 17)
+map2022 = ggplot() +
+  tidyterra::geom_spatraster(
+    data = landsc_factor,
+    use_coltab = TRUE,
+    show.legend = FALSE
+  ) +
+  # Occupied patches
+  geom_sf(
+    data = patches_17 %>% 
+      dplyr::filter(MeanNTot > 0),
+    fill = "#FF7B00",
+    colour = NA
+  ) +
+  geom_sf(
+    data = glt_census %>% 
+      dplyr::filter(Detect2022 == "N"),
+    fill = NA,
+    colour = "black",
+    linewidth = 0.5
+  ) +
+  geom_sf(
+    data = glt_census %>% 
+      dplyr::filter(Detect2022 == "P"),
+    fill = NA,
+    colour = "#0CD6E8",
+    linewidth = 0.5
+  ) +
+  # Regions
+  geom_sf(
+    data = regions,
+    shape = 23,
+    size = 1,
+    fill = "#E7FF00",
+    colour = "black",
+    stroke = 0.1
+  ) +
+  ggtitle("2022") +
+  theme_void()
+
+## 2100
+# Patches
+patches_95 = patch_sf_pop %>% 
+  dplyr::filter(Year == 95)
+map2100 = ggplot() +
+  tidyterra::geom_spatraster(
+    data = landsc_factor,
+    use_coltab = TRUE,
+    show.legend = FALSE
+  ) +
+  # Occupied patches
+  geom_sf(
+    data = patches_95 %>% 
+      dplyr::filter(MeanNTot > 0),
+    fill = "#FF7B00",
+    colour = NA
+  ) +
+  # Regions
+  geom_sf(
+    data = regions,
+    shape = 23,
+    size = 1,
+    fill = "#E7FF00",
+    colour = "black",
+    stroke = 0.1
+  ) +
+  ggtitle("2100") +
+  theme_void()
+
+### Combine the four maps
+maps_combined = map2005 + map2013 + map2022 + map2100 +
+  plot_layout(ncol = 2, nrow = 2, widths = c(1, 1))
+
+## Reduce space taken by titles
+maps_combined = maps_combined &
+  theme(
+    plot.title = element_text(
+      size = 12,
+      hjust = 0.5,
+      margin = margin(b = 2)
+    ),
+    plot.margin = margin(2, 2, 2, 2)
+  )
+
+## Export plot
+png(here("data",
+         "rangeshifter",
+         "tests",
+         test_config$test_name,
+         "plot",
+         "map_occ_patches.png"),
+    width = 2400, height = 1800, res = 300, type="cairo")
+maps_combined
+dev.off()
 
 #### Patch abundance -----
 # We count population by patch using the right parameters
-
-# Population by patch
-pop_patch = pop_all %>%
-  dplyr::semi_join(
-    best_values, # using the optimal parameter combination
-    by = params_tested
-  ) %>%
-  dplyr::group_by(PatchID, 
-                  Year) %>% # Add parameters here (depending on how many are tested)
-  dplyr::summarise(MeanN = mean(NInd),
-                   MeanN_Juvs = mean(NJuvs),
-                   MeanN_Tot = mean(NInd+NJuvs),
+pop_patch = pop_all_complete %>%
+  dplyr::semi_join(best_values,
+                   by = params_tested) %>% # We select the best combination of parameters
+  dplyr::filter(Year != max(Year, na.rm = TRUE), # Remove the last year
+                PatchID != 0) %>% # Remove the matrix 
+  dplyr::group_by(PatchID,
+                  Year) %>%
+  dplyr::summarise(MeanNInd = mean(NInd), # N Adults (Stage 1 + Stage 2)
+                   MeanNJuvs = mean(NJuvs), # N Juveniles
+                   MeanNTot = mean(NInd+NJuvs), # Total population
                    .groups = "drop")
-# First lines
-head(pop_patch)
+dplyr::glimpse(pop_patch)
+
+# Complete missing patch/year combinations
+# i.e., some patches have NAs because in the original Pop files, they are discarded if they never have populations
+pop_patch = pop_patch %>% 
+  tidyr::complete(
+    PatchID = patch_sf$PatchID,
+    Year,
+    fill = list(
+      MeanNInd = 0,
+      MeanNJuvs = 0,
+      MeanNTot = 0
+    )
+  )
 
 ## Join patch name
 # names of the patches used for simulations (until "test_patch_cut_1")
@@ -1146,14 +1451,14 @@ patch_list = c("Vendaval",
                "Pirineus_114")
 
 # Only keep patches with known abundance
-pop_patch = pop_patch %>% 
+pop_patch_select = pop_patch %>% 
   dplyr::left_join(patch_corres_id, by=c("PatchID" = "cut_patch_id")) %>% # Update patch id variable here (integer id)
   dplyr::rename(patch_id = uncut_patch_name) %>% 
   dplyr::filter(!is.na(patch_id)) %>% # Patch name variable here
   dplyr::filter(patch_id %in% patch_list) # Patch name variable here
 
 ### Compare with patch abundance over time
-sim_sel = pop_patch %>%
+sim_sel = pop_patch_select %>%
   dplyr::filter(
     Year %in% c(0, 8, 13, 17) # Years of interest
   )
@@ -1172,9 +1477,9 @@ sim_sel = sim_sel %>%
 sim_frag = sim_sel %>%
   dplyr::group_by(FragName, Year) %>%
   dplyr::summarise(
-    SimN_Ad = sum(MeanN),
-    SimN_Juv = sum(MeanN_Juvs),
-    SimN_Tot = sum(MeanN_Tot),
+    SimN_Ad = sum(MeanNInd),
+    SimN_Juv = sum(MeanNJuvs),
+    SimN_Tot = sum(MeanNTot),
     .groups = "drop"
   )
 
@@ -1290,7 +1595,7 @@ patch_summary = comparison %>%
     names_glue = "{.value}_{FragName}_{Year}"
   ) %>%
   dplyr::rename_with(
-    ~ stringr::str_replace(.x, "^SimN_", "Pop_")
+    ~ stringr::str_replace(.x, "^SimN_Tot_", "Pop_")
   )
 
 

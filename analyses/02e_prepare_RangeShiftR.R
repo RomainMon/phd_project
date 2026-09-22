@@ -30,11 +30,7 @@ names(rasters_rshifter) = years
 plot(rasters_rshifter[['2024']], col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e", "purple","orange"))
 
 #### GLT distribution ----
-# 2013-2018
-glt_2013_2018 = sf::st_read(here("data", "glt", "JDietz", "glt_distrib_2013_2018.shp"))
-plot(glt_2013_2018)
-crs(glt_2013_2018)
-# 2023
+# 2022
 glt_2022 = sf::st_read(here("data", "glt", "JDietz", "glt_distrib_2013_2018_2022.shp"))
 plot(glt_2022)
 crs(glt_2022)
