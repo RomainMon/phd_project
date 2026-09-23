@@ -14,10 +14,10 @@ library(sf)
 ### Import datasets -----
 
 # GLT data
-load(here("data", "glt", "APonchon", "data_clean_long_final.RData"))
+load(here::here("data", "glt", "APonchon", "data_clean_long_final.RData"))
 
 # Group locations
-regions = sf::st_read(here("data", "geo", "APonchon", "GLT", "RegionsName.shp"))
+regions = sf::st_read(here::here("data", "geo", "APonchon", "GLT", "RegionsName.shp"))
 regions_csv = readr::read_csv2(
   here::here("data", "geo", "APonchon", "GLT", "RegionsName.csv"),
   locale = readr::locale(encoding = "ISO-8859-1"),
@@ -25,10 +25,10 @@ regions_csv = readr::read_csv2(
 )
 
 # LULC
-raster_lulc_2024 = terra::rast(here("outputs", "data", "MapBiomas", "Rasters_reclass", "raster_reclass_2024.tif"))
+raster_lulc_2024 = terra::rast(here::here("outputs", "data", "MapBiomas", "Rasters_reclass", "raster_reclass_2024.tif"))
 
 # Corridors
-base_path = here("outputs", "data", "corridor")
+base_path = here::here("outputs", "data", "corridor")
 vect_files = list.files(base_path, pattern = "\\.gpkg$", full.names = TRUE)
 
 # Extract years
@@ -46,7 +46,7 @@ for (i in seq_along(corridors)) {
 names(corridors) = vector_df$year # Name by year
 
 # Patches
-base_path = here("outputs", "data", "patches_rshifter")
+base_path = here::here("outputs", "data", "patches_rshifter")
 vect_files = list.files(base_path, pattern = "\\.gpkg$", full.names = TRUE)
 
 # Extract years
