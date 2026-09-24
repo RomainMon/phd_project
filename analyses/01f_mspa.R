@@ -15,7 +15,7 @@ library(raster)
 library(sf)
 
 ### Import data -------
-## Rasters
+#### Rasters reclassified -----
 base_path = here("outputs", "data", "MapBiomas", "Rasters_reclass")
 raster_files = list.files(base_path, pattern = "\\.tif$", full.names = TRUE)
 
@@ -32,8 +32,64 @@ for (i in seq_along(rasters)) {
   cat("Year", years[i], " → raster name:", basename(raster_df$file[i]), "\n")
 }
 
-## Vectors
+#### PLUS simulated raters -----
+base_path = here("outputs", "data", "PLUS", "ca_simul")
+raster_files = list.files(base_path, pattern = "\\.tif$", full.names = TRUE)
+
+# Extract years
+years_plus = stringr::str_extract(basename(raster_files), "(?<!\\d)\\d{4}(?!\\d)")
+# Create a dataframe to link files and years
+raster_df = data.frame(file = raster_files, years_plus = as.numeric(years_plus)) %>%
+  dplyr::arrange(years_plus)
+# Load rasters in chronological order
+rasters_plus = lapply(raster_df$file, terra::rast)
+years_plus = raster_df$years_plus
+# Check
+for (i in seq_along(rasters_plus)) {
+  cat("Year", years_plus[i], " → raster name:", basename(raster_df$file[i]), "\n")
+}
+# Remove the first PLUS raster (2024) and year
+names(rasters_plus) = years_plus
+rasters_plus = rasters_plus[names(rasters_plus) != "2024"]
+years_plus = years_plus[years_plus != 2024]
+
+# Reproject PLUS rasters to EPSG 31983
+rasters_plus = lapply(seq_along(rasters_plus), function(i) {
+  terra::project(rasters_plus[[i]], "EPSG:31983")
+})
+crs(rasters[[1]])
+crs(rasters_plus[[1]])
+
+# Align PLUS rasters on the others
+template = rasters[[1]]
+rasters_plus = lapply(rasters_plus, function(r) {
+  terra::resample(
+    r,
+    template,
+    method = "near"
+  )
+})
+# Compare
+terra::compareGeom(
+  rasters[[1]],
+  rasters_plus[[1]],
+  stopOnError = FALSE
+)
+
+#### Plantios -----
 plantios = vect(here("data", "geo", "AMLD", "plantios", "work", "plantios_clean.shp"))
+
+### Merge rasters --------
+# We combine past and future landscapes altogether
+rasters_all = c(rasters, rasters_plus)
+years_all = c(years, years_plus)
+names(rasters_all) = years_all
+
+# Convert to integer/categorical values
+rasters_all = lapply(
+  rasters_all,
+  terra::as.int
+)
 
 ### MSPA with GuidosToolBox --------
 
@@ -65,16 +121,23 @@ reclass_small_patches = function(r, min_area_ha) {
 }
 
 ## Apply to all rasters
-rasters_large_patches = lapply(seq_along(rasters), function(i) {
-  message("Processing raster for year: ", years[i])
-  reclass_small_patches(rasters[[i]], min_area_ha = 10)
+# Rasters reclassified
+rasters_large_patches = lapply(seq_along(rasters_all), function(i) {
+  message("Processing raster for year: ", years_all[i])
+  reclass_small_patches(rasters_all[[i]], min_area_ha = 10)
 })
 
+# Convert to integer/categorical values
+rasters_large_patches = lapply(
+  rasters_large_patches,
+  terra::as.int
+)
+
 # Quick check
-plot(rasters[[36]], col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e"))
-plot(rasters_large_patches[[36]], col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e", "magenta")) # Look carefully: tiny patches are reclassified!
-freq(rasters[[36]])
-freq(rasters_large_patches[[36]])
+plot(rasters_all[[39]], col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e"))
+plot(rasters_large_patches[[39]], col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e", "magenta")) # Look carefully: tiny patches are reclassified!
+freq(rasters_all[[39]])
+freq(rasters_large_patches[[39]])
 
 #### Reclass for MSPA ----
 # -> GTB requires a 8-byte type formatted input mask (.tif) with 0 = missing data, 1 = background, 2 = habitat
@@ -99,7 +162,7 @@ reclass_for_mspa <- function(xx) {
 
 ## Apply to all rasters
 rasters_for_mspa <- lapply(rasters_large_patches, reclass_for_mspa)
-plot(rasters_for_mspa[[36]], col=c("white", "grey", "#32a65e"))
+plot(rasters_for_mspa[[39]], col=c("white", "grey", "#32a65e"))
 
 #### Export all reclassed rasters ----
 # Define output folder
@@ -107,7 +170,7 @@ out_dir_preMSPA = here("outputs", "data", "MapBiomas", "MSPA", "preMSPA")
 
 # Export loop
 for(i in seq_along(rasters_for_mspa)) {
-  year <- years[i]
+  year <- years_all[i]
   r_mspa <- rasters_for_mspa[[i]]
   
   out_file <- file.path(out_dir_preMSPA, paste0("raster_for_mspa_", year, ".tif"))
@@ -175,7 +238,6 @@ for (i in seq_along(mspa_df$file)) {
 }
 
 
-
 ##### Mask MapBiomas rasters with MSPA --------
 # -> Here, we mask MapBiomas rasters with the outcome of the MSPA analysis in GuidosToolBox
 # (i) We reclass cells as corridors (value = 33)
@@ -208,12 +270,14 @@ mask_with_mspa = function(landuse, mspa) {
 }
 
 ## Apply to all rasters
-rasters_reclass_w_mspa = map2(rasters, rasters_mspa, mask_with_mspa)
+rasters_reclass_w_mspa = map2(rasters_all, # Name of raster files to mask
+                              rasters_mspa, # MSPA rasters
+                              mask_with_mspa)
 
 # Quick check
-plot(rasters_reclass_w_mspa[[36]], col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e", "orange"))
-freq(rasters[[36]])
-freq(rasters_reclass_w_mspa[[36]])
+plot(rasters_reclass_w_mspa[[39]], col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e", "orange"))
+freq(rasters_all[[39]])
+freq(rasters_reclass_w_mspa[[39]])
 
 #### Add corridors unmarked as corridors by MSPA -----
 # -> Here, we overlay plantios on MSPA rasters and assign value 33 where there is an intersection with the plantio ("Corredor") AND the raster year is equal or after date_refor
@@ -253,6 +317,8 @@ rasters_reclass_w_mspa2 = purrr::map2(rasters_reclass_w_mspa, mspa_years, functi
 # Count
 freq(rasters_reclass_w_mspa[[36]])
 freq(rasters_reclass_w_mspa2[[36]])
+freq(rasters_reclass_w_mspa[[39]])
+freq(rasters_reclass_w_mspa2[[39]])
 
 # Visual check
 year_to_check = 2024
@@ -275,7 +341,6 @@ plot(plantios_selected, border = "black", add = TRUE)
 #### Export MSPA final rasters -----
 # Last check
 freq(rasters[[36]]) # The frequency of all land use classes before any reclassification
-freq(rasters_large_patches[[36]]) # The frequency of forest (large patches) (1) and forest (small patches) (999)
 freq(rasters_reclass_w_mspa2[[36]]) # The frequency of all land use classes and of forest corridors (33)
 
 # Export

@@ -1470,7 +1470,7 @@ pop_patch_select = pop_patch %>%
   dplyr::filter(patch_id %in% patch_list)
 head(pop_patch_select)
 
-### Compare with patch abundance over time
+# Keep years of interest
 sim_sel = pop_patch_select %>%
   dplyr::filter(
     Year %in% c(0, 8, 13, 17) # Years of interest
@@ -1537,10 +1537,12 @@ cor(comparison$SimN_Tot, comparison$RealN)
 
 # Smallest differences
 comparison %>% 
+  dplyr::select(FragName, Year, SimN_Tot, RealN, RMSE) %>% 
   dplyr::arrange(RMSE)
 
 # Largest differences
 comparison %>% 
+  dplyr::select(FragName, Year, SimN_Tot, RealN, RMSE) %>% 
   dplyr::arrange(dplyr::desc(RMSE))
 
 # Mean difference
@@ -1700,55 +1702,76 @@ connec_all = connec_all %>%
   dplyr::left_join(metadata, by = "Id_simul")
 
 ##### Among cut patches ------
-### Dispersal across years
-data.disp = connec_all %>%
-  
-  dplyr::filter(StartPatch != "-999", # Remove the total number of successful immigrants into a patch
-                EndPatch != "-999")  %>% # Remove the total number of successful emigrants into a patch 
+## Plot the lines at the scale of cut patches
 
+# Select time periods
+periods = data.frame(
+  Period = c("Year 0-8", "Year 8-17", "Year 17-95"),
+  Year_min = c(0, 8, 17),
+  Year_max = c(8, 17, 96)
+)
+
+
+## Select the dataset
+data.disp.cut = connec_all %>% 
+  dplyr::filter(
+    StartPatch != "-999", # Remove the total number of successful immigrants into a patch
+    EndPatch != "-999" # Remove the total number of successful emigrants into a patch
+  )
+
+
+## Assign each year to a period
+data.disp.cut = data.disp.cut %>%
+  dplyr::mutate(
+    Period = dplyr::case_when(
+      Year >= 0  & Year <= 8  ~ "Year 0-8",
+      Year > 8  & Year <= 17 ~ "Year 8-17",
+      Year > 17 & Year < 96  ~ "Year 17-95",
+      TRUE ~ NA_character_
+    )
+  ) %>%
+  dplyr::filter(!is.na(Period))
+
+
+## Aggregate dispersal across years within each period
+data.disp.cut = data.disp.cut %>%
   dplyr::group_by(
     Id_simul,
+    Period,
     StartPatch,
     EndPatch
   ) %>%
-  
   dplyr::summarise(
-    Ninds = sum(Ninds),
+    Ninds = sum(Ninds, na.rm = TRUE),
     .groups = "drop"
   )
 
-### WARNING: duplicated pairs of patches (e.g., movement from 1 to 2 AND from 2 to 1)
-# -> we aggregate first
-data.disp.agg = data.disp %>% 
-  
-  # Create an undirected patch pair
+
+## WARNING: duplicated pairs of patches
+## e.g. movement from 1 -> 2 AND 2 -> 1
+data.disp.cut = data.disp.cut %>%
+  dplyr::filter(StartPatch != EndPatch) %>% ## Remove intra-patch dispersal
   dplyr::mutate(
     Patch1 = pmin(StartPatch, EndPatch),
     Patch2 = pmax(StartPatch, EndPatch),
     Pair = paste0(Patch1, "_", Patch2)
-  ) %>% 
-  
-  # Aggregate both directions
-  # e.g. 1 -> 2 + 2 -> 1
+  ) %>%
   dplyr::group_by(
     Id_simul,
+    Period,
+    Patch1,
+    Patch2,
     Pair
   ) %>%
   dplyr::summarise(
-    Ninds = sum(Ninds),
-    # Keep other columns
-    dplyr::across(
-      dplyr::everything(),
-      ~ dplyr::first(.x)
-    ),
+    Ninds = sum(Ninds, na.rm = TRUE),
     .groups = "drop"
-  ) %>% 
-  
-  dplyr::select(-c(StartPatch, EndPatch))
+  )
 
 
 ### Join coordinates
-# Centroids of patches (CUT)
+
+# Centroids of CUT patches
 patch_pts = patch_sf %>%
   sf::st_centroid() %>%
   dplyr::select(PatchID) %>%
@@ -1758,9 +1781,9 @@ patch_pts = patch_sf %>%
   ) %>%
   sf::st_drop_geometry()
 
-# Join coordinates
-data.disp.agg = data.disp.agg %>% 
-  # coordinates of origin
+
+# Coordinates of origin
+data.disp.cut = data.disp.cut %>% 
   dplyr::left_join(
     patch_pts %>%
       dplyr::rename(
@@ -1771,7 +1794,7 @@ data.disp.agg = data.disp.agg %>%
     by = "Patch1"
   ) %>%
   
-  # coordinates of destination
+  # Coordinates of destination
   dplyr::left_join(
     patch_pts %>%
       dplyr::rename(
@@ -1782,32 +1805,41 @@ data.disp.agg = data.disp.agg %>%
     by = "Patch2"
   )
 
-# Create origins and destination objects
-data.disp.from = data.disp.agg %>%
+
+### Create origins and destination objects
+
+data.disp.cut.from = data.disp.cut %>%
   dplyr::select(-c(Long_to, Lat_to)) %>%
   dplyr::rename(
     Long = Long_from,
     Lat = Lat_from
   )
-data.disp.to = data.disp.agg %>%
+
+data.disp.cut.to = data.disp.cut %>%
   dplyr::select(-c(Long_from, Lat_from)) %>%
   dplyr::rename(
     Long = Long_to,
     Lat = Lat_to
   )
 
-### To lines
-# Create LINESTRING geometries
-disp.lines = rbind(data.disp.from, data.disp.to) # We duplicate rows to create dispersal lines
-disp.lines = disp.lines %>% 
+
+### Create LINESTRING geometries
+
+disp.lines.cut = rbind(
+  data.disp.cut.from,
+  data.disp.cut.to
+)
+
+disp.lines.cut = disp.lines.cut %>% 
   sf::st_as_sf(
     coords = c("Long", "Lat"),
     na.fail = FALSE,
     crs = sf::st_crs(patch_sf)
-    ) %>%
+  ) %>%
   dplyr::group_by(
     Id_simul,
-    Pair
+    Pair,
+    Period
   ) %>%
   dplyr::summarise(
     Ninds = dplyr::first(Ninds),
@@ -1815,48 +1847,178 @@ disp.lines = disp.lines %>%
   ) %>%
   sf::st_cast("LINESTRING")
 
-# Plot the lines
-ggplot2::ggplot() +
+## MAPS
+# 2005-2013
+map_disp_cut_2005_2013 = ggplot2::ggplot() +
   
-  # Landscape background
+  # Landscape
   tidyterra::geom_spatraster(
     data = landsc_factor,
     use_coltab = TRUE,
     show.legend = FALSE
   ) +
   
+  # # Patches
+  # ggplot2::geom_sf(
+  #   data = patch_sf,
+  #   ggplot2::aes(fill = factor(PatchID)),
+  #   colour = "black",
+  #   linewidth = 0.01,
+  #   alpha = 0.5,
+  #   show.legend = FALSE
+  # ) +
+  # 
   # Simulated connectivity
   ggplot2::geom_sf(
-    data = disp.lines,
+    data = disp.lines.cut %>% 
+      dplyr::filter(
+        Id_simul == 1,
+        Period == "Year 0-8"
+      ),
     ggplot2::aes(linewidth = Ninds),
     colour = "deeppink",
     alpha = 0.8
   ) +
   
-  # Observed dispersal
-  ggplot2::geom_sf(
-    data = glt_disp,
-    colour = "orange",
-    linewidth = 0.3,
-    alpha = 0.9
-  ) +
+  # # Observed dispersal
+  # ggplot2::geom_sf(
+  #   data = glt_disp,
+  #   colour = "orange",
+  #   linewidth = 0.2,
+  #   alpha = 0.9
+  # ) +
   
-  # One panel per simulation
-  ggplot2::facet_wrap(~Id_simul) +
-  
-  # Width of simulated lines
   ggplot2::scale_linewidth_continuous(
     trans = "log1p",
-    range = c(0.05, 0.7),
+    range = c(0.01, 0.5),
     name = "Number of dispersers"
   ) +
   
-  ggplot2::theme_void() +
+  ggplot2::ggtitle("Dispersal flux (2005-2013)") +
   
+  ggplot2::theme_void() +
   ggplot2::theme(
-    strip.text = ggplot2::element_text(face = "bold"),
-    legend.position = "right"
+    legend.position = "none"
   )
+
+
+# 2013-2022
+map_disp_cut_2013_2022 = ggplot2::ggplot() +
+  
+  # Landscape
+  tidyterra::geom_spatraster(
+    data = landsc_factor,
+    use_coltab = TRUE,
+    show.legend = FALSE
+  ) +
+  # 
+  # # Patches
+  # ggplot2::geom_sf(
+  #   data = patch_sf,
+  #   ggplot2::aes(fill = factor(PatchID)),
+  #   colour = "black",
+  #   linewidth = 0.01,
+  #   alpha = 0.5,
+  #   show.legend = FALSE
+  # ) +
+  
+  ggplot2::geom_sf(
+    data = disp.lines.cut %>% 
+      dplyr::filter(
+        Id_simul == 1,
+        Period == "Year 8-17"
+      ),
+    ggplot2::aes(linewidth = Ninds),
+    colour = "deeppink",
+    alpha = 0.8
+  ) +
+  
+  # ggplot2::geom_sf(
+  #   data = glt_disp,
+  #   colour = "orange",
+  #   linewidth = 0.2,
+  #   alpha = 0.9
+  # ) +
+  
+  ggplot2::scale_linewidth_continuous(
+    trans = "log1p",
+    range = c(0.01, 0.5),
+    name = "Number of dispersers"
+  ) +
+  
+  ggplot2::ggtitle("Dispersal flux (2013-2022)") +
+  
+  ggplot2::theme_void() +
+  ggplot2::theme(
+    legend.position = "none"
+  )
+
+
+# 2022-2100
+map_disp_cut_2022_2100 = ggplot2::ggplot() +
+  
+  # Landscape
+  tidyterra::geom_spatraster(
+    data = landsc_factor,
+    use_coltab = TRUE,
+    show.legend = FALSE
+  ) +
+  
+  # # Patches
+  # ggplot2::geom_sf(
+  #   data = patch_sf,
+  #   ggplot2::aes(fill = factor(PatchID)),
+  #   colour = "black",
+  #   linewidth = 0.01,
+  #   alpha = 0.5,
+  #   show.legend = FALSE
+  # ) +
+  
+  ggplot2::geom_sf(
+    data = disp.lines.cut %>% 
+      dplyr::filter(
+        Id_simul == 1,
+        Period == "Year 17-95"
+      ),
+    ggplot2::aes(linewidth = Ninds),
+    colour = "deeppink",
+    alpha = 0.8
+  ) +
+  
+  # ggplot2::geom_sf(
+  #   data = glt_disp,
+  #   colour = "orange",
+  #   linewidth = 0.2,
+  #   alpha = 0.9
+  # ) +
+  # 
+  ggplot2::scale_linewidth_continuous(
+    trans = "log1p",
+    range = c(0.01, 0.5),
+    name = "Number of dispersers"
+  ) +
+  
+  ggplot2::ggtitle("Dispersal flux (2022-2100)") +
+  
+  ggplot2::theme_void() +
+  ggplot2::theme(
+    legend.position = "none"
+  )
+
+### Combine the maps
+maps_combined_disp = map_disp_cut_2005_2013 + map_disp_cut_2013_2022 + map_disp_cut_2022_2100 +
+  patchwork::plot_layout(ncol = 2, nrow = 2, widths = c(1, 1))
+
+## Export plot
+png(here::here("data",
+               "rangeshifter",
+               "tests",
+               test_config$test_name,
+               "plot",
+               "map_disp_cut_patches.png"),
+    width = 2400, height = 1800, res = 300, type="cairo")
+maps_combined_disp
+dev.off()
 
 ##### Among uncut patches ------
 ## Plot the lines at the scale of "real" patches (e.g., UMMPs)

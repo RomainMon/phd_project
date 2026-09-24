@@ -198,6 +198,12 @@ plot(
     "#32a65e", "#ad975a", "#519799","#FFFFB2", "#0000FF", "#d4271e","purple","orange"
   )
 )
+plot(
+  rasters_mspa_alt[[39]],
+  col = c(
+    "#32a65e", "#ad975a", "#519799","#FFFFB2", "#0000FF", "#d4271e","purple","orange"
+  )
+)
 
 #### Overlay linear features -----
 # Here, we overlay vector linear features to the rasters using a buffer width and assign the intersected cells a new numeric value
@@ -238,7 +244,7 @@ rasters_lf = purrr::map2(rasters_mspa_alt, years, function(r, yr) {
 
 # Check
 plot(
-  rasters_lf[[36]],
+  rasters_lf[[39]],
   col = c(
     "#32a65e", "#ad975a", "#519799","#FFFFB2", "#0000FF", "#d4271e","purple","orange"
   )
@@ -495,9 +501,7 @@ plot(
   border = "grey20",
   lwd = 0.3,
   reset = FALSE,
-  add= TRUE,
-  main = "Forest patches after UMMP clipping"
-)
+  add= TRUE)
 
 
 # Select columns
@@ -630,6 +634,7 @@ patches_names = purrr::map(
 
 ## Checks
 # Check how many times a given name appears
+# should be the number of years
 purrr::map2_dfr(
   patches_names,
   years,
@@ -733,13 +738,14 @@ table(
 
 #### Clip patches with the watershed -------
 # Here, we clip the northern patch (Pirineus) which is continuous but only occupied in its southern range (in the RJ watershed)
-# Select Pirineus using the area
-patches_2005 = patches_names_good[[17]]
 
+# Select an example
+patches_2005 = patches_names_good[[17]]
+# Select Pirineus using the area
 pirineus = patches_2005 %>%
   dplyr::mutate(area = sf::st_area(geometry)) %>%
   dplyr::slice_max(area, n = 1, with_ties = FALSE)
-
+# Plot
 plot(sf::st_geometry(patches_2005))
 plot(sf::st_geometry(pirineus), add = TRUE, col = "red")
 plot(sf::st_geometry(watershed_sf), add = TRUE, border = "blue", lwd = 2)
@@ -833,7 +839,7 @@ plot(sf::st_geometry(watershed_sf), add = TRUE, border = "blue", lwd = 2)
 # We select one river to cut Aldeia I into several patches
 rio_quarteis = rivers_sf %>% 
   dplyr::filter(NOME == "Rio Quartéis")
-plot(rio_quarteis)
+plot(sf::st_geometry(rio_quarteis))
 
 # Cut the largest Aldeia_I patch with a river
 # Preserve the original ID for the southernmost piece

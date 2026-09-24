@@ -1,6 +1,6 @@
 #------------------------------------------------#
 # Author: Romain Monassier
-# Objective: LULC data preparation for simulation
+# Objective: LULC data preparation for simulation in PLUS software
 #------------------------------------------------#
 
 ### Load packages ------
@@ -9,7 +9,6 @@ library(here)
 library(ggplot2)
 library(raster)
 library(terra)
-library(lulcc)
 library(landscapemetrics)
 
 ### Import rasters -------
