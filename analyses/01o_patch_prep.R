@@ -41,16 +41,16 @@ base_path = here("outputs", "data", "MapBiomas", "MSPA", "reclass_w_mspa")
 raster_files = list.files(base_path, pattern = "\\.tif$", full.names = TRUE)
 
 # Extract years
-years = stringr::str_extract(basename(raster_files), "(?<!\\d)\\d{4}(?!\\d)")
+years_all = stringr::str_extract(basename(raster_files), "(?<!\\d)\\d{4}(?!\\d)")
 # Create a dataframe to link files and years
-raster_df = data.frame(file = raster_files, year = as.numeric(years)) %>%
-  dplyr::arrange(year)
+raster_df = data.frame(file = raster_files, years_all = as.numeric(years_all)) %>%
+  dplyr::arrange(years_all)
 # Load rasters in chronological order
 rasters_mspa = lapply(raster_df$file, terra::rast)
-years = raster_df$year
+years_all = raster_df$years_all
 # Check
 for (i in seq_along(rasters_mspa)) {
-  cat("Year", years[i], " → raster name:", basename(raster_df$file[i]), "\n")
+  cat("Year", years_all[i], " → raster name:", basename(raster_df$file[i]), "\n")
 }
 plot(rasters_mspa[[36]], col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e", "orange"))
 
@@ -113,48 +113,6 @@ watershed_sf = sf::st_as_sf(watershed)
 plot(rasters_mspa[[36]], col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e", "orange"))
 plot(sf::st_geometry(watershed_sf), add=TRUE, lwd=1.5)
 
-# ### Dilatation-erosion --------
-# # Here, we apply dilatation-erosion on habitats (value = 1)
-# # This section is based on Mailys Queru's work
-# 
-# # dilatation_erosion_mailys <- function(raster, seuil) {
-# #   habitat <- app(raster, fun = function(v) ifelse(v == 1, 1, NA)) # All cells different than 1 become NA
-# #   dist_hab <- terra::distance(habitat)
-# #   dist_hab_thresh <- app(dist_hab, fun = function(v) ifelse(v > seuil, 1, NA)) # Threshold distance and set 0 to NA 
-# #   dist_nonhab <- terra::distance(dist_hab_thresh) 
-# #   dist_nonhab > seuil 
-# #   }
-# 
-# # Numeric version (applies mask to original raster)
-# dilatation_erosion = function(raster, seuil) { 
-#   # Step 1: Habitat mask 
-#   habitat = app(raster, fun = function(v) ifelse(v == 1, 1, NA)) 
-#   # Step 2: Dilation 
-#   dist_hab = terra::distance(habitat) 
-#   dilated_mask = app(dist_hab, fun = function(v) ifelse(v > seuil, 1, NA)) 
-#   # Step 3: Erosion 
-#   dist_nonhab = terra::distance(dilated_mask) 
-#   final_mask = app(dist_nonhab, fun = function(v) ifelse(v > seuil, 1, NA)) 
-#   # Step 4: Apply mask to original raster 
-#   raster[!is.na(final_mask)] = 1 
-#   
-#   raster 
-# }
-# 
-
-# # Warning: choose wisely on which raster applying dilatation-erosion (with or without corridors)
-# message("Applying dilatation–erosion...")
-# rasters_dilate = lapply(seq_along(rasters_mspa), function(i) {
-#   message("  - Processing dilatation–erosion for raster ", i, " (year ", years[i], ")")
-#   dilatation_erosion(rasters_mspa[[i]], seuil = 30)
-# })
-# 
-# # Quick check
-# plot(rasters_mspa[[36]], main=paste0("Before dilatation–Erosion ", years[36]), col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e","orange"))
-# plot(rasters_dilate[[36]], main=paste0("After dilatation–Erosion ", years[36]), col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e","orange"))
-# freq(rasters_mspa[[36]])
-# freq(rasters_dilate[[36]])
-
 
 ### 1a) Vector metrics on REAL patches -----
 # Here, we work with 'real' patches (i.e., fragments either isolated or connected by a narrow corridor)
@@ -190,14 +148,17 @@ rasters_mspa_alt = lapply(
   elev_threshold = 500,
   new_value = 10
 )
+# corridor cells above 500 m take the value 10
+rasters_mspa_alt = lapply(
+  rasters_mspa_alt,
+  reclass_high_forest,
+  topo = topo_r,
+  forest_value = 33,
+  elev_threshold = 500,
+  new_value = 10
+)
 
 # Check
-plot(
-  rasters_mspa_alt[[36]],
-  col = c(
-    "#32a65e", "#ad975a", "#519799","#FFFFB2", "#0000FF", "#d4271e","purple","orange"
-  )
-)
 plot(
   rasters_mspa_alt[[39]],
   col = c(
@@ -234,7 +195,7 @@ plot(highway)
 # Pipelines take the value "agriculture" (4)
 # WARNING: at this resolution (30 x 30 m), a minimum of 20 m is needed for linear features to create continuous linear features (below, some cells are not overwritten, and some raster cells are still connected through their vertices)
 # With MSPA rasters to distinguish patches connected by forest corridors
-rasters_lf = purrr::map2(rasters_mspa_alt, years, function(r, yr) {
+rasters_lf = purrr::map2(rasters_mspa_alt, years_all, function(r, yr) {
   message("  - Applying linear features for year ", yr)
   r_lin = r
   r_lin = apply_linear_feature_single(r_lin, yr, pipelines, buffer_width = 25, value = 4, use_date = TRUE)
@@ -637,7 +598,7 @@ patches_names = purrr::map(
 # should be the number of years
 purrr::map2_dfr(
   patches_names,
-  years,
+  years_all,
   ~ .x %>%
     sf::st_drop_geometry() %>%
     dplyr::select(patch_id) %>%
@@ -649,7 +610,7 @@ purrr::map2_dfr(
 # Uniqueness across years (should be 0)
 purrr::map2_dfr(
   patches_names,
-  years,
+  years_all,
   ~ .x %>%
     sf::st_drop_geometry() %>%
     dplyr::count(patch_id) %>%
@@ -686,7 +647,7 @@ with_progress({
   
   p = progressr::progressor(steps = length(patches_names))
   
-  patches_names_good= lapply(seq_along(patches_names), function(i) {
+  patches_names_good = lapply(seq_along(patches_names), function(i) {
     
     p()
     
@@ -713,16 +674,23 @@ with_progress({
 })
 
 # Dissolve back
-patches_names_good = lapply(patches_names_good, function(x) {
+
+with_progress({
   
-  x %>%
-    dplyr::group_by(patch_id) %>%
-    dplyr::summarise(
-      geometry = sf::st_union(geometry),
-      .groups = "drop"
-    ) %>%
-    sf::st_make_valid()
+  p = progressr::progressor(steps = length(patches_names_good))
   
+  patches_names_good = lapply(patches_names_good, function(x) {
+    
+    p()
+  
+    x %>%
+      dplyr::group_by(patch_id) %>%
+      dplyr::summarise(
+        geometry = sf::st_union(geometry),
+        .groups = "drop"
+      ) %>%
+      sf::st_make_valid()
+    })
 })
 
 # Verification
@@ -1162,7 +1130,7 @@ plot(sf::st_geometry(aldeia_4), add = TRUE, col = "lightblue")
 base_path = here("outputs", "data", "patches_rshifter")
 purrr::walk2(
   patches_names_good_cut2,
-  years,
+  years_all,
   ~ {
     output_path = file.path(base_path, paste0("patches_rshifter_", .y, ".gpkg"))
     sf::st_write(.x, output_path, layer = "patches", append=FALSE, delete_dsn = TRUE, quiet = TRUE)
@@ -1176,7 +1144,7 @@ output_dir = here("outputs", "data", "landscape_rshifter")
 
 # Export each raster with year in the filename
 for (i in seq_along(rasters_lf)) {
-  year_i = years[i]
+  year_i = years_all[i]
   output_path = file.path(output_dir, paste0("raster_rshifter_", year_i, ".tif"))
   
   message("  - Writing raster for year ", year_i)

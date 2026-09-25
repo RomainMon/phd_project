@@ -112,7 +112,7 @@ plot(binary_rasters[[36]])
 plot(sf::st_geometry(patches[[as.character(years[36])]]),
      add = TRUE, border = "red")
 
-### 2005 RASTER
+### PICK A RASTER -------
 names(binary_rasters) = years
 HabitatLayer = binary_rasters[["2005"]]
 

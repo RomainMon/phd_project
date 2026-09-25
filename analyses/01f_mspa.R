@@ -53,43 +53,39 @@ names(rasters_plus) = years_plus
 rasters_plus = rasters_plus[names(rasters_plus) != "2024"]
 years_plus = years_plus[years_plus != 2024]
 
-# Reproject PLUS rasters to EPSG 31983
-rasters_plus = lapply(seq_along(rasters_plus), function(i) {
-  terra::project(rasters_plus[[i]], "EPSG:31983")
-})
-crs(rasters[[1]])
-crs(rasters_plus[[1]])
-
-# Align PLUS rasters on the others
+# MapBiomas raster = spatial template
 template = rasters[[1]]
-rasters_plus = lapply(rasters_plus, function(r) {
-  terra::resample(
+
+# Reproject PLUS directly onto the MapBiomas grid
+rasters_plus_reproj = lapply(rasters_plus, function(r) {
+  
+  terra::project(
     r,
     template,
     method = "near"
   )
 })
-# Compare
+
+# Check geometry
 terra::compareGeom(
-  rasters[[1]],
-  rasters_plus[[1]],
+  template,
+  rasters_plus_reproj[[1]],
   stopOnError = FALSE
 )
+
+# Check classes
+terra::freq(rasters_plus[[1]])
+terra::freq(rasters_plus_reproj[[1]])
+plot(rasters_plus_reproj[[3]], col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e"))
 
 #### Plantios -----
 plantios = vect(here("data", "geo", "AMLD", "plantios", "work", "plantios_clean.shp"))
 
 ### Merge rasters --------
 # We combine past and future landscapes altogether
-rasters_all = c(rasters, rasters_plus)
+rasters_all = c(rasters, rasters_plus_reproj)
 years_all = c(years, years_plus)
 names(rasters_all) = years_all
-
-# Convert to integer/categorical values
-rasters_all = lapply(
-  rasters_all,
-  terra::as.int
-)
 
 ### MSPA with GuidosToolBox --------
 
@@ -161,7 +157,7 @@ reclass_for_mspa <- function(xx) {
 }
 
 ## Apply to all rasters
-rasters_for_mspa <- lapply(rasters_large_patches, reclass_for_mspa)
+rasters_for_mspa = lapply(rasters_large_patches, reclass_for_mspa)
 plot(rasters_for_mspa[[39]], col=c("white", "grey", "#32a65e"))
 
 #### Export all reclassed rasters ----
@@ -317,8 +313,6 @@ rasters_reclass_w_mspa2 = purrr::map2(rasters_reclass_w_mspa, mspa_years, functi
 # Count
 freq(rasters_reclass_w_mspa[[36]])
 freq(rasters_reclass_w_mspa2[[36]])
-freq(rasters_reclass_w_mspa[[39]])
-freq(rasters_reclass_w_mspa2[[39]])
 
 # Visual check
 year_to_check = 2024
