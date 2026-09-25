@@ -54,18 +54,21 @@ merge_classes = function(r, year, classes_to_merge, new_value) {
 
 
 # apply merging
-# We create a landscape with matrix to restore (agriculture), matrix that cannot be restored (the rest), habitat (and corridors)
-matrix_classes = c(2,3,5,6,10)
+# We create a landscape with matrix to restore (agriculture), matrix that cannot be restored (the rest), habitat
+classes = c(2,3,5,6,10)
 rasters_simple = purrr::map2(
   rasters_mspa,
   years,
-  ~ merge_classes(.x, .y, matrix_classes, new_value = 10)
+  ~ merge_classes(.x, .y, classes, new_value = 10)
 )
-freq(rasters_simple[[39]])
-plot(rasters_simple[[39]], col=c("#32a65e", "#FFFFB2", "grey", "orange"))
-
-### We compare the current and future landscapes
-lands = rasters_simple[c('2024','2100')]
+# We also assign corridors to forest
+classes = c(33)
+rasters_simple = purrr::map2(
+  rasters_simple,
+  years,
+  ~ merge_classes(.x, .y, classes, new_value = 1)
+)
+plot(rasters_simple[['2100']], col=c("darkgreen","lightyellow","gray"))
 
 # Function to compute class-level metrics for all classes
 # This function computes landscapemetrics at the class-level for a list of chronological rasters
@@ -89,3 +92,12 @@ compute_class_metrics = function(r, year, metrics_to_compute) {
   
   return(metrics)
 }
+
+# Compute metrics
+all_lulc_classes = purrr::map2_dfr(
+  rasters_simple,
+  years,
+  ~ compute_class_metrics(.x, 
+                          .y, 
+                          metrics_to_compute = c("lsm_c_ca", "lsm_c_pland"))
+)
