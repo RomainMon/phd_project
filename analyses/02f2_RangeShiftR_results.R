@@ -444,8 +444,31 @@ inds_all = purrr::map_dfr(inds_files, function(f){
 
 # Take a look at the dataset
 dplyr::glimpse(inds_all)
+
 # Unique values in the Status column
 unique(inds_all$Status)
+
+## Take a look at an individual
+# Randomly select one Rep x Id_simul combination
+selected_sim = inds_all %>% 
+  dplyr::distinct(Rep, Id_simul) %>% 
+  dplyr::slice_sample(n = 1)
+# Randomly select one individual within that combination
+selected_ind = inds_all %>% 
+  dplyr::semi_join(
+    selected_sim,
+    by = c("Rep", "Id_simul")
+  ) %>% 
+  dplyr::distinct(IndID, Rep, Id_simul) %>% 
+  dplyr::slice_sample(n = 1)
+# Print the complete history of this individual
+inds_all %>% 
+  dplyr::semi_join(
+    selected_ind,
+    by = c("IndID", "Rep", "Id_simul")
+  ) %>% 
+  dplyr::arrange(Year)
+
 
 ### Join tested parameter
 inds_all = inds_all %>% 
@@ -457,11 +480,9 @@ inds_all = inds_all %>%
 # Dispersal events are individuals with Status 1/2 (dispersing), 4 (settled), 6 or 7 (died in transfer)
 # Nsteps: Number of steps taken
 # NOTE: In movement models, individuals take single-cell steps basing their decisions on three parameters: their perceptual range (PR), the method used to evaluate the landscape within their perceptual range and their directional persistence (DP), which corresponds to their tendency to follow a correlated random walk.
-### CHECK WITH CAMILLE THE DISPERSAL EVENT DEFINITION
 dispersers_all = inds_all %>% 
   dplyr::filter(
-    Status %in% c(1, 2, 4, 6, 7),
-    Nsteps > 0
+    Nsteps > 0 # Each time an individual disperses, the number of step is recorded
   ) %>% 
   dplyr::mutate(
     DispersalEventID = dplyr::row_number()
@@ -503,7 +524,6 @@ dispersers_all %>%
   dplyr::count(Status, Disp_type)
 
 ###### Dispersal success ----
-# We compute the dispersal success (including individuals who died and those who settled)
 disp_success = dispersers_all %>% 
   dplyr::group_by(
     Id_simul,
@@ -511,20 +531,20 @@ disp_success = dispersers_all %>%
     Rep
   ) %>% 
   dplyr::summarise(
-    n_dispersal = dplyr::n(),
-    Interpatch_disp = sum(Disp_type == "Inter-patch dispersal"),
-    Intrapatch_disp = sum(Disp_type == "Intra-patch dispersal"),
-    Disp_failure = sum(Disp_type == "Died in matrix"),
-    prop_intra = Intrapatch_disp / n_dispersal,
-    prop_inter = Interpatch_disp / n_dispersal,
-    prop_fail = Disp_failure / n_dispersal,
+    n_dispersal = dplyr::n(), # number of dispersal events
+    Interpatch_disp = sum(Disp_type == "Inter-patch dispersal"), # number of successful inter-patch dispersal events
+    Intrapatch_disp = sum(Disp_type == "Intra-patch dispersal"), # number of intra-patch dispersal events
+    Disp_failure = sum(Disp_type == "Died in matrix"), # number of failed dispersal events
+    prop_intra = Intrapatch_disp / n_dispersal, # % of successful intra-patch disp (VS the total number of disp events)
+    prop_inter = Interpatch_disp / n_dispersal, # % of successful inter-patch disp (VS the total number of disp events)
+    prop_fail = Disp_failure / n_dispersal,  # % of failed disp (VS the total number of disp events)
     .groups = "drop"
   ) %>% 
   dplyr::group_by(
     Id_simul,
     dplyr::across(dplyr::all_of(params_tested))
   ) %>% 
-  # We compute mean proportion across the replicates
+  # We compute mean proportion across the replicates (by simulation id)
   dplyr::summarise(
     mean_prop_intra = round(mean(prop_intra, na.rm = TRUE),2),
     mean_prop_inter = round(mean(prop_inter, na.rm = TRUE),2),
@@ -602,7 +622,7 @@ ggplot2::ggplot(
 dev.off()
 
 ###### Intra- and inter-patch dispersal ----
-# Proportions of intra- and inter-patch dispersal for each simulation
+# Here, we focus on SUCCESSFUL dispersal events
 disp_proportions = dispersers_all %>% 
   dplyr::filter(Disp_type != "Died in matrix") %>% # We remove the dispersal failures (individuals dying)
   dplyr::group_by(
@@ -611,9 +631,9 @@ disp_proportions = dispersers_all %>%
     Rep
   ) %>% 
   dplyr::summarise(
-    n_dispersal = dplyr::n(),
-    n_intra = sum(Disp_type == "Intra-patch dispersal", na.rm = TRUE),
-    n_inter = sum(Disp_type == "Inter-patch dispersal", na.rm = TRUE),
+    n_dispersal = dplyr::n(), # number of successful dispersal events
+    n_intra = sum(Disp_type == "Intra-patch dispersal", na.rm = TRUE), # number of successful intra-patch dispersal events
+    n_inter = sum(Disp_type == "Inter-patch dispersal", na.rm = TRUE), # number of successful inter-patch dispersal events
     prop_intra = n_intra / n_dispersal,
     prop_inter = n_inter / n_dispersal,
     .groups = "drop"
@@ -635,7 +655,6 @@ expected_prop = c(
   "Intra-patch dispersal" = 3.6 / (3.6 + 0.4),
   "Inter-patch dispersal" = 0.4 / (3.6 + 0.4)
 )
-expected_prop
 
 # RMSE
 disp_proportions = disp_proportions %>% 
@@ -765,10 +784,9 @@ ggplot2::ggplot(
 dev.off()
 
 ###### Dispersal distance -----
-# We compute the dispersal success (including individuals who died and those who settled)
 disp_dist = dispersers_all %>% 
   dplyr::filter(
-    Disp_type != "Died in matrix"
+    Disp_type != "Died in matrix" # Remove failed dispersal events
   )
 
 # Mean dispersal distance across simulations
@@ -781,8 +799,12 @@ mean_dist = disp_dist %>%
     mean_dist = mean(DistMoved, na.rm = TRUE),
     .groups = "drop"
   )
-
-
+# In wide format
+mean_dist_wide = mean_dist %>% 
+  tidyr::pivot_wider(values_from = mean_dist,
+                     names_from = Disp_type) %>% 
+  dplyr::rename(mean_disp_dist_inter = "Inter-patch dispersal",
+                mean_disp_dist_intra = "Intra-patch dispersal")
 ## Export plot
 png(here("data",
          "rangeshifter",
@@ -825,11 +847,13 @@ dev.off()
 #### Fit the best score -----
 # Join dispersal flux
 fit_score_pop_disp = fit_score %>%
-  dplyr::left_join(disp_proportions)
+  dplyr::left_join(disp_proportions) %>% 
+  dplyr::left_join(mean_dist_wide)
 # Best option
 best_fit = fit_score_pop_disp %>%
   dplyr::arrange(RMSE, diff_disp_intra) %>% # Choose the indicator variables
   dplyr::slice(1) # Select with slice(X) the row to keep
+best_fit
 # Extract best values
 best_values = best_fit %>%
   dplyr::select(dplyr::all_of(params_tested))
@@ -946,15 +970,53 @@ patch_occ_2100 = range_time %>%
   dplyr::filter(Year == 95)
 
 #### Patch abundance and connectivity -----
-##### Patch data -----
-# Mean population size by patch/year across replicates
+##### Vector patches -----
+patch_v = terra::as.polygons(patch) # Vectorize RangeShifter raster patches
+patch_sf = sf::st_as_sf(patch_v) %>% 
+  dplyr::rename(PatchID = id) %>% 
+  dplyr::filter(PatchID != 0)  # Remove matrix
+
+##### List of patches used for simulations -----
+# names of the patches used for simulations (until "test_patch_cut_1")
+# i.e., patches irrespective of forest elevation
+# patch_list = c("Aldeia_I_1",
+#                "Aldeia_I_2",
+#                "Sta_Helena",
+#                "Imbau_I_2",
+#                "Afetiva",
+#                "Nova_Esperanca_2",
+#                "Pirineus_111",
+#                "Poco_das_Antas",
+#                "Rio_Vermelho",
+#                "Uniao_N_2")
+
+# names of the patches used for simulations
+# i.e., patches of forests <500 m
+patch_list = c("Vendaval",
+               "Rio_Vermelho",
+               "Boa_Esperanca_II",
+               "Imbau_I_2",
+               "Sta_Helena_II",
+               "Sta_Helena_I",
+               "Sta_Helena",
+               "Aldeia_I_1",
+               "Aldeia_I_2",
+               "Poco_das_Antas",
+               "Uniao_N_2",
+               "Nova_Esperanca_2",
+               "Afetiva",
+               "Pirineus_114")
+
+##### Population by patch -----
 pop_patch = pop_all_complete %>%
+  # We focus on the best parameters
   dplyr::semi_join(best_values,
-                   by = params_tested) %>% # We select the best combination of parameters
+                   by = params_tested) %>%
   dplyr::filter(Year != max(Year, na.rm = TRUE), # Remove the last year
                 PatchID != 0) %>% # Remove the matrix 
   dplyr::group_by(PatchID,
                   Year) %>%
+  # Mean population size by patch/year across replicates
   dplyr::summarise(MeanNInd = round(mean(NInd),0), # N Adults (Stage 1 + Stage 2)
                    MeanNJuvs = round(mean(NJuvs),0), # N Juveniles
                    MeanNTot = round(mean(NInd+NJuvs),0), # Total population
@@ -973,11 +1035,11 @@ pop_patch = pop_patch %>%
     )
   )
 
-# Join patch names
+# Join REAL patch names
 pop_patch = pop_patch %>% 
-  dplyr::inner_join(patch_corres_id, 
-                    by=c("PatchID" = "cut_patch_id")) %>% # Update patch id variable here (integer id)
-  dplyr::rename(patch_id = uncut_patch_name)
+  dplyr::inner_join(patch_corres_id, # Table with correspondence between the RangeShifter patches and the REAL patches
+                    by=c("PatchID" = "cut_patch_id")) %>% # Update the variable in the correspondence table to make the correspondence
+  dplyr::rename(patch_id = uncut_patch_name) # patch_id is the REAL patch id
 dplyr::glimpse(pop_patch)
 
 # # Check -> all patches should have the same number of years (i.e., years of simulations)
@@ -986,52 +1048,53 @@ dplyr::glimpse(pop_patch)
 #   dplyr::summarise(n_rep = dplyr::n_distinct(Year))
 
 ##### Patch occupancy -----
-# Vectorize raster patches
-patch_v = terra::as.polygons(patch)
-patch_sf = sf::st_as_sf(patch_v) %>% 
-  dplyr::rename(PatchID = id) %>% 
-  dplyr::filter(PatchID != 0)  # Remove matrix
-
 # Join population size to spatial patches
 patch_sf_pop = patch_sf %>% 
   dplyr::left_join(
     pop_patch,
     by = "PatchID"
   )
-dplyr::glimpse(patch_sf_pop)
 
-### Proportions of patches occupied VS census polygons
-## Comparison with 2013
+### Proportions of patches occupied
+# We compare the number of patches occupied in simulations with the number of patches occupied in the census dataset
+# Comparison with the 2013 census
 sim_2013 = patch_sf_pop %>%
+  # Select the year of interest
   dplyr::filter(Year == 8) %>%
+  # Mutate the occupancy state
   dplyr::mutate(
     sim_occupied = dplyr::case_when(MeanNTot == 0 ~ "Unoccupied",
                                     MeanNTot > 0 ~ "Occupied")
   ) %>%
   dplyr::select(
-    PatchID,
+    PatchID, # RangeShifter patch id
     Year,
     sim_occupied,
     geometry
   )
 
+# Census data
 census_2013 = glt_census %>%
+  # Select year of interest
   dplyr::filter(!is.na(Detect2013)) %>%
   dplyr::select(
-    ID2,
-    Detect2013,
+    ID2, # Transect id
+    Detect2013, # Detection data
     geometry
   )
 
 # Spatial join
 comparison_2013 = sf::st_intersection(
   census_2013,
-  sim_2013) %>%
+  sim_2013
+  ) %>%
+  # Compute the intersection area between the transect and the patch
   dplyr::mutate(
     overlap_area = as.numeric(sf::st_area(geometry)) # Intersection area
   ) %>%
   dplyr::group_by(ID2) %>%
-  # Keep the patch with the largest overlap with the census polygon
+  # Some census data overlap several patches (and vice-versa)
+  # HENCE: we keep the largest intersection between the patch and the census polygon
   dplyr::slice_max(
     order_by = overlap_area,
     n = 1,
@@ -1059,19 +1122,21 @@ comparison_2013 = comparison_2013 %>%
 # Proportion
 prop_match_2013 = comparison_2013 %>%
   dplyr::summarise(
-    n_occ = sum(Detect2013 == "P"),
-    n_match_pres = sum(match_pres == "MATCH", na.rm = TRUE),
-    n_unmatch_pres = sum(match_pres == "UNMATCH", na.rm = TRUE),
-    prop_match_pres = round(n_match_pres / n_occ, 2),
-    n_abs = sum(Detect2013 == "N"),
-    n_match_abs = sum(match_abs == "MATCH", na.rm = TRUE),
-    n_unmatch_abs = sum(match_abs == "UNMATCH", na.rm = TRUE),
-    prop_match_abs = round(n_match_abs / n_abs, 2)
+    n_occ = sum(Detect2013 == "P"), # Number of occurrences
+    n_match_pres = sum(match_pres == "MATCH", na.rm = TRUE), # Number of true positives
+    n_unmatch_pres = sum(match_pres == "UNMATCH", na.rm = TRUE), # Number of false negatives
+    prop_match_pres = round(n_match_pres / n_occ, 2), # % true positive
+    n_abs = sum(Detect2013 == "N"), # Number of absences
+    n_match_abs = sum(match_abs == "MATCH", na.rm = TRUE), # Number of true negatives
+    n_unmatch_abs = sum(match_abs == "UNMATCH", na.rm = TRUE), # Number of false positives
+    prop_match_abs = round(n_match_abs / n_abs, 2) # % true negatives
   ) %>% 
   dplyr::rename_with(~ paste0(., '_2013'))
 
 ## Comparison with 2022
+# Comparison with the 2013 census
 sim_2022 = patch_sf_pop %>%
+  # Select the year of interest
   dplyr::filter(Year == 17) %>%
   dplyr::mutate(
     sim_occupied = dplyr::case_when(MeanNTot == 0 ~ "Unoccupied",
@@ -1084,6 +1149,7 @@ sim_2022 = patch_sf_pop %>%
     geometry
   )
 
+# Census data
 census_2022 = glt_census %>%
   dplyr::filter(!is.na(Detect2022)) %>%
   dplyr::select(
@@ -1109,8 +1175,8 @@ comparison_2022 = sf::st_intersection(
   dplyr::ungroup() %>%
   sf::st_drop_geometry()
 
-# We compute the proportion of patches occupied in 2013 but not occupied in simulations (false negative)
-# AND the proportion of patches unoccupied in 2013 but occupied in simulations (false positive)
+# We compute the proportion of patches occupied in 2022 but not occupied in simulations (false negative)
+# AND the proportion of patches unoccupied in 2022 but occupied in simulations (false positive)
 comparison_2022 = comparison_2022 %>% 
   dplyr::mutate(
     match_pres = dplyr::case_when(
@@ -1139,8 +1205,10 @@ prop_match_2022 = comparison_2022 %>%
 
 
 ### Map of occupancy at selected years
+# Years of interest
 years_to_plot = c(0, 8, 17, 95)
 
+# Filter patches with years
 patch_sf_occupancy = patch_sf_pop %>% 
   dplyr::filter(Year %in% years_to_plot) %>% 
   dplyr::mutate(
@@ -1152,7 +1220,7 @@ patch_sf_occupancy = patch_sf_pop %>%
   )
 
 ### Create maps
-# Creating a background
+# Creating a background for the raster
 coltb = data.frame(value=1:6, 
                    col=c(
                      "#FFFFB2",
@@ -1162,9 +1230,10 @@ coltb = data.frame(value=1:6,
                      "#0000FF",
                      "#d4271e"
                    ))
+# Convert to factor
 landsc_factor = terra::as.factor(landsc)
+# Assign the color palette
 terra::coltab(landsc_factor) = coltb
-terra::has.colors(landsc_factor)
 
 ## 2005
 # Patches
@@ -1360,64 +1429,30 @@ dev.off()
 
 
 ##### Patch abundance ------
-
-## Join patch name
-
-# names of the patches used for simulations (until "test_patch_cut_1")
-# i.e., patches irrespective of forest elevation
-# patch_list = c("Aldeia_I_1",
-#                "Aldeia_I_2",
-#                "Sta_Helena",
-#                "Imbau_I_2",
-#                "Afetiva",
-#                "Nova_Esperanca_2",
-#                "Pirineus_111",
-#                "Poco_das_Antas",
-#                "Rio_Vermelho",
-#                "Uniao_N_2")
-
-# names of the patches used for simulations
-# i.e., patches of forests <500 m
-patch_list = c("Vendaval",
-               "Rio_Vermelho",
-               "Boa_Esperanca_II",
-               "Imbau_I_2",
-               "Sta_Helena_II",
-               "Sta_Helena_I",
-               "Sta_Helena",
-               "Aldeia_I_1",
-               "Aldeia_I_2",
-               "Poco_das_Antas",
-               "Uniao_N_2",
-               "Nova_Esperanca_2",
-               "Afetiva",
-               "Pirineus_114")
-
-# Only keep patches with known abundance
+# Filter patches based on the list of patches used for simulations
 pop_patch_select = pop_patch %>% 
   # Remove patches that do not belong to the list
   dplyr::filter(patch_id %in% patch_list)
-head(pop_patch_select)
 
 # Keep years of interest
-sim_sel = pop_patch_select %>%
+pop_patch_select = pop_patch_select %>%
   dplyr::filter(
     Year %in% c(0, 8, 13, 17) # Years of interest
   )
 
 # Remove suffixes from patches ids and create a variable "FragName" resembling UMMP name
-sim_sel = sim_sel %>%
+pop_patch_select = pop_patch_select %>%
   dplyr::mutate(
     FragName = stringr::str_remove(
       patch_id, # patch name
       "_\\d+$"
     )
   )
-head(sim_sel) # See difference between patch_id and FragName
+head(pop_patch_select) # See difference between patch_id and FragName
 
 # Aggregate patches sharing the same fragment name
 # Example: since Aldeia_I_1 and Aldeia_I_2 correspond to the same monitored UMMP, we sum their abundances
-sim_frag = sim_sel %>%
+pop_patch_select_agg = pop_patch_select %>%
   dplyr::group_by(FragName, Year) %>%
   dplyr::summarise(
     SimN_Ad = sum(MeanNInd),
@@ -1441,10 +1476,12 @@ real_census_long = real_census_data %>%
       Survey == "n_glt_2022" ~ 17
     )
   ) %>% 
-  dplyr::filter(!is.na(FragName))
+  dplyr::filter(!is.na(FragName),
+                Survey != "n_glt_2018") # Remove the 2018 census (yellow fever)
 
-# Join
-comparison = sim_frag %>%
+# Combine real and simulated pop sizes
+comparison = pop_patch_select_agg %>%
+  # Join using the FragName (i.e., UMMP name)
   dplyr::left_join(
     real_census_long,
     by = c(
@@ -1453,15 +1490,15 @@ comparison = sim_frag %>%
     )
   ) %>% 
   dplyr::filter(!is.na(RealN)) %>% # Remove where pop size was not assessed in some patches
-  dplyr::filter(Survey != "n_glt_2018") %>% # Remove YF data
   dplyr::group_by(FragName, 
                   Year) %>% 
+  # Compute RMSE (difference between simulated and real)
   dplyr::mutate(
     RMSE = sqrt(mean((SimN_Tot - RealN)^2))
   ) %>% 
   dplyr::ungroup()
 
-# Correlation
+# Correlation between simulated and real data
 cor(comparison$SimN_Tot, comparison$RealN)
 
 # Smallest differences
@@ -1474,10 +1511,18 @@ comparison %>%
   dplyr::select(FragName, Year, SimN_Tot, RealN, RMSE) %>% 
   dplyr::arrange(dplyr::desc(RMSE))
 
-# Mean difference
+# Mean difference across years
 comparison %>% 
   dplyr::group_by(Year) %>% 
-  dplyr::summarise(mean(RMSE))
+  dplyr::summarise(mean(RMSE)) %>% 
+  dplyr::arrange(Year)
+
+# Mean difference across fragments
+comparison %>% 
+  dplyr::group_by(FragName) %>% 
+  dplyr::summarise(mean = mean(RMSE)) %>% 
+  dplyr::arrange(mean)
+
 
 # Plot
 png(here::here("data",
@@ -1549,18 +1594,13 @@ dev.off()
 ##### Source/sink dynamics -----
 # We work at the scale of real patches
 # We identify patch pop dynamics (positive, negative, stable)
-# We add dispersal flux (balance between emigrations and immigrations)
-
-###### TO COMPLETE !!! -----
+# We add dispersal flux (balance between emigration and immigration)
 
 ###### Patch dynamics --------
 # Summarize pop size across uncut patches
-pop_patch_disp = pop_patch %>%
-  dplyr::filter(
-    Year %in% c(0, 95)
-    ) %>% 
+pop_patch_uncut = pop_patch %>%
   dplyr::group_by(
-    patch_id,
+    patch_id, # uncut patch id
     Year
   ) %>% 
   dplyr::summarise(
@@ -1571,7 +1611,7 @@ pop_patch_disp = pop_patch %>%
   )
 
 # Compute growth rate and lambda
-pop_patch_disp = pop_patch_disp %>% 
+pop_patch_uncut = pop_patch_uncut %>% 
   dplyr::group_by(patch_id) %>% 
   dplyr::arrange(Year, .by_group = TRUE) %>% 
   dplyr::mutate(
@@ -1592,6 +1632,10 @@ pop_patch_disp = pop_patch_disp %>%
     ) %>% 
   dplyr::ungroup()
 
+# Remove year 0
+pop_patch_uncut = pop_patch_uncut %>% 
+  dplyr::filter(Year != 0)
+
 ###### Patch dispersal --------
 # Filter dispersal flux
 # We keep the dispersal flux of the best simulation only
@@ -1600,80 +1644,270 @@ disp_subset = dispersers_all %>%
     Id_simul == best_sim
   )
 
-# Emigrants: cumulative number leaving each focus patch from Year 0 to 95
-emigrants = disp_subset %>% 
+# Emigration: successful and failed emigrations leaving each patch (focus on the origin)
+emig = disp_subset %>% 
   dplyr::filter(
-    Disp_type %in% c("Inter-patch dispersal", "Died in matrix")
+    Disp_type %in% c(
+      "Inter-patch dispersal",
+      "Died in matrix"
+    )
   ) %>% 
-  dplyr::group_by(Orig_patch_name) %>% 
+  dplyr::group_by(
+    Orig_patch_name,
+    Year,
+    Rep
+  ) %>% 
   dplyr::summarise(
-    n_emigrants_success = sum(
-      Disp_type == "Inter-patch dispersal",
-      na.rm = TRUE
+    # Successful emigrations
+    n_emig = dplyr::n_distinct(
+      IndID[Disp_type == "Inter-patch dispersal"]
     ),
-    n_emigrants_died = sum(
-      Disp_type == "Died in matrix",
-      na.rm = TRUE
+    
+    # Failed emigrations
+    n_emig_failed = dplyr::n_distinct(
+      IndID[Disp_type == "Died in matrix"]
     ),
-    mean_disp_dist_emigrants = mean(
+    
+    # Mean distance of successful emigrants in this replicate
+    mean_dist_emig = mean(
       DistMoved[Disp_type == "Inter-patch dispersal"],
       na.rm = TRUE
     ),
+    
     .groups = "drop"
   ) %>% 
   dplyr::rename(
     patch_id = Orig_patch_name
+  ) %>% 
+  dplyr::group_by(
+    patch_id,
+    Year
+  ) %>% 
+  dplyr::summarise(
+    # Average across replicates
+    mean_n_emig = round(mean(n_emig), 1),
+    mean_n_emig_failed = round(mean(n_emig_failed), 1),
+    mean_dist_emig = mean(mean_dist_emig, na.rm = TRUE),
+    .groups = "drop"
   )
 
-
-# Immigrants: cumulative number successfully arriving in each focus patch from Year 0 to 95
-immigrants = disp_subset %>% 
+# Immigrants: focus on the destination
+immig = disp_subset %>% 
   dplyr::filter(
     Disp_type == "Inter-patch dispersal"
+    ) %>% 
+  dplyr::group_by(
+    Dest_patch_name,
+    Year,
+    Rep
   ) %>% 
-  dplyr::group_by(Dest_patch_name) %>% 
   dplyr::summarise(
-    n_immigrants = dplyr::n(),
-    mean_disp_dist_immigrants = mean(
+    
+    # Number of successful immigrants
+    n_immig = dplyr::n_distinct(IndID),
+    .groups = "drop",
+    
+    # Mean dispersal distance of immigrants
+    mean_dist_immig = mean(
       DistMoved,
       na.rm = TRUE
     ),
-    .groups = "drop"
+    
+    
   ) %>% 
   dplyr::rename(
     patch_id = Dest_patch_name
+  ) %>% 
+  dplyr::group_by(
+    patch_id,
+    Year
+  ) %>% 
+  # Average across replicates
+  dplyr::summarise(
+    mean_n_immig = round(mean(n_immig),1),
+    mean_dist_immig = mean(mean_dist_immig),
+    .groups = "drop"
   )
 
+# Bind
+emig_immig = emig %>% 
+  dplyr::full_join(immig, by=c("patch_id","Year"))
 
-# Combine into one table per patch
-disp_patches = dplyr::full_join(
-  emigrants,
-  immigrants,
-  by = c("patch_id")
-) %>% 
-  dplyr::mutate(
-    dplyr::across(
-      dplyr::starts_with("n_"),
-      ~ tidyr::replace_na(.x, 0)
+# Complete missing years
+emig_immig = emig_immig %>% 
+  tidyr::complete(
+    patch_id,
+    Year,
+    fill = list(
+      mean_n_immig = 0,
+      mean_n_emig = 0,
+      mean_n_emig_failed = 0
     )
   )
 
-# Join dispersal information
-pop_patch_disp = pop_patch_disp %>% 
-  dplyr::filter(Year == 95) %>% 
-  dplyr::left_join(disp_patches, by=c("patch_id"))
+# Mean across patches
+emig_immig %>% 
+  dplyr::select(-Year) %>% 
+  dplyr::summarise(
+    dplyr::across(
+      dplyr::where(is.numeric),
+      ~ mean(.x, na.rm = TRUE)
+    )
+  )
 
 ###### Categorize as source/sink ------
-# We use the ratio between the number of immigrants and number of emigrants to determine
-pop_patch_disp = pop_patch_disp %>%
+# Merge pop and disp data
+pop_disp_patch_uncut = pop_patch_uncut %>% 
+  dplyr::left_join(emig_immig, by=c("patch_id","Year"))
+
+# Categorize patches as sources and sinks
+# Sources: patches with positive growth rates (lambda>1) and emigrants>immigrants
+# Sinks: patches with negative growth rates (lambda<1) and immigrants>emigrants
+pop_disp_patch_uncut = pop_disp_patch_uncut %>% 
   dplyr::mutate(
-    n_emigrants = n_emigrants_success+n_emigrants_died,
     source_sink = dplyr::case_when(
-      dyn == "+" & n_emigrants>n_immigrants ~ "Source",
-      dyn == "-" & n_immigrants>n_emigrants ~ "Sink",
-      n_emigrants==n_immigrants ~ "Other"
+      dyn == "+" & mean_n_emig>mean_n_immig ~ "Viable source",
+      dyn == "=" & mean_n_emig>mean_n_immig ~ "Viable source",
+      dyn == "-" & mean_n_emig>mean_n_immig ~ "Unviable source",
+      dyn == "+" & mean_n_immig>mean_n_emig ~ "Viable sink",
+      dyn == "=" & mean_n_immig>mean_n_emig ~ "Viable sink",
+      dyn == "-" & mean_n_immig>mean_n_emig ~ "Unviable sink",
+      dyn == "=" & mean_n_immig==mean_n_emig ~ "Equilibrium",
+      dyn == "+" & mean_n_emig==mean_n_immig ~ "Other viable patches",
+      dyn == "-" & mean_n_emig==mean_n_immig ~ "Other unviable patches",
+      MeanN_Tot > 0 & lag_value == 0 ~ "Recolonized",
+      MeanN_Tot == 0 ~ "Unoccupied",
+      TRUE ~ "Other"
+    )
+    )
+pop_disp_patch_uncut %>% 
+  dplyr::count(source_sink)
+
+###### Patch dynamics ------
+# Filter using the list of patches
+patch_dyn_select = pop_disp_patch_uncut %>% 
+  dplyr::filter(patch_id %in% patch_list)
+  
+# In long format
+patch_dyn_select_long = patch_dyn_select %>% 
+  dplyr::select(
+    patch_id,
+    Year,
+    MeanN_Tot,
+    mean_n_emig,
+    mean_n_immig
+  ) %>% 
+  tidyr::pivot_longer(
+    cols = c(
+      MeanN_Tot,
+      mean_n_emig,
+      mean_n_immig
+    ),
+    names_to = "Variable",
+    values_to = "Value"
+  ) %>% 
+  dplyr::mutate(
+    Variable = dplyr::recode(
+      Variable,
+      MeanN_Tot = "Population size",
+      mean_n_emig = "Emigrants",
+      mean_n_immig = "Immigrants"
     )
   )
+# Plot
+png(here::here("data",
+               "rangeshifter",
+               "tests",
+               test_config$test_name,
+               "plot",
+               "patch_dyn.png"),
+    width = 3000, height = 2000, res = 300, type="cairo")
+# Plot
+ggplot2::ggplot(
+  patch_dyn_select_long,
+  ggplot2::aes(
+    x = Year,
+    y = Value,
+    colour = Variable,
+    group = Variable
+  )
+) +
+  ggplot2::geom_line(linewidth = 0.9) +
+  ggplot2::geom_point(size = 0.5) +
+  ggplot2::facet_wrap(
+    ~ patch_id,
+    scales = "free_y"
+  ) +
+  ggplot2::labs(
+    x = "Year",
+    y = "Number of individuals",
+    colour = NULL
+  ) +
+  ggplot2::theme_bw() +
+  ggplot2::theme(
+    legend.position = "bottom",
+    strip.text = ggplot2::element_text(face = "bold")
+  )
+dev.off()
+
+###### Patch status ------
+# Proportion of patches in each source/sink category per year
+source_sink_prop = pop_disp_patch_uncut %>% 
+  dplyr::filter(!is.na(source_sink),
+                source_sink != "Unoccupied",
+                source_sink != "Equilibrium",
+                source_sink != "Recolonized") %>% 
+  dplyr::group_by(Year, source_sink) %>% 
+  dplyr::summarise(
+    n_patches = dplyr::n_distinct(patch_id),
+    .groups = "drop"
+  ) %>% 
+  dplyr::group_by(Year) %>% 
+  dplyr::mutate(
+    prop_patches = n_patches / sum(n_patches)
+  ) %>% 
+  dplyr::ungroup()
+
+# Plot
+png(here::here("data",
+               "rangeshifter",
+               "tests",
+               test_config$test_name,
+               "plot",
+               "source_sink_dyn.png"),
+    width = 2000, height = 1200, res = 300, type="cairo")
+ggplot2::ggplot(
+  source_sink_prop,
+  ggplot2::aes(
+    x = Year,
+    y = prop_patches,
+    fill = source_sink
+  )
+) +
+  ggplot2::geom_col(width = 0.8) +
+  ggplot2::scale_fill_manual(
+    values = c(
+      "Viable source" = "#00F5DC",
+      "Unviable source" = "#00453E",
+      "Viable sink" = "#FF2273",
+      "Unviable sink" = "#71002A",
+      "Other viable patches" = "#CFFFFE",
+      "Other unviable patches" = "#FFCFE1"
+    )
+  ) +
+  ggplot2::scale_y_continuous(
+    labels = scales::percent_format()
+  ) +
+  ggplot2::labs(
+    x = "Year",
+    y = "Proportion of patches",
+    fill = "Patch category"
+  ) +
+  ggplot2::theme_bw() +
+  ggplot2::theme(
+    legend.position = "bottom"
+  )
+dev.off()
 
 #### Heatmaps ----
 # Because movement is stochastic, the number of visits per cell and the colonisation of empty patches are different for each replicate. 
@@ -1699,19 +1933,28 @@ heatmaps_mean = terra::mean(heatmaps_stack)
 # Keep only patch cells with values > 0
 patches_positive = terra::ifel(patch > 0, 1, NA)
 
+# Plot
+png(here::here("data",
+               "rangeshifter",
+               "tests",
+               test_config$test_name,
+               "plot",
+               "heatmap.png"),
+    width = 2000, height = 1200, res = 300, type="cairo")
 # Base heatmap
 terra::plot(
   heatmaps_mean,
   col = magma(9)
 )
-
 # Overlay patches in transparent grey
 terra::plot(
   patches_positive,
-  col = adjustcolor("white", alpha.f = 0.50),
+  col = adjustcolor("white", alpha.f = 0.20),
   add = TRUE,
   legend = FALSE
 )
+dev.off()
+
 
 #### Connectivity ----
 ##### Connect files -----
@@ -1783,6 +2026,7 @@ data.disp.cut = data.disp.cut %>%
     StartPatch,
     EndPatch
   ) %>%
+  # Sums of dispersing individuals between pairs of patches
   dplyr::summarise(
     Ninds = sum(Ninds, na.rm = TRUE),
     .groups = "drop"
@@ -2205,9 +2449,6 @@ disp.lines.ummps = disp.lines.ummps %>%
   sf::st_cast("LINESTRING")
 
 # Plot the lines
-dplyr::inner_join(best_fit, metadata) %>% dplyr::select(Id_simul) # Id_simul associated with the best combination of parameters
-good_id_simul = 7
-
 # 2005-2013
 map_disp_uncut_2005_2013 = ggplot2::ggplot() +
   
@@ -2224,7 +2465,7 @@ map_disp_uncut_2005_2013 = ggplot2::ggplot() +
   # Simulated connectivity
   ggplot2::geom_sf(
     data = disp.lines.ummps %>% 
-      dplyr::filter(Id_simul == good_id_simul,
+      dplyr::filter(Id_simul == best_sim,
                     Period == "Year 0-8") ,
     ggplot2::aes(linewidth = Ninds),
     colour = "deeppink",
@@ -2274,7 +2515,7 @@ map_disp_uncut_2013_2022 = ggplot2::ggplot() +
   # Simulated connectivity
   ggplot2::geom_sf(
     data = disp.lines.ummps %>% 
-      dplyr::filter(Id_simul == good_id_simul,
+      dplyr::filter(Id_simul == best_sim,
                     Period == "Year 8-17") ,
     ggplot2::aes(linewidth = Ninds),
     colour = "deeppink",
@@ -2324,7 +2565,7 @@ map_disp_uncut_2022_2100 = ggplot2::ggplot() +
   # Simulated connectivity
   ggplot2::geom_sf(
     data = disp.lines.ummps %>% 
-      dplyr::filter(Id_simul == good_id_simul,
+      dplyr::filter(Id_simul == best_sim,
                     Period == "Year 17-95") ,
     ggplot2::aes(linewidth = Ninds),
     colour = "deeppink",
@@ -2383,8 +2624,8 @@ summary = read_excel(here::here("data",
 
 #### Information to add manually ----
 
-test_aim = "Testing StraightenPath parameter"
-test_remarks = "StraightenPath TRUE fits better; FALSE creates a few intermediate/long dispersal lines that do not exist otherwise"
+test_aim = "Tests with varying dispersal distances & PR"
+test_remarks = "New files exploited (inds, connect) -> new indicators added"
 
 #### Test name -----
 test_name = basename(normalizePath(dirpath))
@@ -2510,8 +2751,6 @@ new_summary = dplyr::tibble(
   'StraightenPath' =
     format_tested_values(metadata$StraightenPath),
   
-  
-  
   'Dispersal Y/N' = dispersal,
   
   'Nhab' = format_tested_values(metadata$Nhab),
@@ -2538,11 +2777,18 @@ new_summary = dplyr::tibble(
   
   'RMSE_pop_size' = rmse_pop_size,
   
-  'Patch_occ_2100' = patch_occ_2100$MeanNOccupPatches,
+  'Patch_occ_2100' = patch_occ_2100 %>% 
+    dplyr::semi_join(best_values, by = params_tested) %>% 
+    dplyr::select(MeanNOccupPatches) %>% 
+    dplyr::pull(1),
   'Occ_true_pos_2013%' = prop_match_2013$prop_match_pres_2013,
   'Occ_true_pos_2022%' = prop_match_2022$prop_match_pres_2022,
   'Occ_true_neg_2013%' = prop_match_2013$prop_match_abs_2013,
   'Occ_true_neg_2022%' = prop_match_2022$prop_match_abs_2022,
+  'Prop_disp_intrapatch' = best_fit$mean_prop_intra,
+  'Prop_disp_interpatch' = best_fit$mean_prop_inter,
+  'Disp_dist_intrapatch' = best_fit$mean_disp_dist_intra,
+  'Disp_dist_interpatch' = best_fit$mean_disp_dist_inter,
   
   'Remarks' = test_remarks
 )
