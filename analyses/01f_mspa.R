@@ -56,7 +56,8 @@ years_plus = years_plus[years_plus != 2024]
 # MapBiomas raster = spatial template
 template = rasters[[1]]
 
-# Reproject PLUS directly onto the MapBiomas grid
+##### Reproject PLUS -----
+# Reproject directly onto the MapBiomas grid 
 rasters_plus_reproj = lapply(rasters_plus, function(r) {
   
   terra::project(
