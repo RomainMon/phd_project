@@ -63,13 +63,12 @@ library(viridis)
 
 # List with components stored
 test_config = list(
-  test_name = "test_resist_16", # Name of the folder
+  test_name = "test_resist_17", # Name of the folder
   
   # Parameters tested with sensitivity analysis (i.e., those varying during simulations)
   parameters = c(
-    "Emig_prob",
-    "PR",
-    "Max_nb_steps"
+    "IndsHaCell",
+    "PR"
   )
 )
 
@@ -109,7 +108,8 @@ terra::plot(
   legend = FALSE)
 
 ## Uncut patches
-patch_uncut = sf::st_read(here::here("outputs", "data", "patches_rshifter", "patches_rshifter_2005.gpkg")) 
+patch_uncut = sf::st_read(here::here("outputs", "data", "patches_rshifter", 
+                                     "patches_rshifter_2005.gpkg")) 
 plot(patch_uncut)
 
 ## Species distribution
@@ -179,6 +179,7 @@ metadata = read_excel(here::here("data",
 
 # Transform TRUE/FALSE values into logical
 metadata$StraightenPath = ifelse(metadata$StraightenPath == "TRUE", TRUE, FALSE)
+
 
 #### Loop (WITHOUT DISPERSAL) -----
 
@@ -339,28 +340,47 @@ for(i in 1:nrow(metadata)) {
   } else {
     NULL
   }
-  straightenpath = metadata$StraightenPath
+  straightenpath = metadata$StraightenPath[i]
   
   nhab = metadata$Nhab[i]
-  costs = c(metadata$Cost1[i],
-            metadata$Cost2[i],
-            metadata$Cost3[i],
-            metadata$Cost4[i],
-            metadata$Cost5[i],
-            metadata$Cost6[i])
+  costs = unlist(metadata[i, c("Cost1", "Cost2", "Cost3", "Cost4", "Cost5", "Cost6")])
   
   id_simulation = metadata$Id_simul[i]
   
   # Print progression
   cat("\n========================================\n")
-  cat(sprintf("Simulation %d/%d (ID: %d)\n",
-              i, nrow(metadata), id_simulation))
-  cat(sprintf("  DensDep = %.3f | Juv suvival = %.3f | Adult suvival = %.3f | IndsHaCell = %.3f\n",
-              densdep, juv_survival, ad_survival, indshacell))
-  cat(sprintf("  EmigProb = %.3f | Perceptual range = %.3f | PR method = %.3f | Memory size = %.3f | Directional persistence = %.3f | Nhab = %.3f | Step mortality = %.3f | Goal type = %.3f | Straighten Path = %.3f\n",
-              emig_prob, pr, pr_meth, ms, dp, nhab, step_mortality, goal_type, straightenpath))
-  cat(sprintf("  Costs = %.3f\n",
-              costs))
+  
+  cat(sprintf(
+    "Simulation %d/%d (ID: %d)\n",
+    i, nrow(metadata), id_simulation
+  ))
+  
+  cat(sprintf(
+    "  DensDep = %.3f | Juv survival = %.3f | Adult survival = %.3f | IndsHaCell = %.3f\n",
+    densdep,
+    juv_survival,
+    ad_survival,
+    indshacell
+  ))
+  
+  cat(sprintf(
+    "  EmigProb = %.3f | Perceptual range = %.3f | PR method = %.3f | Memory size = %.3f | Directional persistence = %.3f | Nhab = %.3f | Step mortality = %.3f | Goal type = %.3f | Straighten Path = %.3f\n",
+    emig_prob,
+    pr,
+    pr_meth,
+    ms,
+    dp,
+    nhab,
+    step_mortality,
+    goal_type,
+    straightenpath
+  ))
+  
+  cat(sprintf(
+    "  Costs = %s\n",
+    paste(sprintf("%.3f", costs), collapse = " | ")
+  ))
+  
   cat("========================================\n\n")
   
   ##### 1) Simulation -----
@@ -370,7 +390,7 @@ for(i in 1:nrow(metadata)) {
                    Years = 96, # Number of years
                    OutIntPop = 1, # Whether to export population files 
                    OutIntOcc = 0, # Whether to export occupancy files (every X year)
-                   OutIntRange = 5, # Whether to export range files (every X year)
+                   OutIntRange = 10, # Whether to export range files (every X year)
                    OutIntInd = 1, # Whether to export individual files
                    OutIntConn = 1, # Whether to export connectivity files (n individuals from patch i to patch j)
                    SMSHeatMap = TRUE, # Produce SMS heat map raster as output?

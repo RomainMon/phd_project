@@ -17,13 +17,12 @@ library(viridis)
 
 # List with components stored
 test_config = list(
-  test_name = "test_resist_16", # Name of the folder
+  test_name = "test_resist_17", # Name of the folder
   
   # Parameters tested with sensitivity analysis (i.e., those varying during simulations)
   parameters = c(
-    "Emig_prob",
-    "PR",
-    "Max_nb_steps"
+    "IndsHaCell",
+    "PR"
   )
 )
 
@@ -59,7 +58,8 @@ terra::plot(
   legend = FALSE)
 
 ## Uncut patches
-patch_uncut = sf::st_read(here::here("outputs", "data", "patches_rshifter", "patches_rshifter_2005.gpkg")) 
+patch_uncut = sf::st_read(here::here("outputs", "data", 
+                                     "patches_rshifter", "patches_rshifter_2005.gpkg")) 
 plot(patch_uncut)
 
 #### Species distribution -----
@@ -87,7 +87,7 @@ patch_corres_id = readr::read_csv(here::here("data",
 glt_census = sf::st_read(here::here("data", "glt", "JDietz", "glt_distrib_2013_2018_2022.shp"))
 plot(glt_census)
 
-#### Species occurrence -----
+#### Species long-term monitoring -----
 regions = sf::st_read(here::here("data", "geo", "APonchon", "GLT", "RegionsName.shp"))
 plot(regions)
 
@@ -192,6 +192,7 @@ dplyr::glimpse(pop_all)
 # VS Year 8 → individuals
 ## We complete the dataset
 pop_all_complete = pop_all %>% 
+  dplyr::select(-c(RepSeason, Ncells, Species)) %>% # Remove unnecessary columns
   tidyr::complete(
     PatchID,
     Id_simul,
@@ -241,21 +242,25 @@ dplyr::glimpse(pop_all_complete)
 
 ### Join tested parameter
 pop_all_complete = pop_all_complete %>% 
-  dplyr::left_join(metadata, by = "Id_simul") %>% 
-  dplyr::select(-c(RepSeason, Ncells, Species)) # Remove unnecessary columns
+  dplyr::left_join(metadata, by = "Id_simul")
 
 ##### Pop dynamics -----
+# ATTENTION: 
+# IF female-only model: the population only includes females -> multiply by 2 to estimate the total population
+# IF sex model, the population includes both males and females
+
 # Population size by simulation
 pop_total = pop_all_complete %>%
   dplyr::group_by(Id_simul, 
                   dplyr::across(dplyr::all_of(params_tested)),
                   Rep, 
                   Year) %>%
-  dplyr::summarise(NInd = sum(NInd), # N Adults (Stage 1 + Stage 2)
-                   NJuvs = sum(NJuvs), # N Juveniles
-                   NTot = NInd+NJuvs, # Total population
+  dplyr::summarise(NInd = sum(NInd)*2, # N Adults (Stage 1 + Stage 2)
+                   NJuvs = sum(NJuvs)*2, # N Juveniles
+                   NTot = NInd+NJuvs*2, # Total population
                    .groups = "drop") %>% 
   dplyr::filter(Year != max(Year, na.rm = TRUE)) # Remove the last Year
+
 # Mean population size over time (by tested parameter)
 pop_time = pop_total %>%
   dplyr::group_by(dplyr::across(dplyr::all_of(params_tested)),
@@ -278,7 +283,7 @@ ggplot(
   # Faceting
   facet_grid(
     cols = vars(.data[[params_tested[2]]]),
-    rows = vars(.data[[params_tested[3]]]),
+    # rows = vars(.data[[params_tested[3]]]),
     scales = "free_y") +
   # Vertical reference years
   geom_vline(
@@ -316,7 +321,7 @@ ggplot(
   # Faceting
   facet_grid(
     cols = vars(.data[[params_tested[2]]]),
-    rows = vars(.data[[params_tested[3]]]),
+    # rows = vars(.data[[params_tested[3]]]),
     scales = "free_y") +
   # Vertical reference years
   geom_vline(
@@ -376,7 +381,7 @@ ggplot(
   )
 ) +
   geom_tile() +
-  facet_wrap(vars(.data[[params_tested[3]]])) +
+  # facet_wrap(vars(.data[[params_tested[3]]])) +
   scale_fill_viridis_c(
     option = "C",
     direction = -1
@@ -401,7 +406,7 @@ ggplot(
   )
 ) +
   geom_tile() +
-  facet_wrap(vars(.data[[params_tested[3]]])) +
+  # facet_wrap(vars(.data[[params_tested[3]]])) +
   scale_fill_viridis_c(
     option = "C",
     direction = -1
@@ -447,32 +452,48 @@ dplyr::glimpse(inds_all)
 
 # Unique values in the Status column
 unique(inds_all$Status)
+# Status (Bocedi et al. 2026, User Manual)
+# 0 Initial status in natal patch / philopatric recruit 
+# 1 Disperser 
+# 2 Disperser awaiting settlement in possible suitable patch 
+# 3 Waiting between dispersal events 
+# 4 Completed settlement 
+# 5 Completed settlement in a suitable neighbouring cell/patch 
+# 6 Died during transfer by failing to find a suitable patch (includes exceeding the  maximum number of steps or crossing an absorbing boundary) 
+# 7 Died during transfer by constant, step-dependent, habitat-dependent or  distance-dependent mortality 
+# 8 Failed to survive annual (demographic) mortality 
+# 9 Exceeded maximum age 
+# 10 Translocated individual
 
 ## Take a look at an individual
 # Randomly select one Rep x Id_simul combination
-selected_sim = inds_all %>% 
-  dplyr::distinct(Rep, Id_simul) %>% 
+selected_sim = inds_all %>%
+  dplyr::distinct(Rep, Id_simul) %>%
   dplyr::slice_sample(n = 1)
 # Randomly select one individual within that combination
-selected_ind = inds_all %>% 
+selected_ind = inds_all %>%
   dplyr::semi_join(
     selected_sim,
     by = c("Rep", "Id_simul")
-  ) %>% 
-  dplyr::distinct(IndID, Rep, Id_simul) %>% 
+  ) %>%
+  dplyr::distinct(IndID, Rep, Id_simul) %>%
   dplyr::slice_sample(n = 1)
 # Print the complete history of this individual
-inds_all %>% 
+inds_all %>%
   dplyr::semi_join(
     selected_ind,
     by = c("IndID", "Rep", "Id_simul")
-  ) %>% 
+  ) %>%
   dplyr::arrange(Year)
 
 
 ### Join tested parameter
 inds_all = inds_all %>% 
   dplyr::left_join(metadata, by = "Id_simul")
+
+##### Individual status by patch -----
+# To complete
+# Identify births, deaths, immigrations, emigrations
 
 ##### Select dispersal events -----
 
@@ -602,9 +623,7 @@ ggplot2::ggplot(
     size = 3
   ) +
   ggplot2::scale_y_continuous(
-    labels = scales::percent,
-    limits = c(0, 1),
-    expand = c(0, 0)
+    labels = scales::percent
   ) +
   ggplot2::labs(
     x = "Simulation (Id_simul)",
@@ -690,7 +709,7 @@ ggplot(
   )
 ) +
   geom_tile() +
-  facet_wrap(vars(.data[[params_tested[3]]])) +
+  # facet_wrap(vars(.data[[params_tested[3]]])) +
   scale_fill_viridis_c(
     option = "C",
     direction = -1
@@ -764,9 +783,7 @@ ggplot2::ggplot(
     size = 3
   ) +
   ggplot2::scale_y_continuous(
-    labels = scales::percent,
-    limits = c(0, 1),
-    expand = c(0, 0)
+    labels = scales::percent
   ) +
   ggplot2::labs(
     x = "Simulation (Id_simul)",
@@ -932,7 +949,7 @@ ggplot(
   # Faceting
   facet_grid(
     cols = vars(.data[[params_tested[2]]]),
-    rows = vars(.data[[params_tested[3]]]),
+    # rows = vars(.data[[params_tested[3]]]),
     scales = "free_y") +
   theme_bw() +
   labs(y = "Mean number of occupied patches")
@@ -958,7 +975,7 @@ ggplot(
   # Faceting
   facet_grid(
     cols = vars(.data[[params_tested[2]]]),
-    rows = vars(.data[[params_tested[3]]]),
+    # rows = vars(.data[[params_tested[3]]]),
     scales = "free_y") +
   theme_bw() +
   labs(y = "Mean number of occupied patches")
@@ -967,7 +984,7 @@ dev.off()
 
 # Number of occupied patches
 patch_occ_2100 = range_time %>% 
-  dplyr::filter(Year == 95)
+  dplyr::filter(Year == 90)
 
 #### Patch abundance and connectivity -----
 ##### Vector patches -----
@@ -1008,6 +1025,10 @@ patch_list = c("Vendaval",
                "Pirineus_114")
 
 ##### Population by patch -----
+# ATTENTION: 
+# IF female-only model: the population only includes females -> multiply by 2 to estimate the total population
+# IF sex model, the population includes both males and females
+
 pop_patch = pop_all_complete %>%
   # We focus on the best parameters
   dplyr::semi_join(best_values,
@@ -1017,9 +1038,9 @@ pop_patch = pop_all_complete %>%
   dplyr::group_by(PatchID,
                   Year) %>%
   # Mean population size by patch/year across replicates
-  dplyr::summarise(MeanNInd = round(mean(NInd),0), # N Adults (Stage 1 + Stage 2)
-                   MeanNJuvs = round(mean(NJuvs),0), # N Juveniles
-                   MeanNTot = round(mean(NInd+NJuvs),0), # Total population
+  dplyr::summarise(MeanNInd = round(mean(NInd)*2,0), # N Adults (Stage 1 + Stage 2)
+                   MeanNJuvs = round(mean(NJuvs)*2,0), # N Juveniles
+                   MeanNTot = round(mean(NInd+NJuvs)*2,0), # Total population
                    .groups = "drop")
 
 # Complete missing patch/year combinations
@@ -1958,42 +1979,79 @@ dev.off()
 
 #### Connectivity ----
 ##### Connect files -----
-# stack all files
+### Stack ALL files
+# connec_files = list.files(
+#   here::here("data",
+#              "rangeshifter",
+#              "tests",
+#              test_config$test_name,
+#              "Outputs"),
+#   pattern = "_Connect\\.txt$", # Connectivity files
+#   full.names = TRUE
+# )
+# 
+# # Read and stack all pop files
+# connec_all = purrr::map_dfr(connec_files, function(f){
+#   
+#   # Simulation id
+#   sim_id = stringr::str_extract(
+#     basename(f),
+#     "(?<=Sim)\\d+(?=_Land)"
+#   ) %>%  as.numeric()
+#   
+#   # Read pop file
+#   read.table(
+#     f,
+#     header = TRUE,
+#     sep = "\t"
+#   ) %>%
+#     dplyr::mutate(Id_simul = sim_id)
+#   
+# })
+# 
+# ### Join tested parameter
+# connec_all = connec_all %>% 
+#   dplyr::left_join(metadata, by = "Id_simul")
+
+### Stack ONLY files corresponding to the best simulation
 connec_files = list.files(
-  here::here("data",
-             "rangeshifter",
-             "tests",
-             test_config$test_name,
-             "Outputs"),
-  pattern = "_Connect\\.txt$", # Connectivity files
+  here::here(
+    "data",
+    "rangeshifter",
+    "tests",
+    test_config$test_name,
+    "Outputs"
+  ),
+  pattern = paste0(
+    "_Sim", best_sim, "_Land.*_Connect\\.txt$"
+  ),
   full.names = TRUE
 )
 
-# Read and stack all pop files
-connec_all = purrr::map_dfr(connec_files, function(f){
+# Read and stack connectivity files
+connec_all = purrr::map_dfr(connec_files, function(f) {
   
   # Simulation id
   sim_id = stringr::str_extract(
     basename(f),
     "(?<=Sim)\\d+(?=_Land)"
-  ) %>%  as.numeric()
+  ) %>% 
+    as.numeric()
   
-  # Read pop file
+  # Read connectivity file
   read.table(
     f,
     header = TRUE,
     sep = "\t"
   ) %>%
-    dplyr::mutate(Id_simul = sim_id)
-  
+    dplyr::mutate(
+      Id_simul = sim_id
+    )
 })
+
 
 # Take a look at the dataset
 dplyr::glimpse(connec_all)
-
-### Join tested parameter
-connec_all = connec_all %>% 
-  dplyr::left_join(metadata, by = "Id_simul")
 
 ##### Among cut patches ------
 ## Plot the lines at the scale of cut patches
@@ -2020,8 +2078,8 @@ data.disp.cut = data.disp.cut %>%
 ## Aggregate dispersal across years within each period
 data.disp.cut = data.disp.cut %>%
   dplyr::group_by(
-    Id_simul,
-    dplyr::across(dplyr::all_of(params_tested)),
+    # Id_simul,
+    # dplyr::across(dplyr::all_of(params_tested)),
     Period,
     StartPatch,
     EndPatch
@@ -2042,7 +2100,7 @@ data.disp.cut = data.disp.cut %>%
     Pair = paste0(Patch1, "_", Patch2)
   ) %>%
   dplyr::group_by(
-    Id_simul,
+    # Id_simul,
     Period,
     Patch1,
     Patch2,
@@ -2120,7 +2178,7 @@ disp.lines.cut = disp.lines.cut %>%
     crs = sf::st_crs(patch_sf)
   ) %>%
   dplyr::group_by(
-    Id_simul,
+    # Id_simul,
     Pair,
     Period
   ) %>%
@@ -2156,7 +2214,7 @@ map_disp_cut_2005_2013 = ggplot2::ggplot() +
   ggplot2::geom_sf(
     data = disp.lines.cut %>% 
       dplyr::filter(
-        Id_simul == best_sim,
+        # Id_simul == best_sim,
         Period == "Year 0-8"
       ),
     ggplot2::aes(linewidth = Ninds),
@@ -2209,7 +2267,7 @@ map_disp_cut_2013_2022 = ggplot2::ggplot() +
   ggplot2::geom_sf(
     data = disp.lines.cut %>% 
       dplyr::filter(
-        Id_simul == best_sim,
+        # Id_simul == best_sim,
         Period == "Year 8-17"
       ),
     ggplot2::aes(linewidth = Ninds),
@@ -2261,7 +2319,7 @@ map_disp_cut_2022_2100 = ggplot2::ggplot() +
   ggplot2::geom_sf(
     data = disp.lines.cut %>% 
       dplyr::filter(
-        Id_simul == best_sim,
+        # Id_simul == best_sim,
         Period == "Year 17-95"
       ),
     ggplot2::aes(linewidth = Ninds),
@@ -2336,7 +2394,7 @@ data.disp.ummps = data.disp.ummps %>%
 data.disp.ummps = data.disp.ummps %>%
   dplyr::group_by(
     Id_simul,
-    dplyr::across(dplyr::all_of(params_tested)),
+    # dplyr::across(dplyr::all_of(params_tested)),
     Period, # Or Year instrad
     StartPatchName,
     EndPatchName
@@ -2363,7 +2421,7 @@ data.disp.ummps = data.disp.ummps %>%
   # Aggregate both directions
   # e.g. 1 -> 2 + 2 -> 1
   dplyr::group_by(
-    Id_simul,
+    # Id_simul,
     Pair,
     Period
   ) %>%
@@ -2438,7 +2496,7 @@ disp.lines.ummps = disp.lines.ummps %>%
     crs = sf::st_crs(patch_uncut)
   ) %>%
   dplyr::group_by(
-    Id_simul,
+    # Id_simul,
     Pair,
     Period
   ) %>%
@@ -2465,8 +2523,9 @@ map_disp_uncut_2005_2013 = ggplot2::ggplot() +
   # Simulated connectivity
   ggplot2::geom_sf(
     data = disp.lines.ummps %>% 
-      dplyr::filter(Id_simul == best_sim,
-                    Period == "Year 0-8") ,
+      dplyr::filter(
+        # Id_simul == best_sim,
+        Period == "Year 0-8") ,
     ggplot2::aes(linewidth = Ninds),
     colour = "deeppink",
     alpha = 0.8
@@ -2515,8 +2574,9 @@ map_disp_uncut_2013_2022 = ggplot2::ggplot() +
   # Simulated connectivity
   ggplot2::geom_sf(
     data = disp.lines.ummps %>% 
-      dplyr::filter(Id_simul == best_sim,
-                    Period == "Year 8-17") ,
+      dplyr::filter(
+        # Id_simul == best_sim,
+        Period == "Year 8-17") ,
     ggplot2::aes(linewidth = Ninds),
     colour = "deeppink",
     alpha = 0.8
@@ -2565,8 +2625,9 @@ map_disp_uncut_2022_2100 = ggplot2::ggplot() +
   # Simulated connectivity
   ggplot2::geom_sf(
     data = disp.lines.ummps %>% 
-      dplyr::filter(Id_simul == best_sim,
-                    Period == "Year 17-95") ,
+      dplyr::filter(
+        # Id_simul == best_sim,
+        Period == "Year 17-95") ,
     ggplot2::aes(linewidth = Ninds),
     colour = "deeppink",
     alpha = 0.8
@@ -2624,8 +2685,8 @@ summary = read_excel(here::here("data",
 
 #### Information to add manually ----
 
-test_aim = "Tests with varying dispersal distances & PR"
-test_remarks = "New files exploited (inds, connect) -> new indicators added"
+test_aim = "Tests IndsHaCell AND PR based on THE REAL POP SIZE (females*2)"
+test_remarks = "IndsHaCell between 0.02 and 0.03, PR ~ 8"
 
 #### Test name -----
 test_name = basename(normalizePath(dirpath))
