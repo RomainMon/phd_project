@@ -17,12 +17,12 @@ library(viridis)
 
 # List with components stored
 test_config = list(
-  test_name = "test_resist_17", # Name of the folder
+  test_name = "test_resist_18", # Name of the folder
   
   # Parameters tested with sensitivity analysis (i.e., those varying during simulations)
   parameters = c(
     "IndsHaCell",
-    "PR"
+    "DensDep"
   )
 )
 
@@ -257,7 +257,7 @@ pop_total = pop_all_complete %>%
                   Year) %>%
   dplyr::summarise(NInd = sum(NInd)*2, # N Adults (Stage 1 + Stage 2)
                    NJuvs = sum(NJuvs)*2, # N Juveniles
-                   NTot = NInd+NJuvs*2, # Total population
+                   NTot = (NInd+NJuvs)*2, # Total population
                    .groups = "drop") %>% 
   dplyr::filter(Year != max(Year, na.rm = TRUE)) # Remove the last Year
 

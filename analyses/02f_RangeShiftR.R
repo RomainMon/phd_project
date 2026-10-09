@@ -63,11 +63,12 @@ library(viridis)
 
 # List with components stored
 test_config = list(
-  test_name = "test_resist_17", # Name of the folder
+  test_name = "test_resist_18", # Name of the folder
   
   # Parameters tested with sensitivity analysis (i.e., those varying during simulations)
   parameters = c(
     "IndsHaCell",
+    "DensDep",
     "PR"
   )
 )
@@ -391,9 +392,9 @@ for(i in 1:nrow(metadata)) {
                    OutIntPop = 1, # Whether to export population files 
                    OutIntOcc = 0, # Whether to export occupancy files (every X year)
                    OutIntRange = 10, # Whether to export range files (every X year)
-                   OutIntInd = 1, # Whether to export individual files
-                   OutIntConn = 1, # Whether to export connectivity files (n individuals from patch i to patch j)
-                   SMSHeatMap = TRUE, # Produce SMS heat map raster as output?
+                   OutIntInd = 0, # Whether to export individual files
+                   OutIntConn = 0, # Whether to export connectivity files (n individuals from patch i to patch j)
+                   SMSHeatMap = FALSE, # Produce SMS heat map raster as output?
                    ReturnPopDataFrame = TRUE, # Return population data to R as data frame (most suitable for patch based models)?
                    CreatePopFile = TRUE # Create population output file? Defaults to TRUE.
                    ) 
@@ -496,7 +497,7 @@ for(i in 1:nrow(metadata)) {
                       DensDep = F, # For movement processes only: Density-dep settlement probability?
                       IndVar = F, # For movement processes only: Individual variability in settlement probability traits?
                       MinSteps = 0, # For movement processes only: min number of steps
-                      MaxSteps = pr*max_nb_steps, # For movement processes only: max number of steps
+                      MaxSteps = max_nb_steps, # For movement processes only: max number of steps
                       MaxStepsYear = 0 # For movement processes and stage-structured population only: max nb of steps per year IF >1 reproductive season. IF 0:  every individual completes the dispersal phase in one year, i.e. between two successive reproduction phases.
   )
   
