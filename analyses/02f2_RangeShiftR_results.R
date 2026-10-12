@@ -22,7 +22,7 @@ test_config = list(
   # Parameters tested with sensitivity analysis (i.e., those varying during simulations)
   parameters = c(
     "IndsHaCell",
-    "DensDep"
+    "Max_nb_steps"
   )
 )
 
@@ -192,7 +192,9 @@ dplyr::glimpse(pop_all)
 # VS Year 8 → individuals
 ## We complete the dataset
 pop_all_complete = pop_all %>% 
-  dplyr::select(-c(RepSeason, Ncells, Species)) %>% # Remove unnecessary columns
+  dplyr::select(-c(RepSeason, 
+                   Ncells, 
+                   Species)) %>% # Remove unnecessary columns
   tidyr::complete(
     PatchID,
     Id_simul,
@@ -245,9 +247,6 @@ pop_all_complete = pop_all_complete %>%
   dplyr::left_join(metadata, by = "Id_simul")
 
 ##### Pop dynamics -----
-# ATTENTION: 
-# IF female-only model: the population only includes females -> multiply by 2 to estimate the total population
-# IF sex model, the population includes both males and females
 
 # Population size by simulation
 pop_total = pop_all_complete %>%
@@ -255,16 +254,21 @@ pop_total = pop_all_complete %>%
                   dplyr::across(dplyr::all_of(params_tested)),
                   Rep, 
                   Year) %>%
-  dplyr::summarise(NInd = sum(NInd)*2, # N Adults (Stage 1 + Stage 2)
-                   NJuvs = sum(NJuvs)*2, # N Juveniles
+  # ATTENTION: 
+  # IF female-only model: the population only includes females -> multiply by 2 to estimate the total population
+  # IF sex model, the population includes both males and females
+  dplyr::summarise(NInd = sum(NInd), # N Adults (Stage 1 + Stage 2)
+                   NJuvs = sum(NJuvs), # N Juveniles
                    NTot = (NInd+NJuvs)*2, # Total population
                    .groups = "drop") %>% 
   dplyr::filter(Year != max(Year, na.rm = TRUE)) # Remove the last Year
 
 # Mean population size over time (by tested parameter)
 pop_time = pop_total %>%
-  dplyr::group_by(dplyr::across(dplyr::all_of(params_tested)),
-                  Year) %>%
+  dplyr::group_by(
+    Id_simul,
+    dplyr::across(dplyr::all_of(params_tested)),
+    Year) %>%
   dplyr::summarise(MeanN_Ind = mean(NInd), 
                    MeanN_Juvs = mean(NJuvs),
                    MeanN_Tot = mean(NTot),
@@ -353,7 +357,9 @@ pop2022 = 4869 # Adjust
 
 ## Based on 2005, 2013 and 2022 populations sizes
 fit_score = pop_time %>%
-  dplyr::group_by(dplyr::across(dplyr::all_of(params_tested))) %>%
+  dplyr::group_by(
+    Id_simul,
+    dplyr::across(dplyr::all_of(params_tested))) %>%
   dplyr::summarise(
     N0 = MeanN_Tot[Year == 0],
     N8 = MeanN_Tot[Year == 8],
@@ -2685,8 +2691,8 @@ summary = read_excel(here::here("data",
 
 #### Information to add manually ----
 
-test_aim = "Tests IndsHaCell AND PR based on THE REAL POP SIZE (females*2)"
-test_remarks = "IndsHaCell between 0.02 and 0.03, PR ~ 8"
+test_aim = "Tests IndsHaCell and Max nb steps based on THE REAL POP SIZE (females*2) and using 60 ha territories instead"
+test_remarks = "IndsHaCell > 0.05 and colonization real slow now: increase IndsHaCell and check if colonization of patches follows"
 
 #### Test name -----
 test_name = basename(normalizePath(dirpath))

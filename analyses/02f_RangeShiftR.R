@@ -68,8 +68,7 @@ test_config = list(
   # Parameters tested with sensitivity analysis (i.e., those varying during simulations)
   parameters = c(
     "IndsHaCell",
-    "DensDep",
-    "PR"
+    "Max_nb_steps"
   )
 )
 
