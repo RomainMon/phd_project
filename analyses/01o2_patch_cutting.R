@@ -170,7 +170,7 @@ smallest_patches = dplyr::bind_rows(
       sf::st_drop_geometry() %>%
       dplyr::mutate(year = as.numeric(year_i)) %>%
       dplyr::arrange(area_m2) %>%
-      dplyr::slice_head(n = 2) # Two smaller patches
+      dplyr::slice_head(n = 2) # Two small patches
     
   })
 )
@@ -178,9 +178,9 @@ smallest_patches
 
 ### Thresholds
 # Min patch size = min occupied patch area
-MiniArea = 20000 #m²
+MiniArea = 30000 #m²
 # Max patch size = according to the literature on GLT home range (~21 ha to 150 ha, mean = 45-60 ha) (Lucas et al. 2019, Dietz et al. 1997)
-MaxiArea = 600000 #m² 
+MaxiArea = 800000 #m² 
 
 
 #### ESTETHIC PREFERENCES -----

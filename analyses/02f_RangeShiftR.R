@@ -63,12 +63,12 @@ library(viridis)
 
 # List with components stored
 test_config = list(
-  test_name = "test_resist_18", # Name of the folder
+  test_name = "test_resist_20", # Name of the folder
   
   # Parameters tested with sensitivity analysis (i.e., those varying during simulations)
   parameters = c(
     "IndsHaCell",
-    "Max_nb_steps"
+    "PR"
   )
 )
 

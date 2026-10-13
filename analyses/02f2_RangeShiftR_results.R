@@ -17,12 +17,12 @@ library(viridis)
 
 # List with components stored
 test_config = list(
-  test_name = "test_resist_18", # Name of the folder
+  test_name = "test_resist_20", # Name of the folder
   
   # Parameters tested with sensitivity analysis (i.e., those varying during simulations)
   parameters = c(
     "IndsHaCell",
-    "Max_nb_steps"
+    "PR"
   )
 )
 
@@ -254,12 +254,16 @@ pop_total = pop_all_complete %>%
                   dplyr::across(dplyr::all_of(params_tested)),
                   Rep, 
                   Year) %>%
-  # ATTENTION: 
-  # IF female-only model: the population only includes females -> multiply by 2 to estimate the total population
+  # WARNING: 
+  # IF female-only model: the population only includes females -> multiply to estimate the total population
+  # Sex ratio in wild populations: between 53% and 66% (Dietz and Baker 1993)
+  # Sex ratio in zoos: ~56%
+  # Female proportion: 100-56=44
+  # Multiplier: 1/0.44 = 2.3
   # IF sex model, the population includes both males and females
   dplyr::summarise(NInd = sum(NInd), # N Adults (Stage 1 + Stage 2)
                    NJuvs = sum(NJuvs), # N Juveniles
-                   NTot = (NInd+NJuvs)*2, # Total population
+                   NTot = (NInd+NJuvs)*2.3, # Total population
                    .groups = "drop") %>% 
   dplyr::filter(Year != max(Year, na.rm = TRUE)) # Remove the last Year
 
@@ -1031,10 +1035,6 @@ patch_list = c("Vendaval",
                "Pirineus_114")
 
 ##### Population by patch -----
-# ATTENTION: 
-# IF female-only model: the population only includes females -> multiply by 2 to estimate the total population
-# IF sex model, the population includes both males and females
-
 pop_patch = pop_all_complete %>%
   # We focus on the best parameters
   dplyr::semi_join(best_values,
@@ -1044,9 +1044,14 @@ pop_patch = pop_all_complete %>%
   dplyr::group_by(PatchID,
                   Year) %>%
   # Mean population size by patch/year across replicates
-  dplyr::summarise(MeanNInd = round(mean(NInd)*2,0), # N Adults (Stage 1 + Stage 2)
-                   MeanNJuvs = round(mean(NJuvs)*2,0), # N Juveniles
-                   MeanNTot = round(mean(NInd+NJuvs)*2,0), # Total population
+  # WARNING: 
+  # IF female-only model: the population only includes females -> multiply to estimate the total population
+  # Sex ratio in wild populations: between 53% and 66% (Dietz and Baker 1993)
+  # Sex ratio in zoos: ~56%
+  # Female proportion: 100-56=44
+  # Multiplier: 1/0.44 = 2.3
+  # IF sex model, the population includes both males and females
+  dplyr::summarise(MeanNTot = round(mean((NInd+NJuvs)*2.3),0), # Total population
                    .groups = "drop")
 
 # Complete missing patch/year combinations
@@ -1482,8 +1487,6 @@ head(pop_patch_select) # See difference between patch_id and FragName
 pop_patch_select_agg = pop_patch_select %>%
   dplyr::group_by(FragName, Year) %>%
   dplyr::summarise(
-    SimN_Ad = sum(MeanNInd),
-    SimN_Juv = sum(MeanNJuvs),
     SimN_Tot = sum(MeanNTot),
     .groups = "drop"
   )
@@ -2691,8 +2694,8 @@ summary = read_excel(here::here("data",
 
 #### Information to add manually ----
 
-test_aim = "Tests IndsHaCell and Max nb steps based on THE REAL POP SIZE (females*2) and using 60 ha territories instead"
-test_remarks = "IndsHaCell > 0.05 and colonization real slow now: increase IndsHaCell and check if colonization of patches follows"
+test_aim = "Tests IndsHaCell and PR based on THE REAL POP SIZE (females*2.3) and using 80 ha territories instead"
+test_remarks = "IndsHaCell < 0.055; colonization overall OK; pop dynamics reaches a plateau (~10000)"
 
 #### Test name -----
 test_name = basename(normalizePath(dirpath))

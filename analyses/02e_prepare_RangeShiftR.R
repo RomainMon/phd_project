@@ -365,7 +365,7 @@ patches_select = patches_sf %>%
 
 # Select these patches
 plot(sf::st_geometry(patches_sf))
-plot(sf::st_geometry(patches_glt), col="darkgreen", add=TRUE)
+# plot(sf::st_geometry(patches_glt), col="darkgreen", add=TRUE)
 plot(sf::st_geometry(patches_select), col="lightgreen", add=TRUE)
 
 ## To raster
@@ -539,7 +539,7 @@ cat(
 output_dir = here("data", 
                   "rangeshifter", 
                   "tests", 
-                  "test_resist_18", # UPDATE HERE
+                  "test_resist_20", # UPDATE HERE
                   "Inputs")
 
 # Landscape
