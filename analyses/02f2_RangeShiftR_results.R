@@ -17,12 +17,11 @@ library(viridis)
 
 # List with components stored
 test_config = list(
-  test_name = "test_resist_20", # Name of the folder
+  test_name = "test_resist_22", # Name of the folder
   
   # Parameters tested with sensitivity analysis (i.e., those varying during simulations)
   parameters = c(
-    "IndsHaCell",
-    "PR"
+    "IndsHaCell"
   )
 )
 
@@ -37,7 +36,7 @@ dirpath = here::here(
 ### Import data -----
 #### Landscape -----
 landsc = terra::rast(file.path(dirpath, "Inputs", "raster_reclass_2005.txt"))
-terra::plot(landsc)
+terra::plot(landsc, col=c("#F1F13B","#00A305","#EE11EE","#004702","blue","red"))
 terra::res(landsc)
 terra::unique(landsc)
 
@@ -289,10 +288,10 @@ ggplot(
 ) +
   geom_line(linewidth = 1) +
   # Faceting
-  facet_grid(
-    cols = vars(.data[[params_tested[2]]]),
-    # rows = vars(.data[[params_tested[3]]]),
-    scales = "free_y") +
+  # facet_grid(
+  #   cols = vars(.data[[params_tested[2]]]),
+  #   rows = vars(.data[[params_tested[3]]]),
+  #   scales = "free_y") +
   # Vertical reference years
   geom_vline(
     xintercept = c(0, 8, 17),
@@ -327,10 +326,10 @@ ggplot(
 ) +
   geom_line(linewidth = 1) +
   # Faceting
-  facet_grid(
-    cols = vars(.data[[params_tested[2]]]),
-    # rows = vars(.data[[params_tested[3]]]),
-    scales = "free_y") +
+  # facet_grid(
+  #   cols = vars(.data[[params_tested[2]]]),
+  #   rows = vars(.data[[params_tested[3]]]),
+  #   scales = "free_y") +
   # Vertical reference years
   geom_vline(
     xintercept = c(0, 8, 17),
@@ -500,10 +499,6 @@ inds_all %>%
 ### Join tested parameter
 inds_all = inds_all %>% 
   dplyr::left_join(metadata, by = "Id_simul")
-
-##### Individual status by patch -----
-# To complete
-# Identify births, deaths, immigrations, emigrations
 
 ##### Select dispersal events -----
 
@@ -698,7 +693,7 @@ disp_proportions %>%
 # Best option
 disp_proportions %>%
   dplyr::arrange(diff_disp_intra) %>%
-  dplyr::slice(1) # Select with slice(X) the row to keep
+  dplyr::slice(4) # Select with slice(X) the row to keep
 
 ### Heatmap
 ## Export plot
@@ -957,10 +952,10 @@ ggplot(
 ) +
   geom_line(linewidth = 1) +
   # Faceting
-  facet_grid(
-    cols = vars(.data[[params_tested[2]]]),
-    # rows = vars(.data[[params_tested[3]]]),
-    scales = "free_y") +
+  # facet_grid(
+  #   cols = vars(.data[[params_tested[2]]]),
+  #   rows = vars(.data[[params_tested[3]]]),
+  #   scales = "free_y") +
   theme_bw() +
   labs(y = "Mean number of occupied patches")
 
@@ -983,10 +978,10 @@ ggplot(
 ) +
   geom_line(linewidth = 1) +
   # Faceting
-  facet_grid(
-    cols = vars(.data[[params_tested[2]]]),
-    # rows = vars(.data[[params_tested[3]]]),
-    scales = "free_y") +
+  # facet_grid(
+  #   cols = vars(.data[[params_tested[2]]]),
+  #   rows = vars(.data[[params_tested[3]]]),
+  #   scales = "free_y") +
   theme_bw() +
   labs(y = "Mean number of occupied patches")
 
@@ -1051,7 +1046,7 @@ pop_patch = pop_all_complete %>%
   # Female proportion: 100-56=44
   # Multiplier: 1/0.44 = 2.3
   # IF sex model, the population includes both males and females
-  dplyr::summarise(MeanNTot = round(mean((NInd+NJuvs)*2.3),0), # Total population
+  dplyr::summarise(MeanNTot = round(mean((NInd+NJuvs)*2.3),0), # Total population across replicates
                    .groups = "drop")
 
 # Complete missing patch/year combinations
@@ -1061,11 +1056,23 @@ pop_patch = pop_patch %>%
     PatchID = patch_sf$PatchID,
     Year,
     fill = list(
-      MeanNInd = 0,
-      MeanNJuvs = 0,
       MeanNTot = 0
     )
   )
+
+# Mean pop size by patch (cut)
+# i.e., indicator of group size
+# Golden lion tamarins live in territorial social groups of 2 to 14 individuals 
+# mean 5.4-6.5 individuals per group (Baker & Beck 2023)
+group_size = pop_patch %>% 
+  dplyr::filter(MeanNTot != 0) %>% 
+  dplyr::summarise(
+    Mean_grp_size = round(mean(MeanNTot),1),
+    Median_grp_size = median(MeanNTot),
+    Min_grp_size = min(MeanNTot),
+    Max_grp_size = max(MeanNTot)
+  )
+group_size
 
 # Join REAL patch names
 pop_patch = pop_patch %>% 
@@ -1482,7 +1489,7 @@ pop_patch_select = pop_patch_select %>%
   )
 head(pop_patch_select) # See difference between patch_id and FragName
 
-# Aggregate patches sharing the same fragment name
+### Aggregate patches sharing the same fragment name
 # Example: since Aldeia_I_1 and Aldeia_I_2 correspond to the same monitored UMMP, we sum their abundances
 pop_patch_select_agg = pop_patch_select %>%
   dplyr::group_by(FragName, Year) %>%
@@ -1959,7 +1966,6 @@ heatmaps_stack = terra::rast(heatmap_files)
 # average over all layers
 heatmaps_mean = terra::mean(heatmaps_stack)
 
-# quick plot
 # Keep only patch cells with values > 0
 patches_positive = terra::ifel(patch > 0, 1, NA)
 
@@ -2540,13 +2546,13 @@ map_disp_uncut_2005_2013 = ggplot2::ggplot() +
     alpha = 0.8
   ) +
   
-  # Observed dispersal
-  ggplot2::geom_sf(
-    data = glt_disp,
-    colour = "orange",
-    linewidth = 0.2,
-    alpha = 0.9
-  ) +
+  # # Observed dispersal
+  # ggplot2::geom_sf(
+  #   data = glt_disp,
+  #   colour = "orange",
+  #   linewidth = 0.2,
+  #   alpha = 0.9
+  # ) +
   
   # One panel per simulation
   # ggplot2::facet_wrap(~Id_simul) +
@@ -2591,13 +2597,13 @@ map_disp_uncut_2013_2022 = ggplot2::ggplot() +
     alpha = 0.8
   ) +
   
-  # Observed dispersal
-  ggplot2::geom_sf(
-    data = glt_disp,
-    colour = "orange",
-    linewidth = 0.2,
-    alpha = 0.9
-  ) +
+  # # Observed dispersal
+  # ggplot2::geom_sf(
+  #   data = glt_disp,
+  #   colour = "orange",
+  #   linewidth = 0.2,
+  #   alpha = 0.9
+  # ) +
   
   # One panel per simulation
   # ggplot2::facet_wrap(~Id_simul) +
@@ -2642,13 +2648,13 @@ map_disp_uncut_2022_2100 = ggplot2::ggplot() +
     alpha = 0.8
   ) +
   
-  # Observed dispersal
-  ggplot2::geom_sf(
-    data = glt_disp,
-    colour = "orange",
-    linewidth = 0.2,
-    alpha = 0.9
-  ) +
+  # # Observed dispersal
+  # ggplot2::geom_sf(
+  #   data = glt_disp,
+  #   colour = "orange",
+  #   linewidth = 0.2,
+  #   alpha = 0.9
+  # ) +
   
   # One panel per simulation
   # ggplot2::facet_wrap(~Id_simul) +
@@ -2694,8 +2700,8 @@ summary = read_excel(here::here("data",
 
 #### Information to add manually ----
 
-test_aim = "Tests IndsHaCell and PR based on THE REAL POP SIZE (females*2.3) and using 80 ha territories instead"
-test_remarks = "IndsHaCell < 0.055; colonization overall OK; pop dynamics reaches a plateau (~10000)"
+test_aim = "Tests IndsHaCell based on THE REAL POP SIZE (females*2.3) and using 80 ha territories instead"
+test_remarks = "IndsHaCell = 0.048"
 
 #### Test name -----
 test_name = basename(normalizePath(dirpath))
@@ -2855,6 +2861,12 @@ new_summary = dplyr::tibble(
   'Occ_true_pos_2022%' = prop_match_2022$prop_match_pres_2022,
   'Occ_true_neg_2013%' = prop_match_2013$prop_match_abs_2013,
   'Occ_true_neg_2022%' = prop_match_2022$prop_match_abs_2022,
+  
+  'Mean_grp_size' = group_size$Mean_grp_size,
+  'Median_grp_size' = group_size$Median_grp_size,
+  'Min_grp_size' = group_size$Min_grp_size,
+  'Max_grp_size' = group_size$Max_grp_size,
+  
   'Prop_disp_intrapatch' = best_fit$mean_prop_intra,
   'Prop_disp_interpatch' = best_fit$mean_prop_inter,
   'Disp_dist_intrapatch' = best_fit$mean_disp_dist_intra,

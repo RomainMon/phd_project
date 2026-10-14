@@ -63,12 +63,11 @@ library(viridis)
 
 # List with components stored
 test_config = list(
-  test_name = "test_resist_20", # Name of the folder
+  test_name = "test_resist_22", # Name of the folder
   
   # Parameters tested with sensitivity analysis (i.e., those varying during simulations)
   parameters = c(
-    "IndsHaCell",
-    "PR"
+    "IndsHaCell"
   )
 )
 
@@ -179,7 +178,6 @@ metadata = read_excel(here::here("data",
 
 # Transform TRUE/FALSE values into logical
 metadata$StraightenPath = ifelse(metadata$StraightenPath == "TRUE", TRUE, FALSE)
-
 
 #### Loop (WITHOUT DISPERSAL) -----
 
@@ -391,9 +389,9 @@ for(i in 1:nrow(metadata)) {
                    OutIntPop = 1, # Whether to export population files 
                    OutIntOcc = 0, # Whether to export occupancy files (every X year)
                    OutIntRange = 10, # Whether to export range files (every X year)
-                   OutIntInd = 0, # Whether to export individual files
-                   OutIntConn = 0, # Whether to export connectivity files (n individuals from patch i to patch j)
-                   SMSHeatMap = FALSE, # Produce SMS heat map raster as output?
+                   OutIntInd = 1, # Whether to export individual files
+                   OutIntConn = 1, # Whether to export connectivity files (n individuals from patch i to patch j)
+                   SMSHeatMap = TRUE, # Produce SMS heat map raster as output?
                    ReturnPopDataFrame = TRUE, # Return population data to R as data frame (most suitable for patch based models)?
                    CreatePopFile = TRUE # Create population output file? Defaults to TRUE.
                    ) 
