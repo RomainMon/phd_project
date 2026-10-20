@@ -17,7 +17,7 @@ library(viridis)
 
 # List with components stored
 test_config = list(
-  test_name = "test_resist_22", # Name of the folder
+  test_name = "test_resist_23", # Name of the folder
   
   # Parameters tested with sensitivity analysis (i.e., those varying during simulations)
   parameters = c(
@@ -35,14 +35,14 @@ dirpath = here::here(
 
 ### Import data -----
 #### Landscape -----
-landsc = terra::rast(file.path(dirpath, "Inputs", "raster_reclass_2005.txt"))
+landsc = terra::rast(file.path(dirpath, "Inputs", "raster_reclass_2024.txt"))
 terra::plot(landsc, col=c("#F1F13B","#00A305","#EE11EE","#004702","blue","red"))
 terra::res(landsc)
 terra::unique(landsc)
 
 #### Patches ----
 ## Cut patches
-patch = terra::rast(file.path(dirpath, "Inputs", "patches_2005.txt"))
+patch = terra::rast(file.path(dirpath, "Inputs", "patches_2024.txt"))
 terra::res(patch)
 # We can have a glimpse at how many cells the different patches contain:
 table(terra::values(patch))
@@ -58,11 +58,12 @@ terra::plot(
 
 ## Uncut patches
 patch_uncut = sf::st_read(here::here("outputs", "data", 
-                                     "patches_rshifter", "patches_rshifter_2005.gpkg")) 
+                                     "patches_rshifter", 
+                                     "patches_rshifter_2024.gpkg")) 
 plot(patch_uncut)
 
 #### Species distribution -----
-patch_w_glt  = terra::rast(file.path(dirpath, "Inputs", "patches_w_glt_2005.txt"))
+patch_w_glt  = terra::rast(file.path(dirpath, "Inputs", "patches_w_glt_2024.txt"))
 terra::res(patch_w_glt)
 terra::plot(patch_w_glt, col=c("gray","darkgreen"))
 terra::unique(patch_w_glt)
@@ -79,7 +80,7 @@ patch_corres_id = readr::read_csv(here::here("data",
                                              "tests", 
                                              test_config$test_name,
                                              "Inputs", 
-                                             "patch_corres_id_2005.csv"),
+                                             "patch_corres_id_2024.csv"),
                                   col_types = readr::cols(uncut_patch_id = readr::col_integer())) # PATCH INTEGER ID HERE
 
 #### Species distribution ----
@@ -1955,7 +1956,7 @@ dev.off()
 heatmap_files = paste0(
   dirpath,
   "Output_Maps/Batch1_Sim",
-  best_sim,
+  best_sim, # Heatmaps of the best simulation only
   "_Land1_Rep",
   0:19,
   "_Visits.txt"

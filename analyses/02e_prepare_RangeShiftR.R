@@ -62,15 +62,15 @@ names(patches) = vector_df$year # Name by year
 #### Patches (raster) -------
 # These correspond to raster patches created WITH Queru's et al. (2026) patch-cutting procedure
 patches_cut = terra::rast(here("outputs", "data", "patches_cut", 
-                               "2005", # CHOOSE THE PATCHES OF THE YEAR OF INTEREST
-                               "FinalPatches_2005.tif"))
+                               "2024", # CHOOSE THE PATCHES OF THE YEAR OF INTEREST
+                               "FinalPatches_2024.tif"))
 plot(patches_cut)
 
 #### Stepping stones (raster) -------
 # These correspond to raster patches created WITH Queru's et al. (2026) identification of small patches
 stepping_stones = terra::rast(here("outputs", "data", "patches_cut", 
-                                   "2005", # CHOOSE THE PATCHES OF THE YEAR OF INTEREST
-                                   "TooSmallPatches_2005.tif"))
+                                   "2024", # CHOOSE THE PATCHES OF THE YEAR OF INTEREST
+                                   "TooSmallPatches_2024.tif"))
 plot(stepping_stones, col="orange")
 
 ### Maps -----
@@ -147,7 +147,7 @@ rasters_resist = lapply(rasters_rshifter, reclass)
 ##### Select landscape of interest ------
 
 # CHOOSE THE YEAR OF INTEREST
-rast = rasters_resist[['2005']]
+rast = rasters_resist[['2024']]
 
 # plot(rast, col=c("white","gray","darkgreen")) # Binary raster
 plot(rast, col=c("white","yellow","darkgreen","green","brown","blue","red"))
@@ -173,13 +173,13 @@ patches = lapply(patches, function(x){
   x %>%
     mutate(unique_id = row_number())
 })
-anyDuplicated(patches[['2005']]$lyr.1) # Duplicated ids
-anyDuplicated(patches[['2005']]$patch_id) # GOOD but not integer value
-anyDuplicated(patches[['2005']]$unique_id) # ALL GOOD
+anyDuplicated(patches[['2024']]$lyr.1) # Duplicated ids
+anyDuplicated(patches[['2024']]$patch_id) # GOOD but not integer value
+anyDuplicated(patches[['2024']]$unique_id) # ALL GOOD
 
 # Vector patches
 # CHOOSE THE YEAR OF INTEREST
-patches_sf = patches[['2005']]
+patches_sf = patches[['2024']]
 
 # Correspondence table between patch name and id
 patch_corres_id = patches_sf %>%
@@ -218,7 +218,7 @@ for (yr in names(patches)) {
 ## Raster patches
 
 # CHOOSE THE YEAR OF INTEREST
-patches_r = patch_rasters[['2005']]
+patches_r = patch_rasters[['2024']]
 
 ##### IF RASTER ----
 ### i.e., Patches are already rasterized (e.g., using Queru et al. 2026 procedure)
@@ -312,56 +312,56 @@ patch_correspondence = patch_intersection %>%
 # For 2005: name explicitely the occupied patches (the data on GLT census does not exist)
 
 # Between parentheses, provide the NAMES of the patches
-patches_select = patches_sf %>%
-  dplyr::filter(patch_id %in% c("Vendaval",
-                                "Rio_Vermelho",
-                                "Boa_Esperanca_II",
-                                "Imbau_I_2",
-                                "Sta_Helena_II",
-                                "Sta_Helena_I",
-                                "Sta_Helena",
-                                "Aldeia_I_1",
-                                "Aldeia_I_2",
-                                "Aldeia_I_3",
-                                "Poco_das_Antas",
-                                "Poco.das.Antas_192", # Cambucas
-                                "Uniao_N_2",
-                                "Uniao_S",
-                                "Nova_Esperanca_2",
-                                "Afetiva",
-                                "Pirineus_114",
-                                "Sao_Joao_II"))
+# patches_select = patches_sf %>%
+#   dplyr::filter(patch_id %in% c("Vendaval",
+#                                 "Rio_Vermelho",
+#                                 "Boa_Esperanca_II",
+#                                 "Imbau_I_2",
+#                                 "Sta_Helena_II",
+#                                 "Sta_Helena_I",
+#                                 "Sta_Helena",
+#                                 "Aldeia_I_1",
+#                                 "Aldeia_I_2",
+#                                 "Aldeia_I_3",
+#                                 "Poco_das_Antas",
+#                                 "Poco.das.Antas_192", # Cambucas
+#                                 "Uniao_N_2",
+#                                 "Uniao_S",
+#                                 "Nova_Esperanca_2",
+#                                 "Afetiva",
+#                                 "Pirineus_114",
+#                                 "Sao_Joao_II"))
 
-### 2022
-# For 2022: we use the spatial data (GLT census)
-# # Patches intersecting GLTs detected in 2022
-# patches_glt = patches_sf[
-#   lengths(
-#     sf::st_intersects(
-#       patches_sf,
-#       glt_occ %>% dplyr::filter(Detect2022 == "P")
-#     )
-#   ) > 0,
-# ]
-# 
-# # Patches intersecting regions
-# patches_regions = patches_sf[
-#   lengths(
-#     sf::st_intersects(
-#       patches_sf,
-#       regions
-#     )
-#   ) > 0,
-# ]
-# 
-# # Keep patches intersecting either a GLT OR a region
-# patches_select = patches_sf %>% 
-#   dplyr::filter(
-#     patch_id %in% c(
-#       patches_glt$patch_id,
-#       patches_regions$patch_id
-#     )
-#   )
+### 2024
+# For 2024: we use the spatial data (GLT census)
+# Patches intersecting GLTs detected in the last census (2022-2023)
+patches_glt = patches_sf[
+  lengths(
+    sf::st_intersects(
+      patches_sf,
+      glt_occ %>% dplyr::filter(Detect2022 == "P")
+    )
+  ) > 0,
+]
+
+# Patches intersecting regions
+patches_regions = patches_sf[
+  lengths(
+    sf::st_intersects(
+      patches_sf,
+      regions
+    )
+  ) > 0,
+]
+
+# Keep patches intersecting either a GLT OR a region
+patches_select = patches_sf %>%
+  dplyr::filter(
+    patch_id %in% c(
+      patches_glt$patch_id,
+      patches_regions$patch_id
+    )
+  )
 
 # Select these patches
 plot(sf::st_geometry(patches_sf))
@@ -539,14 +539,14 @@ cat(
 output_dir = here("data", 
                   "rangeshifter", 
                   "tests", 
-                  "test_resist_20", # UPDATE HERE
+                  "test_resist_23", # UPDATE HERE
                   "Inputs")
 
 # Landscape
 plot(rast)
 writeRaster(
   rast,
-  filename = file.path(output_dir, "raster_reclass_2005.txt"),
+  filename = file.path(output_dir, "raster_reclass_2024.txt"),
   filetype = "AAIGrid",
   overwrite = TRUE,
   datatype = "INT2S",
@@ -557,7 +557,7 @@ writeRaster(
 plot(patches_r)
 writeRaster(
   patches_r,
-  filename = file.path(output_dir, "patches_2005.txt"),
+  filename = file.path(output_dir, "patches_2024.txt"),
   filetype = "AAIGrid",
   overwrite = TRUE,
   datatype = "INT2S",
@@ -568,7 +568,7 @@ writeRaster(
 plot(patch_w_glt)
 writeRaster(
   patch_w_glt,
-  filename = file.path(output_dir, "patches_w_glt_2005.txt"),
+  filename = file.path(output_dir, "patches_w_glt_2024.txt"),
   filetype = "AAIGrid",
   overwrite = TRUE,
   datatype = "INT2S",
@@ -579,6 +579,6 @@ writeRaster(
 # CHOOSE THE PROPER CORRESPONDENCE TABLE (depending on the type of patches used)
 write.csv(
   patch_correspondence,
-  file.path(output_dir, "patch_corres_id_2005.csv"),
+  file.path(output_dir, "patch_corres_id_2024.csv"),
   row.names = FALSE
 )

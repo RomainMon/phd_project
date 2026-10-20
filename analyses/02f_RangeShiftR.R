@@ -63,7 +63,7 @@ library(viridis)
 
 # List with components stored
 test_config = list(
-  test_name = "test_resist_22", # Name of the folder
+  test_name = "test_resist_23", # Name of the folder
   
   # Parameters tested with sensitivity analysis (i.e., those varying during simulations)
   parameters = c(
@@ -86,13 +86,13 @@ dirpath = here::here(
 
 ### Check the landscape -----
 ## Import a landscape
-landsc = terra::rast(file.path(dirpath, "Inputs", "raster_reclass_2005.txt"))
+landsc = terra::rast(file.path(dirpath, "Inputs", "raster_reclass_2024.txt"))
 terra::plot(landsc)
 terra::res(landsc)
 terra::unique(landsc)
 
 ## Cut patches
-patch = terra::rast(file.path(dirpath, "Inputs", "patches_2005.txt"))
+patch = terra::rast(file.path(dirpath, "Inputs", "patches_2024.txt"))
 terra::res(patch)
 # We can have a glimpse at how many cells the different patches contain:
 table(terra::values(patch))
@@ -108,11 +108,11 @@ terra::plot(
 
 ## Uncut patches
 patch_uncut = sf::st_read(here::here("outputs", "data", "patches_rshifter", 
-                                     "patches_rshifter_2005.gpkg")) 
+                                     "patches_rshifter_2024.gpkg")) 
 plot(patch_uncut)
 
 ## Species distribution
-patch_w_glt  = terra::rast(file.path(dirpath, "Inputs", "patches_w_glt_2005.txt"))
+patch_w_glt  = terra::rast(file.path(dirpath, "Inputs", "patches_w_glt_2024.txt"))
 terra::res(patch_w_glt)
 terra::plot(patch_w_glt, col=c("gray","darkgreen"))
 terra::unique(patch_w_glt)
@@ -400,12 +400,12 @@ for(i in 1:nrow(metadata)) {
   # DynamicLandYears: For a dynamic landscape, DynamicLandYears lists the years in which the corresponding habitat maps in LandscapeFile and - if applicable - their respective patch and/or costs maps (in PatchFile,CostsFile) are loaded and used in the simulation
   # demogScaleLayersFile: List of vectors with file names of additional landscape layers which can be used to locally scale certain demographic rates and thus allow them to vary spatially. The list must contain equally sized vectors providing file names, one vector for each element in DynamicLandYears, which are interpreted as stacked layers. Can only be used in combination with habitat quality maps, i.e. when HabPercent=TRUE. It must contain percentage values ranging from 0 to 100
   real_land = ImportedLandscape(
-    LandscapeFile = "raster_reclass_2005.txt",
-    PatchFile = "patches_2005.txt",
+    LandscapeFile = "raster_reclass_2024.txt",
+    PatchFile = "patches_2024.txt",
     Resolution = 28.35578,
     Nhabitats = nhab, # Number of land covers
     K_or_DensDep = c(0, densdep, 0, 0, 0, 0), # Density dependence of the modeled species and is given in units of the nb of individuals/ha (for each land cover). If combined with a StageStructured model, K_or_DensDep will be used as the strength of demographic density dependence b-1. If combined with a non-structured model, K_or_DensDep will be interpreted as limiting carrying capacity K
-    SpDistFile = "patches_w_glt_2005.txt",
+    SpDistFile = "patches_w_glt_2024.txt",
     SpDistResolution = 28.35578
   )
   

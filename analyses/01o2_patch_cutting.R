@@ -116,7 +116,7 @@ plot(sf::st_geometry(patches[[as.character(years[36])]]),
 names(binary_rasters) = years
 
 # Pick the raster of interest!
-HabitatLayer = binary_rasters[["2005"]]
+HabitatLayer = binary_rasters[["2024"]]
 
 #### Dilatation-erosion (optional) ----
 ### OPTIONAL STEP - Perform a DILATATION EROSION on habitat map, to remove the small gaps and spurs
@@ -199,7 +199,7 @@ NbColorsWanted = 12
 ######################################################################################################################
 
 ##### USE THE FUNCTION -----
-Landscape = "2005" 
+Landscape = "2024" 
 list2env(
   situation_report_patches(
     habitat_layer = HabitatLayer,
@@ -296,7 +296,7 @@ plot_histo(FinalPatches,log_scale=T); abline(v=log(MiniArea),col="red");abline(v
 terra::writeRaster(
   TooSmallPatches,
   here(
-    "outputs", "data", "patches_cut", "2005",
+    "outputs", "data", "patches_cut", "2024",
     paste0("TooSmallPatches_", Landscape, ".tif")
   ),
   overwrite = TRUE
@@ -304,7 +304,7 @@ terra::writeRaster(
 terra::writeRaster(
   TooLargePatches,
   here(
-    "outputs", "data", "patches_cut", "2005",
+    "outputs", "data", "patches_cut", "2024",
     paste0("TooLargePatches_", Landscape, ".tif")
   ),
   overwrite = TRUE
@@ -312,7 +312,7 @@ terra::writeRaster(
 terra::writeRaster(
   CorrectPatches,
   here(
-    "outputs", "data", "patches_cut", "2005",
+    "outputs", "data", "patches_cut", "2024",
     paste0("CorrectPatches_", Landscape, ".tif")
   ),
   overwrite = TRUE
@@ -320,7 +320,7 @@ terra::writeRaster(
 terra::writeRaster(
   FinalPatches,
   here(
-    "outputs", "data", "patches_cut", "2005",
+    "outputs", "data", "patches_cut", "2024",
     paste0("FinalPatches_", Landscape, ".tif")
   ),
   overwrite = TRUE
