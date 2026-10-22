@@ -106,17 +106,16 @@ for (i in seq_along(rasters_mspa)) {
   cat("Year", year_i, "done\n")
 }
 
-
 # Plot
 plot(binary_rasters[[36]])
 plot(sf::st_geometry(patches[[as.character(years[36])]]),
-     add = TRUE, border = "red")
+     add = TRUE, border = "white", lwd=0.001)
 
 ### PICK A RASTER -------
 names(binary_rasters) = years
 
 # Pick the raster of interest!
-HabitatLayer = binary_rasters[["2024"]]
+HabitatLayer = binary_rasters[["2023"]]
 
 #### Dilatation-erosion (optional) ----
 ### OPTIONAL STEP - Perform a DILATATION EROSION on habitat map, to remove the small gaps and spurs
@@ -180,7 +179,7 @@ smallest_patches
 # Min patch size = min occupied patch area
 MiniArea = 30000 #m²
 # Max patch size = according to the literature on GLT home range (~21 ha to 150 ha, mean = 45-60 ha) (Lucas et al. 2019, Dietz et al. 1997)
-MaxiArea = 800000 #m² 
+MaxiArea = 700000 #m² 
 
 
 #### ESTETHIC PREFERENCES -----
@@ -199,7 +198,7 @@ NbColorsWanted = 12
 ######################################################################################################################
 
 ##### USE THE FUNCTION -----
-Landscape = "2024" 
+Landscape = "2023" 
 list2env(
   situation_report_patches(
     habitat_layer = HabitatLayer,
@@ -296,7 +295,7 @@ plot_histo(FinalPatches,log_scale=T); abline(v=log(MiniArea),col="red");abline(v
 terra::writeRaster(
   TooSmallPatches,
   here(
-    "outputs", "data", "patches_cut", "2024",
+    "outputs", "data", "patches_cut", "2023",
     paste0("TooSmallPatches_", Landscape, ".tif")
   ),
   overwrite = TRUE
@@ -304,7 +303,7 @@ terra::writeRaster(
 terra::writeRaster(
   TooLargePatches,
   here(
-    "outputs", "data", "patches_cut", "2024",
+    "outputs", "data", "patches_cut", "2023",
     paste0("TooLargePatches_", Landscape, ".tif")
   ),
   overwrite = TRUE
@@ -312,7 +311,7 @@ terra::writeRaster(
 terra::writeRaster(
   CorrectPatches,
   here(
-    "outputs", "data", "patches_cut", "2024",
+    "outputs", "data", "patches_cut", "2023",
     paste0("CorrectPatches_", Landscape, ".tif")
   ),
   overwrite = TRUE
@@ -320,7 +319,7 @@ terra::writeRaster(
 terra::writeRaster(
   FinalPatches,
   here(
-    "outputs", "data", "patches_cut", "2024",
+    "outputs", "data", "patches_cut", "2023",
     paste0("FinalPatches_", Landscape, ".tif")
   ),
   overwrite = TRUE

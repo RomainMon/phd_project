@@ -17,7 +17,7 @@ library(viridis)
 
 # List with components stored
 test_config = list(
-  test_name = "test_resist_23", # Name of the folder
+  test_name = "test_resist_25", # Name of the folder
   
   # Parameters tested with sensitivity analysis (i.e., those varying during simulations)
   parameters = c(
@@ -35,14 +35,14 @@ dirpath = here::here(
 
 ### Import data -----
 #### Landscape -----
-landsc = terra::rast(file.path(dirpath, "Inputs", "raster_reclass_2024.txt"))
+landsc = terra::rast(file.path(dirpath, "Inputs", "raster_reclass_2023.txt"))
 terra::plot(landsc, col=c("#F1F13B","#00A305","#EE11EE","#004702","blue","red"))
 terra::res(landsc)
 terra::unique(landsc)
 
 #### Patches ----
 ## Cut patches
-patch = terra::rast(file.path(dirpath, "Inputs", "patches_2024.txt"))
+patch = terra::rast(file.path(dirpath, "Inputs", "patches_2023.txt"))
 terra::res(patch)
 # We can have a glimpse at how many cells the different patches contain:
 table(terra::values(patch))
@@ -59,11 +59,11 @@ terra::plot(
 ## Uncut patches
 patch_uncut = sf::st_read(here::here("outputs", "data", 
                                      "patches_rshifter", 
-                                     "patches_rshifter_2024.gpkg")) 
+                                     "patches_rshifter_2023.gpkg")) 
 plot(patch_uncut)
 
 #### Species distribution -----
-patch_w_glt  = terra::rast(file.path(dirpath, "Inputs", "patches_w_glt_2024.txt"))
+patch_w_glt  = terra::rast(file.path(dirpath, "Inputs", "patches_w_glt_2023.txt"))
 terra::res(patch_w_glt)
 terra::plot(patch_w_glt, col=c("gray","darkgreen"))
 terra::unique(patch_w_glt)
@@ -80,7 +80,7 @@ patch_corres_id = readr::read_csv(here::here("data",
                                              "tests", 
                                              test_config$test_name,
                                              "Inputs", 
-                                             "patch_corres_id_2024.csv"),
+                                             "patch_corres_id_2023.csv"),
                                   col_types = readr::cols(uncut_patch_id = readr::col_integer())) # PATCH INTEGER ID HERE
 
 #### Species distribution ----
@@ -188,8 +188,8 @@ pop_all = purrr::map_dfr(pop_files, function(f){
 dplyr::glimpse(pop_all)
 
 ### WARNING: pop_all records pop size in patches WHENEVER one patch becomes occupied, not before
-#i.e. Patch A: Year 1–7 → no row
-# VS Year 8 → individuals
+# i.e. Patch A: Year 1–7 → no row VS Year 8 → individuals
+
 ## We complete the dataset
 pop_all_complete = pop_all %>% 
   dplyr::select(-c(RepSeason, 
@@ -207,7 +207,9 @@ pop_all_complete = pop_all %>%
       NJuvs = 0
     )
   )
-dplyr::glimpse(pop_all_complete)
+
+# CHECK
+dplyr::glimpse(pop_all_complete) # We should see NInd = 0 now (before first occurrence)
 
 # ## Quick check: Patch 138 before and after completing the dataset
 # # Original data
@@ -293,18 +295,27 @@ ggplot(
   #   cols = vars(.data[[params_tested[2]]]),
   #   rows = vars(.data[[params_tested[3]]]),
   #   scales = "free_y") +
-  # Vertical reference years
-  geom_vline(
-    xintercept = c(0, 8, 17),
-    linetype = "dashed",
-    colour = "black"
-  ) +
-  annotate("point", x = 0,  y = 1600, size = 3) +
-  annotate("point", x = 8, y = 3706, size = 3) +
-  annotate("point", x = 17, y = 4869, size = 3) +
-  annotate("text", x = 0,  y = 1600, label = "2005", vjust = -1) +
-  annotate("text", x = 8, y = 3706, label = "2013", vjust = -1) +
-  annotate("text", x = 17, y = 4869, label = "2022", vjust = -1) +
+  
+  ### IF SIMULATIONS START IN 2005
+  ## Vertical reference years
+  # geom_vline(
+  #   xintercept = c(0, 8, 17),
+  #   linetype = "dashed",
+  #   colour = "black"
+  # ) +
+  
+  ## Annotations at reference years (2005, 2013, 2022)
+  # annotate("point", x = 0,  y = 1600, size = 3) +
+  # annotate("point", x = 8, y = 3706, size = 3) +
+  # annotate("point", x = 17, y = 4869, size = 3) +
+  # annotate("text", x = 0,  y = 1600, label = "2005", vjust = -1) +
+  # annotate("text", x = 8, y = 3706, label = "2013", vjust = -1) +
+  # annotate("text", x = 17, y = 4869, label = "2022", vjust = -1) +
+  
+  ### IF SIMULATIONS START IN 2023
+  annotate("point", x = 0, y = 4869, size = 3) +
+  annotate("text", x = 0, y = 4869, label = "2022", vjust = -1) +
+  
   theme_bw() +
   labs(y = "Mean population size (total)")
 
@@ -321,7 +332,7 @@ ggplot(
   pop_time,
   aes(
     x = Year,
-    y = MeanN_Tot,
+    y = MeanN_Tot, # Choose the proper count
     colour = factor(.data[[params_tested[1]]])
   )
 ) +
@@ -331,20 +342,29 @@ ggplot(
   #   cols = vars(.data[[params_tested[2]]]),
   #   rows = vars(.data[[params_tested[3]]]),
   #   scales = "free_y") +
-  # Vertical reference years
-  geom_vline(
-    xintercept = c(0, 8, 17),
-    linetype = "dashed",
-    colour = "black"
-  ) +
-  annotate("point", x = 0,  y = 1600, size = 3) +
-  annotate("point", x = 8, y = 3706, size = 3) +
-  annotate("point", x = 17, y = 4869, size = 3) +
-  annotate("text", x = 0,  y = 1600, label = "2005", vjust = -1) +
-  annotate("text", x = 8, y = 3706, label = "2013", vjust = -1) +
-  annotate("text", x = 17, y = 4869, label = "2022", vjust = -1) +
+  
+  ### IF SIMULATIONS START IN 2005
+  ## Vertical reference years
+  # geom_vline(
+  #   xintercept = c(0, 8, 17),
+  #   linetype = "dashed",
+  #   colour = "black"
+  # ) +
+  
+  ## Annotations at reference years (2005, 2013, 2022)
+  # annotate("point", x = 0,  y = 1600, size = 3) +
+  # annotate("point", x = 8, y = 3706, size = 3) +
+  # annotate("point", x = 17, y = 4869, size = 3) +
+  # annotate("text", x = 0,  y = 1600, label = "2005", vjust = -1) +
+  # annotate("text", x = 8, y = 3706, label = "2013", vjust = -1) +
+  # annotate("text", x = 17, y = 4869, label = "2022", vjust = -1) +
+  
+  ### IF SIMULATIONS START IN 2023
+  annotate("point", x = 0, y = 4869, size = 3) +
+  annotate("text", x = 0, y = 4869, label = "2022", vjust = -1) +
+  
   theme_bw() +
-  labs(y = "Mean population size (total)") # UPDATE according to indicator
+  labs(y = "Mean population size (total)")
 
 dev.off()
 
@@ -360,28 +380,42 @@ pop2022 = 4869 # Adjust
 # Calculation: square root of the mean of the squares of the deviations
 
 ## Based on 2005, 2013 and 2022 populations sizes
+# fit_score = pop_time %>%
+#   dplyr::group_by(
+#     Id_simul,
+#     dplyr::across(dplyr::all_of(params_tested))) %>%
+#   dplyr::summarise(
+#     N0 = MeanN_Tot[Year == 0],
+#     N8 = MeanN_Tot[Year == 8],
+#     N17 = MeanN_Tot[Year == 17],
+#     .groups = "drop"
+#   ) %>%
+#   dplyr::mutate(
+#     RMSE = sqrt(
+#       ((N0 - pop2005)^2 +
+#          (N8 - pop2013)^2 +
+#          (N17 - pop2022)^2) / 3
+#     ))
+
+## Based on 2022 population size
 fit_score = pop_time %>%
   dplyr::group_by(
     Id_simul,
     dplyr::across(dplyr::all_of(params_tested))) %>%
   dplyr::summarise(
     N0 = MeanN_Tot[Year == 0],
-    N8 = MeanN_Tot[Year == 8],
-    N17 = MeanN_Tot[Year == 17],
     .groups = "drop"
   ) %>%
   dplyr::mutate(
-    RMSE = sqrt(
-      ((N0 - pop2005)^2 +
-         (N8 - pop2013)^2 +
-         (N17 - pop2022)^2) / 3
-    ))
+    RMSE = sqrt((N0 - pop2022)^2))
+
 # Rank the best options
 fit_score %>%
   dplyr::arrange(RMSE) %>%
   dplyr::slice(1:10)
 
 ## Heatmap plot
+# When >2 two parameters are tested only
 ggplot(
   fit_score, # Fit scores
   aes(
@@ -579,7 +613,7 @@ disp_success = dispersers_all %>%
     .groups = "drop"
   )
 
-### Barplot
+### Summary data
 disp_plot = disp_success %>% 
   dplyr::select(
     Id_simul,
@@ -603,6 +637,7 @@ disp_plot = disp_success %>%
     Label = paste0(round(Proportion * 100, 1), "%")
   )
 
+### PLOT
 ## Export plot
 png(here("data",
          "rangeshifter",
@@ -990,7 +1025,7 @@ dev.off()
 
 # Number of occupied patches
 patch_occ_2100 = range_time %>% 
-  dplyr::filter(Year == 90)
+  dplyr::filter(Year == 70)
 
 #### Patch abundance and connectivity -----
 ##### Vector patches -----
@@ -1013,8 +1048,26 @@ patch_sf = sf::st_as_sf(patch_v) %>%
 #                "Rio_Vermelho",
 #                "Uniao_N_2")
 
-# names of the patches used for simulations
+# names of the patches used for simulations (2005 map)
 # i.e., patches of forests <500 m
+# patch_list = c("Vendaval",
+#                "Rio_Vermelho",
+#                "Boa_Esperanca_II",
+#                "Imbau_I_2",
+#                "Sta_Helena_II",
+#                "Sta_Helena_I",
+#                "Sta_Helena",
+#                "Aldeia_I_1",
+#                "Aldeia_I_2",
+#                "Poco_das_Antas",
+#                "Uniao_N_2",
+#                "Nova_Esperanca_2",
+#                "Afetiva",
+#                "Pirineus_114")
+
+# names of the patches used for simulations (2023 map)
+# i.e., patches of forests <500 m
+# Check patches names in the patch file (names were give in patch_prep script)
 patch_list = c("Vendaval",
                "Rio_Vermelho",
                "Boa_Esperanca_II",
@@ -1024,11 +1077,13 @@ patch_list = c("Vendaval",
                "Sta_Helena",
                "Aldeia_I_1",
                "Aldeia_I_2",
+               "Aldeia_I_3",
+               "Aldeia_I_4",
                "Poco_das_Antas",
                "Uniao_N_2",
                "Nova_Esperanca_2",
                "Afetiva",
-               "Pirineus_114")
+               "Pirineus_121")
 
 ##### Population by patch -----
 pop_patch = pop_all_complete %>%
@@ -1064,7 +1119,8 @@ pop_patch = pop_patch %>%
 # Mean pop size by patch (cut)
 # i.e., indicator of group size
 # Golden lion tamarins live in territorial social groups of 2 to 14 individuals 
-# mean 5.4-6.5 individuals per group (Baker & Beck 2023)
+# mean 5.4 to 6.5 individuals per group (Baker & Beck 2023)
+# IMPORTANT: check that the pop number actually represents the whole population (not just FEMALES)
 group_size = pop_patch %>% 
   dplyr::filter(MeanNTot != 0) %>% 
   dplyr::summarise(
@@ -1097,87 +1153,87 @@ patch_sf_pop = patch_sf %>%
 
 ### Proportions of patches occupied
 # We compare the number of patches occupied in simulations with the number of patches occupied in the census dataset
-# Comparison with the 2013 census
-sim_2013 = patch_sf_pop %>%
-  # Select the year of interest
-  dplyr::filter(Year == 8) %>%
-  # Mutate the occupancy state
-  dplyr::mutate(
-    sim_occupied = dplyr::case_when(MeanNTot == 0 ~ "Unoccupied",
-                                    MeanNTot > 0 ~ "Occupied")
-  ) %>%
-  dplyr::select(
-    PatchID, # RangeShifter patch id
-    Year,
-    sim_occupied,
-    geometry
-  )
 
-# Census data
-census_2013 = glt_census %>%
-  # Select year of interest
-  dplyr::filter(!is.na(Detect2013)) %>%
-  dplyr::select(
-    ID2, # Transect id
-    Detect2013, # Detection data
-    geometry
-  )
+# # Comparison with the 2013 CENSUS
+# sim_2013 = patch_sf_pop %>%
+#   # Select the year of interest
+#   dplyr::filter(Year == 8) %>%
+#   # Mutate the occupancy state
+#   dplyr::mutate(
+#     sim_occupied = dplyr::case_when(MeanNTot == 0 ~ "Unoccupied",
+#                                     MeanNTot > 0 ~ "Occupied")
+#   ) %>%
+#   dplyr::select(
+#     PatchID, # RangeShifter patch id
+#     Year,
+#     sim_occupied,
+#     geometry
+#   )
+# 
+# # Census data
+# census_2013 = glt_census %>%
+#   # Select year of interest
+#   dplyr::filter(!is.na(Detect2013)) %>%
+#   dplyr::select(
+#     ID2, # Transect id
+#     Detect2013, # Detection data
+#     geometry
+#   )
+# 
+# # Spatial join
+# comparison_2013 = sf::st_intersection(
+#   census_2013,
+#   sim_2013
+#   ) %>%
+#   # Compute the intersection area between the transect and the patch
+#   dplyr::mutate(
+#     overlap_area = as.numeric(sf::st_area(geometry)) # Intersection area
+#   ) %>%
+#   dplyr::group_by(ID2) %>%
+#   # Some census data overlap several patches (and vice-versa)
+#   # HENCE: we keep the largest intersection between the patch and the census polygon
+#   dplyr::slice_max(
+#     order_by = overlap_area,
+#     n = 1,
+#     with_ties = FALSE
+#   ) %>%
+#   dplyr::ungroup() %>%
+#   sf::st_drop_geometry()
+# 
+# # We compute the proportion of patches occupied in 2013 and also occupied in simulations
+# # i.e. true positive: observed P, simulated occupied
+# # AND the proportion of patches unoccupied in 2013 and also unoccupied in simulations
+# # i.e. true negative: observed N, simulated unoccupied
+# comparison_2013 = comparison_2013 %>% 
+#   dplyr::mutate(
+#     match_pres = dplyr::case_when(
+#       Detect2013 == "P" & sim_occupied == "Occupied"   ~ "MATCH",
+#       Detect2013 == "P" & sim_occupied == "Unoccupied" ~ "UNMATCH"
+#     ),
+#     match_abs = dplyr::case_when(
+#       Detect2013 == "N" & sim_occupied == "Unoccupied" ~ "MATCH",
+#       Detect2013 == "N" & sim_occupied == "Occupied"   ~ "UNMATCH"
+#     )
+#   )
+# 
+# # Proportion
+# prop_match_2013 = comparison_2013 %>%
+#   dplyr::summarise(
+#     n_occ = sum(Detect2013 == "P"), # Number of occurrences
+#     n_match_pres = sum(match_pres == "MATCH", na.rm = TRUE), # Number of true positives
+#     n_unmatch_pres = sum(match_pres == "UNMATCH", na.rm = TRUE), # Number of false negatives
+#     prop_match_pres = round(n_match_pres / n_occ, 2), # % true positive
+#     n_abs = sum(Detect2013 == "N"), # Number of absences
+#     n_match_abs = sum(match_abs == "MATCH", na.rm = TRUE), # Number of true negatives
+#     n_unmatch_abs = sum(match_abs == "UNMATCH", na.rm = TRUE), # Number of false positives
+#     prop_match_abs = round(n_match_abs / n_abs, 2) # % true negatives
+#   ) %>% 
+#   dplyr::rename_with(~ paste0(., '_2013'))
 
-# Spatial join
-comparison_2013 = sf::st_intersection(
-  census_2013,
-  sim_2013
-  ) %>%
-  # Compute the intersection area between the transect and the patch
-  dplyr::mutate(
-    overlap_area = as.numeric(sf::st_area(geometry)) # Intersection area
-  ) %>%
-  dplyr::group_by(ID2) %>%
-  # Some census data overlap several patches (and vice-versa)
-  # HENCE: we keep the largest intersection between the patch and the census polygon
-  dplyr::slice_max(
-    order_by = overlap_area,
-    n = 1,
-    with_ties = FALSE
-  ) %>%
-  dplyr::ungroup() %>%
-  sf::st_drop_geometry()
-
-# We compute the proportion of patches occupied in 2013 and also occupied in simulations
-# i.e. true positive: observed P, simulated occupied
-# AND the proportion of patches unoccupied in 2013 and also unoccupied in simulations
-# i.e. true negative: observed N, simulated unoccupied
-comparison_2013 = comparison_2013 %>% 
-  dplyr::mutate(
-    match_pres = dplyr::case_when(
-      Detect2013 == "P" & sim_occupied == "Occupied"   ~ "MATCH",
-      Detect2013 == "P" & sim_occupied == "Unoccupied" ~ "UNMATCH"
-    ),
-    match_abs = dplyr::case_when(
-      Detect2013 == "N" & sim_occupied == "Unoccupied" ~ "MATCH",
-      Detect2013 == "N" & sim_occupied == "Occupied"   ~ "UNMATCH"
-    )
-  )
-
-# Proportion
-prop_match_2013 = comparison_2013 %>%
-  dplyr::summarise(
-    n_occ = sum(Detect2013 == "P"), # Number of occurrences
-    n_match_pres = sum(match_pres == "MATCH", na.rm = TRUE), # Number of true positives
-    n_unmatch_pres = sum(match_pres == "UNMATCH", na.rm = TRUE), # Number of false negatives
-    prop_match_pres = round(n_match_pres / n_occ, 2), # % true positive
-    n_abs = sum(Detect2013 == "N"), # Number of absences
-    n_match_abs = sum(match_abs == "MATCH", na.rm = TRUE), # Number of true negatives
-    n_unmatch_abs = sum(match_abs == "UNMATCH", na.rm = TRUE), # Number of false positives
-    prop_match_abs = round(n_match_abs / n_abs, 2) # % true negatives
-  ) %>% 
-  dplyr::rename_with(~ paste0(., '_2013'))
-
-## Comparison with 2022
-# Comparison with the 2013 census
+## Comparison with the 2022 CENSUS
 sim_2022 = patch_sf_pop %>%
   # Select the year of interest
-  dplyr::filter(Year == 17) %>%
+  dplyr::filter(Year == 0) %>% # 0 or 17 depending on the starting year of the simulations
   dplyr::mutate(
     sim_occupied = dplyr::case_when(MeanNTot == 0 ~ "Unoccupied",
                                     MeanNTot > 0 ~ "Occupied")
@@ -1246,7 +1302,12 @@ prop_match_2022 = comparison_2022 %>%
 
 ### Map of occupancy at selected years
 # Years of interest
-years_to_plot = c(0, 8, 17, 95)
+
+# IF 2005 is the starting point
+# years_to_plot = c(0, 8, 17, 95)
+
+# IF 2023 is the starting point
+years_to_plot = c(0, 76)
 
 # Filter patches with years
 patch_sf_occupancy = patch_sf_pop %>% 
@@ -1275,6 +1336,7 @@ landsc_factor = terra::as.factor(landsc)
 # Assign the color palette
 terra::coltab(landsc_factor) = coltb
 
+###### 2005-2013-2022 map -----------
 ## 2005
 # Patches
 patches_0 = patch_sf_pop %>% 
@@ -1467,6 +1529,119 @@ png(here::here("data",
 maps_combined
 dev.off()
 
+###### 2023-2100 map -----------
+## 2023
+# Patches
+patches_0 = patch_sf_pop %>% 
+  dplyr::filter(Year == 0)
+# Title
+title_2023 = paste0(
+  "2023\n",
+  "% true positive = ",
+  round(prop_match_2022$prop_match_pres_2022 * 100, 1),
+  "% | true negative = ",
+  round(prop_match_2022$prop_match_abs_2022 * 100, 1),
+  "%"
+)
+# Map
+map2023 = ggplot() +
+  tidyterra::geom_spatraster(
+    data = landsc_factor,
+    use_coltab = TRUE,
+    show.legend = FALSE
+  ) +
+  # Occupied patches
+  geom_sf(
+    data = patches_0 %>% 
+      dplyr::filter(MeanNTot > 0),
+    fill = "#FF7B00",
+    colour = NA
+  ) +
+  geom_sf(
+    data = glt_census %>% 
+      dplyr::filter(Detect2022 == "N"),
+    fill = NA,
+    colour = "black",
+    linewidth = 0.5
+  ) +
+  geom_sf(
+    data = glt_census %>% 
+      dplyr::filter(Detect2022 == "P"),
+    fill = NA,
+    colour = "#0CD6E8",
+    linewidth = 0.5
+  ) +
+  # Regions
+  geom_sf(
+    data = regions,
+    shape = 23,
+    size = 1,
+    fill = "#E7FF00",
+    colour = "black",
+    stroke = 0.1
+  ) +
+  ggtitle(title_2023) +
+  theme_void()
+
+## 2100
+# Patches
+patches_76 = patch_sf_pop %>% 
+  dplyr::filter(Year == 76)
+# Map
+map2100 = ggplot() +
+  tidyterra::geom_spatraster(
+    data = landsc_factor,
+    use_coltab = TRUE,
+    show.legend = FALSE
+  ) +
+  # Occupied patches
+  geom_sf(
+    data = patches_77 %>% 
+      dplyr::filter(MeanNTot > 0),
+    fill = "#FF7B00",
+    colour = NA
+  ) +
+  # Regions
+  geom_sf(
+    data = regions,
+    shape = 23,
+    size = 1,
+    fill = "#E7FF00",
+    colour = "black",
+    stroke = 0.1
+  ) +
+  ggtitle("2100") +
+  theme_void()
+
+### Combine the two maps
+maps_combined = map2023 + map2100 +
+  patchwork::plot_layout(
+    ncol = 2,
+    nrow = 1,
+    widths = c(1, 1)
+  )
+
+### Reduce space around titles and plots
+maps_combined = maps_combined &
+  theme(
+    plot.title = element_text(
+      size = 12,
+      hjust = 0.5,
+      margin = margin(t = 0, b = 0)
+    ),
+    plot.margin = margin(0, 2, 0, 2)
+  )
+
+## Export plot
+png(here::here("data",
+               "rangeshifter",
+               "tests",
+               test_config$test_name,
+               "plot",
+               "map_occ_patches.png"),
+    width = 2400, height = 1000, res = 300, type="cairo")
+maps_combined
+dev.off()
 
 ##### Patch abundance ------
 # Filter patches based on the list of patches used for simulations
@@ -1474,10 +1649,17 @@ pop_patch_select = pop_patch %>%
   # Remove patches that do not belong to the list
   dplyr::filter(patch_id %in% patch_list)
 
-# Keep years of interest
+## Keep years of interest
+# IF calibrated on 2005-2013-2022 data
+# pop_patch_select = pop_patch_select %>%
+#   dplyr::filter(
+#     Year %in% c(0, 8, 13, 17) # Years of interest
+#   )
+
+# IF calibrated on 2022 data
 pop_patch_select = pop_patch_select %>%
   dplyr::filter(
-    Year %in% c(0, 8, 13, 17) # Years of interest
+    Year %in% c(0) # Years of interest
   )
 
 # Remove suffixes from patches ids and create a variable "FragName" resembling UMMP name
@@ -1499,7 +1681,26 @@ pop_patch_select_agg = pop_patch_select %>%
     .groups = "drop"
   )
 
-# Reshape the real census data
+## Reshape the real census data
+# IF calibrated on 2005-2013-2022 data
+# real_census_long = real_census_data %>%
+#   tidyr::pivot_longer(
+#     starts_with("n_glt"),
+#     names_to = "Survey",
+#     values_to = "RealN"
+#   ) %>%
+#   dplyr::mutate(
+#     Year = dplyr::case_when(
+#       Survey == "n_glt_2005" ~ 0,
+#       Survey == "n_glt_2013" ~ 8,
+#       Survey == "n_glt_2018" ~ 13,
+#       Survey == "n_glt_2022" ~ 17
+#     )
+#   ) %>% 
+#   dplyr::filter(!is.na(FragName),
+#                 Survey != "n_glt_2018") # Remove the 2018 census (yellow fever)
+
+# IF calibrated on 2022 data
 real_census_long = real_census_data %>%
   tidyr::pivot_longer(
     starts_with("n_glt"),
@@ -1508,10 +1709,7 @@ real_census_long = real_census_data %>%
   ) %>%
   dplyr::mutate(
     Year = dplyr::case_when(
-      Survey == "n_glt_2005" ~ 0,
-      Survey == "n_glt_2013" ~ 8,
-      Survey == "n_glt_2018" ~ 13,
-      Survey == "n_glt_2022" ~ 17
+      Survey == "n_glt_2022" ~ 0
     )
   ) %>% 
   dplyr::filter(!is.na(FragName),
@@ -1562,7 +1760,7 @@ comparison %>%
   dplyr::arrange(mean)
 
 
-# Plot
+### Plot (biplot)
 png(here::here("data",
                "rangeshifter",
                "tests",
@@ -1588,6 +1786,7 @@ ggplot(
   )
 dev.off()
 
+### Patch abundance at several dates
 # Comparison (in long format)
 comparison_long = comparison %>%
   dplyr::select(
@@ -2079,13 +2278,25 @@ data.disp.cut = connec_all %>%
     EndPatch != "-999" # Remove the total number of successful emigrants into a patch
   )
 
+### IF calibrated with 2005-2013-2022 data
+## Assign each year to a period
+# data.disp.cut = data.disp.cut %>%
+#   dplyr::mutate(
+#     Period = dplyr::case_when(
+#       Year >= 0  & Year <= 8  ~ "Year 0-8",
+#       Year > 8  & Year <= 17 ~ "Year 8-17",
+#       Year > 17 & Year < 96  ~ "Year 17-95",
+#       TRUE ~ NA_character_
+#     )
+#   ) %>%
+#   dplyr::filter(!is.na(Period))
+
+### IF calibrated with 2022 data
 ## Assign each year to a period
 data.disp.cut = data.disp.cut %>%
   dplyr::mutate(
     Period = dplyr::case_when(
-      Year >= 0  & Year <= 8  ~ "Year 0-8",
-      Year > 8  & Year <= 17 ~ "Year 8-17",
-      Year > 17 & Year < 96  ~ "Year 17-95",
+      Year >= 0  & Year <= 76  ~ "Year 0-76",
       TRUE ~ NA_character_
     )
   ) %>%
@@ -2206,6 +2417,7 @@ disp.lines.cut = disp.lines.cut %>%
 
 
 ## MAPS
+###### 2005-2013-2022-2100 maps -------
 # 2005-2013
 map_disp_cut_2005_2013 = ggplot2::ggplot() +
   
@@ -2378,6 +2590,69 @@ png(here::here("data",
 maps_combined_disp
 dev.off()
 
+###### 2023-2100 maps -------
+# 2022-2100
+map_disp_cut_2023_2100 = ggplot2::ggplot() +
+  
+  # Landscape
+  tidyterra::geom_spatraster(
+    data = landsc_factor,
+    use_coltab = TRUE,
+    show.legend = FALSE
+  ) +
+  
+  # # Patches
+  # ggplot2::geom_sf(
+  #   data = patch_sf,
+  #   ggplot2::aes(fill = factor(PatchID)),
+  #   colour = "black",
+  #   linewidth = 0.01,
+  #   alpha = 0.5,
+  #   show.legend = FALSE
+  # ) +
+  
+  ggplot2::geom_sf(
+    data = disp.lines.cut %>% 
+      dplyr::filter(
+        # Id_simul == best_sim,
+        Period == "Year 0-76"
+      ),
+    ggplot2::aes(linewidth = Ninds),
+    colour = "deeppink",
+    alpha = 0.8
+  ) +
+  
+  # ggplot2::geom_sf(
+  #   data = glt_disp,
+  #   colour = "orange",
+  #   linewidth = 0.2,
+  #   alpha = 0.9
+  # ) +
+  # 
+  ggplot2::scale_linewidth_continuous(
+    trans = "log1p",
+    range = c(0.01, 0.5),
+    name = "Number of dispersers"
+  ) +
+  
+  ggplot2::ggtitle("Dispersal flux (2023-2100)") +
+  
+  ggplot2::theme_void() +
+  ggplot2::theme(
+    legend.position = "none"
+  )
+
+## Export plot
+png(here::here("data",
+               "rangeshifter",
+               "tests",
+               test_config$test_name,
+               "plot",
+               "map_disp_cut_patches.png"),
+    width = 1500, height = 1000, res = 300, type="cairo")
+map_disp_cut_2023_2100
+dev.off()
+
 ##### Among uncut patches ------
 ## Plot the lines at the scale of "real" patches (e.g., UMMPs)
 
@@ -2394,13 +2669,25 @@ data.disp.ummps = connec_all %>%
   dplyr::rename(EndPatchName = uncut_patch_name) %>% 
   dplyr::select(-uncut_patch_id)
 
+### IF calibrated with 2005-2013-2022 data
+## Assign each year to a period
+# data.disp.ummps = data.disp.ummps %>%
+#   dplyr::mutate(
+#     Period = dplyr::case_when(
+#       Year >= 0  & Year <= 8  ~ "Year 0-8",
+#       Year > 8  & Year <= 17 ~ "Year 8-17",
+#       Year > 17 & Year < 96 ~ "Year 17-95",
+#       TRUE ~ NA_character_
+#     )
+#   ) %>%
+#   dplyr::filter(!is.na(Period))
+
+### IF calibrated with 2022 data
 ## Assign each year to a period
 data.disp.ummps = data.disp.ummps %>%
   dplyr::mutate(
     Period = dplyr::case_when(
-      Year >= 0  & Year <= 8  ~ "Year 0-8",
-      Year > 8  & Year <= 17 ~ "Year 8-17",
-      Year > 17 & Year < 96 ~ "Year 17-95",
+      Year >= 0  & Year <= 76  ~ "Year 0-76",
       TRUE ~ NA_character_
     )
   ) %>%
@@ -2522,7 +2809,9 @@ disp.lines.ummps = disp.lines.ummps %>%
   ) %>%
   sf::st_cast("LINESTRING")
 
-# Plot the lines
+### MAPS
+
+###### 2005-2013-2022-2100 maps -----
 # 2005-2013
 map_disp_uncut_2005_2013 = ggplot2::ggplot() +
   
@@ -2691,6 +2980,68 @@ png(here::here("data",
 maps_combined_disp
 dev.off()
 
+###### 2023-2100 maps -----
+map_disp_uncut_2023_2100 = ggplot2::ggplot() +
+  
+  # Patches
+  ggplot2::geom_sf(
+    data = patch_uncut,
+    ggplot2::aes(fill = factor(patch_id)),
+    colour = "black",
+    linewidth = 0.01,
+    alpha = 0.5,
+    show.legend = FALSE
+  ) +
+  
+  # Simulated connectivity
+  ggplot2::geom_sf(
+    data = disp.lines.ummps %>% 
+      dplyr::filter(
+        # Id_simul == best_sim,
+        Period == "Year 0-76") ,
+    ggplot2::aes(linewidth = Ninds),
+    colour = "deeppink",
+    alpha = 0.8
+  ) +
+  
+  # # Observed dispersal
+  # ggplot2::geom_sf(
+  #   data = glt_disp,
+  #   colour = "orange",
+  #   linewidth = 0.2,
+  #   alpha = 0.9
+  # ) +
+  
+  # One panel per simulation
+  # ggplot2::facet_wrap(~Id_simul) +
+  
+  # Width of simulated lines
+  ggplot2::scale_linewidth_continuous(
+    trans = "log1p",
+    range = c(0.05, 1),
+    name = "Number of dispersers"
+  ) +
+  
+  ggtitle("Dispersal flux (2023-2100)") +
+  
+  ggplot2::theme_void() +
+  
+  ggplot2::theme(
+    strip.text = ggplot2::element_text(face = "bold"),
+    legend.position = "none"
+  )
+
+## Export plot
+png(here::here("data",
+               "rangeshifter",
+               "tests",
+               test_config$test_name,
+               "plot",
+               "map_disp_uncut_patches.png"),
+    width = 1500, height = 1000, res = 300, type="cairo")
+map_disp_uncut_2023_2100
+dev.off()
+
 
 ### Append results -----
 # Load an Excel sheet with the parameters to test
@@ -2701,8 +3052,8 @@ summary = read_excel(here::here("data",
 
 #### Information to add manually ----
 
-test_aim = "Tests IndsHaCell based on THE REAL POP SIZE (females*2.3) and using 80 ha territories instead"
-test_remarks = "IndsHaCell = 0.048"
+test_aim = "Tests IndsHaCell using the 2023 map and 70 HA TERRITORIES with NEW DISTRIB. MAP (added territories to Pirineus)"
+test_remarks = "IndsHaCell between 0.1 and 0.14"
 
 #### Test name -----
 test_name = basename(normalizePath(dirpath))
@@ -2776,18 +3127,32 @@ optimal_param = paste(
 )
 
 #### Pop size -----
+
+### 2005-2013-2022-2100 pop sizes
+# Extract pop sizes for the combination of parameters
+# optimal_pop = pop_time %>%
+#   dplyr::semi_join(
+#     best_values,
+#     by = params_tested)
+# pop_sizes = optimal_pop %>%
+#   dplyr::filter(Year %in% c(0, 8, 17, 95)) %>%
+#   dplyr::select(Year, MeanN_Tot) # Select the proper indicator
+# pop_2005 = pop_sizes$MeanN_Tot[pop_sizes$Year == 0]
+# pop_2013 = pop_sizes$MeanN_Tot[pop_sizes$Year == 8]
+# pop_2022 = pop_sizes$MeanN_Tot[pop_sizes$Year == 17]
+# pop_2100 = pop_sizes$MeanN_Tot[pop_sizes$Year == 95]
+
+### 2023-2100 pop sizes
 # Extract pop sizes for the combination of parameters
 optimal_pop = pop_time %>%
   dplyr::semi_join(
     best_values,
     by = params_tested)
 pop_sizes = optimal_pop %>%
-  dplyr::filter(Year %in% c(0, 8, 17, 95)) %>%
+  dplyr::filter(Year %in% c(0, 76)) %>%
   dplyr::select(Year, MeanN_Tot) # Select the proper indicator
-pop_2005 = pop_sizes$MeanN_Tot[pop_sizes$Year == 0]
-pop_2013 = pop_sizes$MeanN_Tot[pop_sizes$Year == 8]
-pop_2022 = pop_sizes$MeanN_Tot[pop_sizes$Year == 17]
-pop_2100 = pop_sizes$MeanN_Tot[pop_sizes$Year == 95]
+pop_2022 = pop_sizes$MeanN_Tot[pop_sizes$Year == 0]
+pop_2100 = pop_sizes$MeanN_Tot[pop_sizes$Year == 76]
 
 #### RMSE -----
 rmse_pop_size = best_fit$RMSE
@@ -2847,8 +3212,8 @@ new_summary = dplyr::tibble(
   
   'Optimal_param' = optimal_param,
   
-  'Pop_size_2005' = pop_2005,
-  'Pop_size_2013' = pop_2013,
+  # 'Pop_size_2005' = pop_2005,
+  # 'Pop_size_2013' = pop_2013,
   'Pop_size_2022' = pop_2022,
   'Pop_size_2100' = pop_2100,
   
@@ -2858,9 +3223,9 @@ new_summary = dplyr::tibble(
     dplyr::semi_join(best_values, by = params_tested) %>% 
     dplyr::select(MeanNOccupPatches) %>% 
     dplyr::pull(1),
-  'Occ_true_pos_2013%' = prop_match_2013$prop_match_pres_2013,
+  # 'Occ_true_pos_2013%' = prop_match_2013$prop_match_pres_2013,
   'Occ_true_pos_2022%' = prop_match_2022$prop_match_pres_2022,
-  'Occ_true_neg_2013%' = prop_match_2013$prop_match_abs_2013,
+  # 'Occ_true_neg_2013%' = prop_match_2013$prop_match_abs_2013,
   'Occ_true_neg_2022%' = prop_match_2022$prop_match_abs_2022,
   
   'Mean_grp_size' = group_size$Mean_grp_size,

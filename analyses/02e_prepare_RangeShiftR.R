@@ -27,7 +27,7 @@ for (i in seq_along(rasters_rshifter)) {
   cat("Year", years[i], " → raster name:", basename(raster_df$file[i]), "\n")
 }
 names(rasters_rshifter) = years
-plot(rasters_rshifter[['2024']], col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e", "purple","orange"))
+plot(rasters_rshifter[['2023']], col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e", "purple","orange"))
 
 #### GLT distribution ----
 glt_occ = sf::st_read(here("data", "glt", "JDietz", "glt_distrib_2013_2018_2022.shp"))
@@ -55,22 +55,22 @@ years = vector_df$year
 for (i in seq_along(patches)) {
   cat("Year", years[i], " → raster name:", basename(vector_df$file[i]), "\n")
 }
-plot(rasters_rshifter[[36]], col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e", "purple","orange"))
-plot(sf::st_geometry(patches[[36]]), col=NA, add=TRUE)
+plot(rasters_rshifter[[35]], col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e", "purple","orange"))
+plot(sf::st_geometry(patches[[35]]), col=NA, add=TRUE)
 names(patches) = vector_df$year # Name by year
 
 #### Patches (raster) -------
 # These correspond to raster patches created WITH Queru's et al. (2026) patch-cutting procedure
 patches_cut = terra::rast(here("outputs", "data", "patches_cut", 
-                               "2024", # CHOOSE THE PATCHES OF THE YEAR OF INTEREST
-                               "FinalPatches_2024.tif"))
+                               "2023", # CHOOSE THE PATCHES OF THE YEAR OF INTEREST
+                               "FinalPatches_2023.tif"))
 plot(patches_cut)
 
 #### Stepping stones (raster) -------
 # These correspond to raster patches created WITH Queru's et al. (2026) identification of small patches
 stepping_stones = terra::rast(here("outputs", "data", "patches_cut", 
-                                   "2024", # CHOOSE THE PATCHES OF THE YEAR OF INTEREST
-                                   "TooSmallPatches_2024.tif"))
+                                   "2023", # CHOOSE THE PATCHES OF THE YEAR OF INTEREST
+                                   "TooSmallPatches_2023.tif"))
 plot(stepping_stones, col="orange")
 
 ### Maps -----
@@ -147,10 +147,10 @@ rasters_resist = lapply(rasters_rshifter, reclass)
 ##### Select landscape of interest ------
 
 # CHOOSE THE YEAR OF INTEREST
-rast = rasters_resist[['2024']]
+rast = rasters_resist[['2023']]
 
 # plot(rast, col=c("white","gray","darkgreen")) # Binary raster
-plot(rast, col=c("white","yellow","darkgreen","green","brown","blue","red"))
+plot(rast, col=c("white","#FFFFB2","#32a65e","orange","#035209","#0000FF","#d4271e"))
 freq(rast)
 
 
@@ -173,13 +173,13 @@ patches = lapply(patches, function(x){
   x %>%
     mutate(unique_id = row_number())
 })
-anyDuplicated(patches[['2024']]$lyr.1) # Duplicated ids
-anyDuplicated(patches[['2024']]$patch_id) # GOOD but not integer value
-anyDuplicated(patches[['2024']]$unique_id) # ALL GOOD
+anyDuplicated(patches[['2023']]$lyr.1) # Duplicated ids
+anyDuplicated(patches[['2023']]$patch_id) # GOOD but not integer value
+anyDuplicated(patches[['2023']]$unique_id) # ALL GOOD
 
 # Vector patches
 # CHOOSE THE YEAR OF INTEREST
-patches_sf = patches[['2024']]
+patches_sf = patches[['2023']]
 
 # Correspondence table between patch name and id
 patch_corres_id = patches_sf %>%
@@ -218,7 +218,7 @@ for (yr in names(patches)) {
 ## Raster patches
 
 # CHOOSE THE YEAR OF INTEREST
-patches_r = patch_rasters[['2024']]
+patches_r = patch_rasters[['2023']]
 
 ##### IF RASTER ----
 ### i.e., Patches are already rasterized (e.g., using Queru et al. 2026 procedure)
@@ -285,14 +285,15 @@ patch_correspondence = patch_intersection %>%
 
 #### Species distribution --------
 # We select patches occupied by GLTs at a given moment
-
 # IMPORTANT : species distribution file should only contain either 0 (species absent) or 1 (species present)
 # Species distribution:
 # 1 = species present
 # 0 = species absent
 # -999 = no data
 
-#### Select patches -----
+### 2005
+# For 2005: name explicitely the occupied patches (the data on GLT census does not exist)
+
 # Compare the patches occupied in 2005 (see Holst et al. 2006) with patches names (given in 01o_patch_prep)
 # In Holst et al. 2006, occupied patches are:
 # V -> Vendaval
@@ -307,9 +308,6 @@ patch_correspondence = patch_intersection %>%
 # SER -> Pirineus
 # We ignore patches where GLTs were removed through translocation (south west)
 # PS: we don't have GLT occurrence data for that year, hence the "manual" selection
-
-### 2005
-# For 2005: name explicitely the occupied patches (the data on GLT census does not exist)
 
 # Between parentheses, provide the NAMES of the patches
 # patches_select = patches_sf %>%
@@ -332,50 +330,237 @@ patch_correspondence = patch_intersection %>%
 #                                 "Pirineus_114",
 #                                 "Sao_Joao_II"))
 
-### 2024
-# For 2024: we use the spatial data (GLT census)
-# Patches intersecting GLTs detected in the last census (2022-2023)
+
+### 2023
+# For 2023: we use the spatial data (GLT census)
+# IMPORTANT: occupied patches are UNCUT patches intersecting monitored groups and occupied transects from Dietz et al. 2024
+# EXCEPT FOR some patches (the largests) where the entire patches are likely not occupied
+# IN THAT CASE, we select the CUT patches (i.e., territories) instead
+
+# Patches that should use CUT portions instead of uncut patches
+special_patches = c(
+  "Aldeia_I_4",
+  "Pirineus_121",
+  "Poco_das_Antas",
+  "Gavioes_160",
+  "Gavioes_162"
+)
+
+# Census detections from 2022-2023
+glt_census = glt_occ %>%
+  dplyr::filter(Detect2022 == "P")
+
+### Select UNCUT patches
+
+# Identify uncut patches intersecting census detections
 patches_glt = patches_sf[
   lengths(
-    sf::st_intersects(
-      patches_sf,
-      glt_occ %>% dplyr::filter(Detect2022 == "P")
-    )
+    sf::st_intersects(patches_sf, glt_census)
   ) > 0,
 ]
 
-# Patches intersecting regions
+# Identify uncut patches intersecting occupied regions
 patches_regions = patches_sf[
   lengths(
-    sf::st_intersects(
-      patches_sf,
-      regions
-    )
+    sf::st_intersects(patches_sf, regions)
   ) > 0,
 ]
 
-# Keep patches intersecting either a GLT OR a region
-patches_select = patches_sf %>%
+# Standard selection:
+# retain occupied uncut patches, EXCEPT the special patches
+patches_select_uncut = patches_sf %>%
   dplyr::filter(
     patch_id %in% c(
       patches_glt$patch_id,
       patches_regions$patch_id
-    )
+    ),
+    !patch_id %in% special_patches
   )
 
-# Select these patches
-plot(sf::st_geometry(patches_sf))
-# plot(sf::st_geometry(patches_glt), col="darkgreen", add=TRUE)
-plot(sf::st_geometry(patches_select), col="lightgreen", add=TRUE)
+### Select CUT portions for the special patches
 
-## To raster
-# Reference raster
+# Match cut patches to their original uncut patch names
+special_cut_ids = patch_correspondence %>%
+  dplyr::filter(
+    uncut_patch_name %in% special_patches
+  ) %>%
+  dplyr::pull(cut_patch_id) %>%
+  base::unique()
+
+# Keep cut portions that intersect census detections
+cut_intersect_glt = patches_cut_sf[
+  lengths(
+    sf::st_intersects(patches_cut_sf, glt_census)
+  ) > 0,
+]
+
+# Keep cut portions that intersect occupied regions
+cut_intersect_regions = patches_cut_sf[
+  lengths(
+    sf::st_intersects(patches_cut_sf, regions)
+  ) > 0,
+]
+
+# Combine the cut portions intersecting either census or regions
+patches_select_cut = dplyr::bind_rows(
+  cut_intersect_glt,
+  cut_intersect_regions
+) %>%
+  dplyr::filter(
+    base::as.character(cut_patch_id) %in%
+      base::as.character(special_cut_ids)
+  ) %>%
+  dplyr::distinct(cut_patch_id, .keep_all = TRUE)
+
+### Select additional territories
+# In Pirineus, the simulated population size is lower than the real
+# -> we select additional territories using a buffer around P detections
+
+# Buffer distance in metres (adjust after visual inspection)
+pirineus_buffer_m = 1000
+
+# Separate present and absent census locations
+census_present = glt_occ %>%
+  dplyr::filter(Detect2022 == "P")
+
+census_absent = glt_occ %>%
+  dplyr::filter(Detect2022 == "N")
+
+# Transform census data to the CRS of the cut patches
+census_present_cut = sf::st_transform(
+  census_present,
+  sf::st_crs(patches_cut_sf)
+)
+
+census_absent_cut = sf::st_transform(
+  census_absent,
+  sf::st_crs(patches_cut_sf)
+)
+
+regions_cut = sf::st_transform(
+  regions,
+  sf::st_crs(patches_cut_sf)
+)
+
+# Check that the CRS uses metres for buffering
+if (sf::st_is_longlat(patches_cut_sf)) {
+  stop(
+    "patches_cut_sf uses a geographic CRS. ",
+    "Transform the patches and census data to a projected CRS in metres before buffering."
+  )
+}
+
+# Cut portions belonging to Pirineus_121
+pirineus_cut_ids = patch_correspondence %>%
+  dplyr::filter(
+    uncut_patch_name == "Pirineus_121"
+  ) %>%
+  dplyr::pull(cut_patch_id) %>%
+  base::unique()
+
+pirineus_cut = patches_cut_sf %>%
+  dplyr::filter(
+    base::as.character(cut_patch_id) %in%
+      base::as.character(pirineus_cut_ids)
+  )
+
+# Portions already selected by P detections or occupied regions
+pirineus_initial = patches_select_cut %>%
+  dplyr::filter(
+    base::as.character(cut_patch_id) %in%
+      base::as.character(pirineus_cut_ids)
+  )
+
+# Buffer around census locations where GLTs are present
+present_buffer = sf::st_buffer(
+  sf::st_union(
+    sf::st_geometry(census_present_cut)
+  ),
+  dist = pirineus_buffer_m
+)
+
+# Candidate cut portions intersecting the buffer
+pirineus_candidates = pirineus_cut[
+  lengths(
+    sf::st_intersects(
+      pirineus_cut,
+      present_buffer
+    )
+  ) > 0,
+]
+
+# Exclude any cut portion intersecting a census location
+# where GLTs were recorded as absent ("N")
+if (nrow(census_absent_cut) > 0) {
+  
+  absent_intersections = lengths(
+    sf::st_intersects(
+      pirineus_candidates,
+      census_absent_cut
+    )
+  ) > 0
+  
+  pirineus_candidates = pirineus_candidates[
+    !absent_intersections,
+  ]
+}
+
+# Combine initially selected and additional Pirineus portions
+# Retain all eligible portions within the buffer
+pirineus_selected = dplyr::bind_rows(
+  pirineus_initial,
+  pirineus_candidates
+) %>%
+  dplyr::distinct(cut_patch_id, .keep_all = TRUE)
+
+# Keep the original selection for the other special patches
+patches_select_cut_other = patches_select_cut %>%
+  dplyr::filter(
+    !base::as.character(cut_patch_id) %in%
+      base::as.character(pirineus_cut_ids)
+  )
+
+# Final cut-patch selection
+patches_select_cut = dplyr::bind_rows(
+  patches_select_cut_other,
+  pirineus_selected
+) %>%
+  dplyr::distinct(cut_patch_id, .keep_all = TRUE)
+
+### Combine standard uncut patches + selected cut portions
+
+# Combine both selections into one sf object
+patches_select = dplyr::bind_rows(
+  patches_select_uncut %>%
+    dplyr::rename(geometry = geom) %>%
+    dplyr::select(geometry),
+  patches_select_cut %>%
+    dplyr::select(geometry)
+)
+
+# Visual check
+plot(sf::st_geometry(patches_sf))
+
+plot(
+  sf::st_geometry(patches_select_uncut),
+  col = "lightgreen",
+  add = TRUE
+)
+
+plot(
+  sf::st_geometry(patches_select_cut),
+  col = "red",
+  add = TRUE
+)
+
+### Rasterize the combined species distribution
+
+# Use the landscape raster as the template
 template = rast
 
-# Create a 0-valued raster with same geometry
-values(template) = 0
+# Initialize all cells as absent
+terra::values(template) = 0
 
-# Rasterize selected patches as 1
 patch_w_glt = terra::rasterize(
   terra::vect(patches_select),
   template,
@@ -383,21 +568,30 @@ patch_w_glt = terra::rasterize(
   background = 0
 )
 
-# Keep selected patches as 1 ONLY where the landscape is habitat (rast == 2)
-# Selected-patch cells overlapping matrix remain 0
+# Keep selected patches as present only in habitat cells
 patch_w_glt = terra::ifel(
   rast == 2 & patch_w_glt == 1,
   1,
   0
 )
 
-# Restore no-data cells from landscape
+# Restore no-data cells
 patch_w_glt[rast == -999] = -999
 
+# Plot the final distribution
 plot(
   patch_w_glt,
   col = c("white", "gray", "darkgreen")
 )
+
+# Overlay uncut patch boundaries
+plot(
+  sf::st_geometry(patches_sf),
+  add = TRUE,
+  border = "black",
+  lwd = 0.3
+)
+
 
 #### Resample (OPTIONAL) -----
 # # RangeShifter prefers integer resolutions (e.g., 30 m)
@@ -539,14 +733,14 @@ cat(
 output_dir = here("data", 
                   "rangeshifter", 
                   "tests", 
-                  "test_resist_23", # UPDATE HERE
+                  "test_resist_25", # UPDATE HERE
                   "Inputs")
 
 # Landscape
 plot(rast)
 writeRaster(
   rast,
-  filename = file.path(output_dir, "raster_reclass_2024.txt"),
+  filename = file.path(output_dir, "raster_reclass_2023.txt"),
   filetype = "AAIGrid",
   overwrite = TRUE,
   datatype = "INT2S",
@@ -557,7 +751,7 @@ writeRaster(
 plot(patches_r)
 writeRaster(
   patches_r,
-  filename = file.path(output_dir, "patches_2024.txt"),
+  filename = file.path(output_dir, "patches_2023.txt"),
   filetype = "AAIGrid",
   overwrite = TRUE,
   datatype = "INT2S",
@@ -568,7 +762,7 @@ writeRaster(
 plot(patch_w_glt)
 writeRaster(
   patch_w_glt,
-  filename = file.path(output_dir, "patches_w_glt_2024.txt"),
+  filename = file.path(output_dir, "patches_w_glt_2023.txt"),
   filetype = "AAIGrid",
   overwrite = TRUE,
   datatype = "INT2S",
@@ -579,6 +773,6 @@ writeRaster(
 # CHOOSE THE PROPER CORRESPONDENCE TABLE (depending on the type of patches used)
 write.csv(
   patch_correspondence,
-  file.path(output_dir, "patch_corres_id_2024.csv"),
+  file.path(output_dir, "patch_corres_id_2023.csv"),
   row.names = FALSE
 )

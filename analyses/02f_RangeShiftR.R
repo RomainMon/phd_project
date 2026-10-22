@@ -63,7 +63,7 @@ library(viridis)
 
 # List with components stored
 test_config = list(
-  test_name = "test_resist_23", # Name of the folder
+  test_name = "test_resist_25", # Name of the folder
   
   # Parameters tested with sensitivity analysis (i.e., those varying during simulations)
   parameters = c(
@@ -86,13 +86,13 @@ dirpath = here::here(
 
 ### Check the landscape -----
 ## Import a landscape
-landsc = terra::rast(file.path(dirpath, "Inputs", "raster_reclass_2024.txt"))
+landsc = terra::rast(file.path(dirpath, "Inputs", "raster_reclass_2023.txt"))
 terra::plot(landsc)
 terra::res(landsc)
 terra::unique(landsc)
 
 ## Cut patches
-patch = terra::rast(file.path(dirpath, "Inputs", "patches_2024.txt"))
+patch = terra::rast(file.path(dirpath, "Inputs", "patches_2023.txt"))
 terra::res(patch)
 # We can have a glimpse at how many cells the different patches contain:
 table(terra::values(patch))
@@ -108,11 +108,11 @@ terra::plot(
 
 ## Uncut patches
 patch_uncut = sf::st_read(here::here("outputs", "data", "patches_rshifter", 
-                                     "patches_rshifter_2024.gpkg")) 
+                                     "patches_rshifter_2023.gpkg")) 
 plot(patch_uncut)
 
 ## Species distribution
-patch_w_glt  = terra::rast(file.path(dirpath, "Inputs", "patches_w_glt_2024.txt"))
+patch_w_glt  = terra::rast(file.path(dirpath, "Inputs", "patches_w_glt_2023.txt"))
 terra::res(patch_w_glt)
 terra::plot(patch_w_glt, col=c("gray","darkgreen"))
 terra::unique(patch_w_glt)
@@ -158,6 +158,7 @@ colSums(eq_pop)
 # The mean GLT density per patch (in 2014) is 0.086 ind/ha (Ruiz-Miranda et al. 2019)
 # GLT density ranges 1.7 inds/km² (0.017 inds/ha) (Gavioes) to 19.0 inds/km² (0.19 inds/ha) (Rio Vermelho, Imbau I) (Ruiz-Miranda et al. 2019)
 # NOTE: 8.6 inds / 100 ha (1 km²) = 0.086 inds/ha.
+# Density categories (Dietz et al. 2024): : very low (0.02 GLTs/ha), moderate (0.1 GLTs/ha), high (0.14 GLTs/ha), or very high (0.19 GLTs/ha).
 # This value corresponds to the 4th or 5th column, which means that 1/b = 0.08 or 1/b = 0.09)
 
 # calculate proportion of all stages excluding the new-born juvenile (stage 0) population, 
@@ -385,7 +386,7 @@ for(i in 1:nrow(metadata)) {
   # This module is used to set general simulation parameters (e.g. simulation ID, number of replicates, and number of years to simulate) and to control output types (plus some more specific settings).
   sim = Simulation(Simulation = id_simulation, # Update simulation id
                    Replicates = 20, # Number of replicates
-                   Years = 96, # Number of years
+                   Years = 77, # Number of years
                    OutIntPop = 1, # Whether to export population files 
                    OutIntOcc = 0, # Whether to export occupancy files (every X year)
                    OutIntRange = 10, # Whether to export range files (every X year)
@@ -400,12 +401,12 @@ for(i in 1:nrow(metadata)) {
   # DynamicLandYears: For a dynamic landscape, DynamicLandYears lists the years in which the corresponding habitat maps in LandscapeFile and - if applicable - their respective patch and/or costs maps (in PatchFile,CostsFile) are loaded and used in the simulation
   # demogScaleLayersFile: List of vectors with file names of additional landscape layers which can be used to locally scale certain demographic rates and thus allow them to vary spatially. The list must contain equally sized vectors providing file names, one vector for each element in DynamicLandYears, which are interpreted as stacked layers. Can only be used in combination with habitat quality maps, i.e. when HabPercent=TRUE. It must contain percentage values ranging from 0 to 100
   real_land = ImportedLandscape(
-    LandscapeFile = "raster_reclass_2024.txt",
-    PatchFile = "patches_2024.txt",
+    LandscapeFile = "raster_reclass_2023.txt",
+    PatchFile = "patches_2023.txt",
     Resolution = 28.35578,
     Nhabitats = nhab, # Number of land covers
     K_or_DensDep = c(0, densdep, 0, 0, 0, 0), # Density dependence of the modeled species and is given in units of the nb of individuals/ha (for each land cover). If combined with a StageStructured model, K_or_DensDep will be used as the strength of demographic density dependence b-1. If combined with a non-structured model, K_or_DensDep will be interpreted as limiting carrying capacity K
-    SpDistFile = "patches_w_glt_2024.txt",
+    SpDistFile = "patches_w_glt_2023.txt",
     SpDistResolution = 28.35578
   )
   

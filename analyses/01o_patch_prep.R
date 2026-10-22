@@ -160,7 +160,7 @@ rasters_mspa_alt = lapply(
 
 # Check
 plot(
-  rasters_mspa_alt[[39]],
+  rasters_mspa_alt[[36]],
   col = c(
     "#32a65e", "#ad975a", "#519799","#FFFFB2", "#0000FF", "#d4271e","purple","orange"
   )
@@ -205,7 +205,7 @@ rasters_lf = purrr::map2(rasters_mspa_alt, years_all, function(r, yr) {
 
 # Check
 plot(
-  rasters_lf[[39]],
+  rasters_lf[[36]],
   col = c(
     "#32a65e", "#ad975a", "#519799","#FFFFB2", "#0000FF", "#d4271e","purple","orange"
   )
@@ -805,32 +805,28 @@ plot(sf::st_geometry(watershed_sf), add = TRUE, border = "blue", lwd = 2)
 #### Clip patches with rivers ------
 
 # We select one river to cut Aldeia I into several patches
-rio_quarteis = rivers_sf %>% 
-  dplyr::filter(NOME == "Rio Quartéis")
-plot(sf::st_geometry(rio_quarteis))
+rio = rivers_sf %>% 
+  dplyr::filter(NOME == "Córrego do Sertão")
 
 # Cut the largest Aldeia_I patch with a river
 # Preserve the original ID for the southernmost piece
 # Assign new IDs to the remaining pieces
-patches_names_good_cut2 = lapply(
+patches_names_good_cut2 = base::lapply(
   patches_names_good_cut,
   function(patches) {
     
-    # Select all Aldeia_I patches
-
+    # Select all Aldeia I patches
     aldeia_all = patches %>%
-      dplyr::filter(grepl("^Aldeia_I", patch_id))
+      dplyr::filter(base::grepl("^Aldeia_I", patch_id))
     
-    # If no Aldeia_I patch exists, return unchanged
     if (nrow(aldeia_all) == 0) {
       return(patches)
     }
     
-    # Select the largest Aldeia_I patch
-
+    # Select the largest Aldeia I feature
     aldeia = aldeia_all %>%
       dplyr::mutate(
-        area_patch = as.numeric(sf::st_area(geometry))
+        area_patch = base::as.numeric(sf::st_area(geometry))
       ) %>%
       dplyr::slice_max(
         order_by = area_patch,
@@ -839,146 +835,276 @@ patches_names_good_cut2 = lapply(
       ) %>%
       dplyr::select(-area_patch)
     
-    # Original ID
     original_patch_id = aldeia$patch_id[[1]]
     
-
-    # Find the next available Aldeia_I ID
-    aldeia_numbers = as.numeric(
-      sub(
+    # Find the next available Aldeia I ID
+    aldeia_numbers = base::as.numeric(
+      base::sub(
         "^Aldeia_I_",
         "",
         patches$patch_id[
-          grepl("^Aldeia_I_[0-9]+$", patches$patch_id)
+          base::grepl(
+            "^Aldeia_I_[0-9]+$",
+            patches$patch_id
+          )
         ]
       )
     )
     
-    if (all(is.na(aldeia_numbers))) {
-      next_number = 1
+    next_number = if (base::all(base::is.na(aldeia_numbers))) {
+      1
     } else {
-      next_number = max(aldeia_numbers, na.rm = TRUE) + 1
+      base::max(aldeia_numbers, na.rm = TRUE) + 1
     }
     
-    # Make sure the river has the same CRS as the patches
-    rio_quarteis_year = rio_quarteis %>%
-      sf::st_transform(sf::st_crs(patches))
-    
-    # Make geometries valid before splitting
-    aldeia = sf::st_make_valid(aldeia)
-    rio_quarteis_year = sf::st_make_valid(rio_quarteis_year)
-    
-    # Split the polygon with the river
-    split_result = lwgeom::st_split(
-      aldeia,
-      rio_quarteis_year
-    )
-    
-    # Extract polygon geometries
-    polygons_extracted = sf::st_collection_extract(
-      split_result,
-      "POLYGON"
+    # Match river CRS to the patches
+    rio_local = sf::st_transform(
+      rio,
+      sf::st_crs(patches)
     ) %>%
       sf::st_make_valid()
     
-    # If the river did not split the patch, return unchanged
-    if (nrow(polygons_extracted) <= 1) {
-      return(patches)
-    }
+    # Extract original polygon components before splitting
+    aldeia_valid = sf::st_make_valid(aldeia)
     
-    # Dissolve any multipart pieces into a single geometry
-    polygons_extracted = polygons_extracted %>%
-      dplyr::summarise(
-        geometry = sf::st_union(geometry),
-        .groups = "drop"
-      )
-    
-    # Extract individual polygon parts after union
-    polygons_extracted = sf::st_cast(
-      polygons_extracted,
+    components = sf::st_cast(
+      sf::st_geometry(aldeia_valid),
       "POLYGON",
       warn = FALSE
-    ) %>%
-      sf::st_as_sf()
+    )
     
-    # Remove very small elements
-    polygons_extracted = polygons_extracted %>%
-      dplyr::mutate(
-        split_area = as.numeric(sf::st_area(geometry))
-      ) %>%
-      dplyr::filter(split_area > 0)
-    
-    # If the result is not split into multiple pieces, return unchanged
-    if (nrow(polygons_extracted) <= 1) {
+    if (base::length(components) < 1) {
       return(patches)
     }
     
-    # If more than two pieces were produced, retain the two
-    # largest pieces and dissolve smaller elements into the nearest
-    # main piece
-    if (nrow(polygons_extracted) > 2) {
+    # Split each original component separately
+    split_components = base::lapply(
+      base::seq_along(components),
+      function(i) {
+        
+        result = tryCatch(
+          lwgeom::st_split(
+            sf::st_sfc(
+              components[[i]],
+              crs = sf::st_crs(patches)
+            ),
+            sf::st_union(sf::st_geometry(rio_local))
+          ),
+          error = function(e) NULL
+        )
+        
+        if (base::is.null(result)) {
+          return(NULL)
+        }
+        
+        result = sf::st_collection_extract(
+          result,
+          "POLYGON"
+        )
+        
+        if (base::length(result) == 0) {
+          return(NULL)
+        }
+        
+        result = sf::st_make_valid(result) %>%
+          sf::st_cast("POLYGON", warn = FALSE)
+        
+        areas = base::as.numeric(sf::st_area(result))
+        
+        result = result[
+          base::is.finite(areas) & areas > 0
+        ]
+        
+        list(
+          component_id = i,
+          pieces = result
+        )
+      }
+    )
+    
+    # Find components genuinely split into at least two pieces
+    valid_splits = base::which(
+      base::vapply(
+        split_components,
+        function(x) {
+          !base::is.null(x) &&
+            base::length(x$pieces) >= 2
+        },
+        logical(1)
+      )
+    )
+    
+    if (base::length(valid_splits) == 0) {
+      return(patches)
+    }
+    
+    # Choose the largest original component that was split
+    split_areas = base::vapply(
+      valid_splits,
+      function(i) {
+        base::as.numeric(
+          sf::st_area(
+            sf::st_sfc(
+              components[[
+                split_components[[i]]$component_id
+              ]],
+              crs = sf::st_crs(patches)
+            )
+          )
+        )
+      },
+      numeric(1)
+    )
+    
+    chosen = valid_splits[base::which.max(split_areas)]
+    
+    main_component_id =
+      split_components[[chosen]]$component_id
+    
+    pieces = split_components[[chosen]]$pieces
+    
+    # Keep the two largest pieces created by the river
+    piece_areas = base::as.numeric(sf::st_area(pieces))
+    ord = base::order(piece_areas, decreasing = TRUE)
+    
+    main_parts = pieces[ord[base::seq_len(2)]]
+    
+    # Assign additional fragments to the nearest main patch
+    if (base::length(pieces) > 2) {
       
-      polygons_extracted = polygons_extracted %>%
-        dplyr::arrange(dplyr::desc(split_area))
+      extra_parts = pieces[ord[-base::seq_len(2)]]
       
-      main_parts = polygons_extracted[1:2, ] # Two main elements
-      elements = polygons_extracted[3:nrow(polygons_extracted), ] # Other tiny elements
-      
-      # Find the closest main piece for each element
-      element_centroids = sf::st_centroid(elements)
-      
-      nearest_main = sf::st_nearest_feature(
-        element_centroids,
+      nearest = sf::st_nearest_feature(
+        extra_parts,
         main_parts
       )
       
-      elements$main_id = nearest_main
-      main_parts$main_id = seq_len(nrow(main_parts))
-      
-      polygons_extracted = dplyr::bind_rows(
-        main_parts %>%
-          dplyr::select(main_id, geometry),
-        elements %>%
-          dplyr::select(main_id, geometry)
-      ) %>%
-        dplyr::group_by(main_id) %>% # Regroup all
-        dplyr::summarise(
-          geometry = sf::st_union(geometry),
-          .groups = "drop"
-        ) %>%
-        sf::st_as_sf()
+      for (j in base::seq_along(extra_parts)) {
+        
+        k = nearest[j]
+        
+        main_parts[[k]] = sf::st_union(
+          sf::st_sfc(
+            main_parts[[k]],
+            crs = sf::st_crs(patches)
+          ),
+          sf::st_sfc(
+            extra_parts[[j]],
+            crs = sf::st_crs(patches)
+          )
+        )[[1]]
+      }
     }
     
-    # Identify the southernmost resulting piece
-    centroids = sf::st_centroid(polygons_extracted)
-    centroid_coords = sf::st_coordinates(centroids)
+    # Identify components that existed before the river cut
+    untouched_ids = base::setdiff(
+      base::seq_along(components),
+      main_component_id
+    )
     
-    polygons_extracted = polygons_extracted %>%
-      dplyr::mutate(
-        centroid_y = centroid_coords[, "Y"]
-      ) %>%
-      dplyr::arrange(centroid_y) # Arrange by Y
-    
-    # Assign IDs
-    polygons_extracted = polygons_extracted %>%
-      dplyr::mutate(
-        patch_id = dplyr::if_else(
-          dplyr::row_number() == 1,
-          original_patch_id,
-          paste0(
-            "Aldeia_I_",
-            next_number + dplyr::row_number() - 2
-          )
+    # Assign each pre-existing component independently
+    # to the patch it touches, or to the nearest patch
+    if (base::length(untouched_ids) > 0) {
+      
+      for (i in untouched_ids) {
+        
+        component_i = sf::st_sfc(
+          components[[i]],
+          crs = sf::st_crs(patches)
         )
-      ) %>%
-      dplyr::select(
-        -dplyr::any_of(c("split_area", "centroid_y", "main_id"))
-      )
+        
+        # Prefer a patch whose geometry touches/intersects
+        # this component
+        touching = sf::st_intersects(
+          component_i,
+          sf::st_sfc(main_parts, crs = sf::st_crs(patches))
+        )[[1]]
+        
+        if (base::length(touching) > 0) {
+          
+          # If touching both, choose the one with the
+          # greatest shared boundary length
+          if (base::length(touching) > 1) {
+            
+            shared_lengths = base::vapply(
+              touching,
+              function(k) {
+                base::as.numeric(
+                  sf::st_length(
+                    sf::st_intersection(
+                      sf::st_boundary(component_i),
+                      sf::st_boundary(
+                        sf::st_sfc(
+                          main_parts[[k]],
+                          crs = sf::st_crs(patches)
+                        )
+                      )
+                    )
+                  ) %>%
+                    base::sum(na.rm = TRUE)
+                )
+              },
+              numeric(1)
+            )
+            
+            target = touching[base::which.max(shared_lengths)]
+            
+          } else {
+            target = touching[1]
+          }
+          
+        } else {
+          
+          # If disconnected from both, assign by minimum distance
+          target = sf::st_nearest_feature(
+            component_i,
+            sf::st_sfc(main_parts, crs = sf::st_crs(patches))
+          )
+        }
+        
+        # Attach this component to its selected patch
+        main_parts[[target]] = sf::st_union(
+          sf::st_sfc(
+            main_parts[[target]],
+            crs = sf::st_crs(patches)
+          ),
+          component_i
+        )[[1]]
+      }
+    }
     
-    # Replace the original patch with the split pieces
+    # Identify the southernmost main patch
+    centroids = sf::st_centroid(
+      sf::st_sfc(main_parts, crs = sf::st_crs(patches))
+    )
+    
+    coords = sf::st_coordinates(centroids)
+    
+    south_idx = base::which.min(coords[, "Y"])
+    
+    north_idx = base::setdiff(
+      base::seq_len(2),
+      south_idx
+    )
+    
+    # Reconstruct the two output features
+    new_patches = aldeia[base::rep(1, 2), ]
+    
+    sf::st_geometry(new_patches) = sf::st_sfc(
+      main_parts[[south_idx]],
+      main_parts[[north_idx]],
+      crs = sf::st_crs(patches)
+    )
+    
+    new_patches$patch_id = base::c(
+      original_patch_id,
+      base::paste0("Aldeia_I_", next_number)
+    )
+    
+    # Replace original feature with the two resulting patches
     patches %>%
-      dplyr::filter(patch_id != original_patch_id) %>%
-      dplyr::bind_rows(polygons_extracted) %>%
+      dplyr::filter(.data$patch_id != original_patch_id) %>%
+      dplyr::bind_rows(new_patches) %>%
       dplyr::select(
         -dplyr::matches("area", ignore.case = TRUE)
       )
@@ -986,16 +1112,33 @@ patches_names_good_cut2 = lapply(
 )
 
 # Check
-patches_2005 = patches_names_good_cut2[[17]]
-
-aldeia_3 = patches_2005 %>%
+patches_2023 = patches_names_good_cut2[[35]]
+aldeia_3 = patches_2023 %>%
   dplyr::filter(patch_id == "Aldeia_I_3")
-aldeia_4 = patches_2005 %>%
+aldeia_4 = patches_2023 %>%
   dplyr::filter(patch_id == "Aldeia_I_4")
 
-plot(sf::st_geometry(patches_2005))
-plot(sf::st_geometry(aldeia_3), add = TRUE, col = "red")
-plot(sf::st_geometry(aldeia_4), add = TRUE, col = "lightblue")
+# Focus on the two patches
+aldeia_focus = rbind(aldeia_3, aldeia_4)
+
+# Transform river to the same CRS
+rio_2023 = st_transform(rio, st_crs(patches_2023))
+
+# Plot only the two patches, zoomed to their extent
+plot(
+  st_geometry(aldeia_focus),
+  col = c("red", "lightblue"),
+  border = "black",
+  main = "Aldeia I patches 3 and 4 — 2023"
+)
+
+# Overlay the river
+plot(
+  st_geometry(rio_2023),
+  add = TRUE,
+  col = "blue",
+  lwd = 2
+)
 
 #### Patch dilatation-erosion -------
 # Dilatation-erosion on all the raster (as above) may result in connecting close but disconnected patches (see: Boa Esperanca, two close patches but actually connected by a CORRIDOR)
