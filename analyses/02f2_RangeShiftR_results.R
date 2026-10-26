@@ -17,7 +17,7 @@ library(viridis)
 
 # List with components stored
 test_config = list(
-  test_name = "test_resist_25", # Name of the folder
+  test_name = "test_resist_26", # Name of the folder
   
   # Parameters tested with sensitivity analysis (i.e., those varying during simulations)
   parameters = c(
@@ -66,6 +66,13 @@ plot(patch_uncut)
 patch_w_glt  = terra::rast(file.path(dirpath, "Inputs", "patches_w_glt_2023.txt"))
 terra::res(patch_w_glt)
 terra::plot(patch_w_glt, col=c("gray","darkgreen"))
+# Overlay uncut patch boundaries
+plot(
+  sf::st_geometry(patch_uncut),
+  add = TRUE,
+  border = "black",
+  lwd = 0.3
+)
 terra::unique(patch_w_glt)
 
 #### Population data -----
@@ -133,6 +140,22 @@ params_tested = test_config$parameters
 # - In the case of a stage-structured population, the number of juveniles born (NJuvs). If the  reproduction is sexual, these columns will be replaced by the number of females juveniles (NJuvFemales) and males (NJuvMales).
 
 ## Individuals
+# 1. Replicate number (Rep) 
+# 2. Year 
+# 3. Reproductive season within the year (RepSeason) 
+# 4. Species number (currently must be 0) 
+# 5. Individual ID (IndID), a unique integer number that identifies the individual 
+# 6. The individual’s Status
+# 7. Natal cell (Natal_X and Natal_Y) and current cell (X and Y) coordinates or natal and current  patch IDs (Natal_patch and PatchID); if the individual has crossed an absorbing landscape or ‘no-data’ boundary, the current cell/patch will be missing (set to -1) 
+# 8. Sex, in case of sexual model (0 = female, 1 = male) 
+# 9. Age in years, in case of overlapping generations 
+# 10. Stage, in case of stage structure 
+# 11. Emigration traits when there is inter-individual variability, 
+# 12. Dispersal kernel traits, if the transfer is modelled with dispersal kernels that vary between individuals
+# 13. If the transfer is modelled with inter-individually variable CRW, columns in point 11 are replaced by the individual step length (StepLength) and walk correlation (Rho) 
+# 14. If there is a density-dependent settlement rule for a movement model, and there is interindividual variability, three traits determining settlement probability (S0, alphaS and betaS) 
+# 15. Distance moved in meters (linear distance from the centre of the starting cell to the centre  of the arrival cell - DistMoved); if the individual has crossed an absorbing landscape or ‘nodata’ boundary, the distance moved will be missing (set to -1) 
+# 16. Number of steps taken (Nsteps) for movement models
 
 ## Genetics
 
@@ -1102,7 +1125,9 @@ pop_patch = pop_all_complete %>%
   # Female proportion: 100-56=44
   # Multiplier: 1/0.44 = 2.3
   # IF sex model, the population includes both males and females
-  dplyr::summarise(MeanNTot = round(mean((NInd+NJuvs)*2.3),0), # Total population across replicates
+  dplyr::summarise(MeanN_Ind = round(mean(NInd),1), 
+                   MeanN_Juvs = round(mean(NJuvs),1),
+                   MeanNTot = round((MeanN_Ind+MeanN_Juvs)*2.3,1), # Total population across replicates
                    .groups = "drop")
 
 # Complete missing patch/year combinations
@@ -1112,6 +1137,8 @@ pop_patch = pop_patch %>%
     PatchID = patch_sf$PatchID,
     Year,
     fill = list(
+      MeanN_Ind = 0,
+      MeanN_Juvs = 0,
       MeanNTot = 0
     )
   )
@@ -1596,7 +1623,7 @@ map2100 = ggplot() +
   ) +
   # Occupied patches
   geom_sf(
-    data = patches_77 %>% 
+    data = patches_76 %>% 
       dplyr::filter(MeanNTot > 0),
     fill = "#FF7B00",
     colour = NA
@@ -1829,322 +1856,167 @@ ggplot(
 dev.off()
 
 ##### Source/sink dynamics -----
-# We work at the scale of real patches
-# We identify patch pop dynamics (positive, negative, stable)
-# We add dispersal flux (balance between emigration and immigration)
+# We work at the scale of real patches (uncut)
+# We compute the contribution from focal subpopulation r to the metapopulation (metric C; Runge et al. 2006)
+# This enables distinguishing between sources and patches
 
-###### Patch dynamics --------
-# Summarize pop size across uncut patches
-pop_patch_uncut = pop_patch %>%
-  dplyr::group_by(
-    patch_id, # uncut patch id
-    Year
-  ) %>% 
-  dplyr::summarise(
-    MeanN_Ad = sum(MeanNInd),
-    MeanN_Juv = sum(MeanNJuvs),
-    MeanN_Tot = sum(MeanNTot),
-    .groups = "drop"
-  )
+# To do so, we need: adults surviving and staying in focal patch, adults surviving and successfully emigrating to other patches, juveniles surviving and staying in focal patch, juveniles surviving and successfully emigrating to other patches
+# Adults surviving locally: Stage 2	; Status 0 or 4	; Same patch (previous vs current)
+# Adults surviving and emigrating successfully: Stage 2	; Status 4 ; Different
+# Juveniles surviving locally: Stage	0 or 1; Status 0 or 4;	Same
+# Juveniles surviving and emigrating successfully: Stage	0 or 1; Status	4;	Different
+# Adults dying locally: Stage 2; Status	8 or 9;	Same
+# Juveniles dying locally: Stage	0 or 1; Status	8 or 9;	Same
+# Adults dying in transfer: Stage 2; Status	6 or 7;	Different
+# Juveniles dying in transfer: Stage	0 or 1; Status 6 or 7;	Different
+# Newborns (recruitment): Stage 0; Previous patch NA current patch is not matrix
+# Newborns (dead): Stage 0; Previous patch NA current patch is matrix
 
-# Compute growth rate and lambda
-pop_patch_uncut = pop_patch_uncut %>% 
-  dplyr::group_by(patch_id) %>% 
-  dplyr::arrange(Year, .by_group = TRUE) %>% 
+# Filter the dataset
+inds_filter = inds_all %>%
+  # Filter using the best simulations
+  dplyr::semi_join(
+    best_values,
+    by = params_tested) %>% 
+  # Remove the last year and the matrix
+  dplyr::filter(
+    Year != max(Year, na.rm = TRUE)) %>% 
   dplyr::mutate(
-    lag_value = dplyr::lag(MeanN_Tot),
-  
-    # Finite rate of increase
-    lambda = dplyr::if_else(
-      lag_value > 0,
-      MeanN_Tot / lag_value,
-      NA_real_),
-    
-    # Dynamics
-    dyn = dplyr::case_when(
-      lambda > 1 ~ "+",
-      lambda < 1 ~ "-",
-      lambda == 1 ~ "="
-    )
-    ) %>% 
-  dplyr::ungroup()
-
-# Remove year 0
-pop_patch_uncut = pop_patch_uncut %>% 
-  dplyr::filter(Year != 0)
-
-###### Patch dispersal --------
-# Filter dispersal flux
-# We keep the dispersal flux of the best simulation only
-disp_subset = dispersers_all %>% 
-  dplyr::filter(
-    Id_simul == best_sim
-  )
-
-# Emigration: successful and failed emigrations leaving each patch (focus on the origin)
-emig = disp_subset %>% 
-  dplyr::filter(
-    Disp_type %in% c(
-      "Inter-patch dispersal",
-      "Died in matrix"
-    )
-  ) %>% 
-  dplyr::group_by(
-    Orig_patch_name,
-    Year,
-    Rep
-  ) %>% 
-  dplyr::summarise(
-    # Successful emigrations
-    n_emig = dplyr::n_distinct(
-      IndID[Disp_type == "Inter-patch dispersal"]
-    ),
-    
-    # Failed emigrations
-    n_emig_failed = dplyr::n_distinct(
-      IndID[Disp_type == "Died in matrix"]
-    ),
-    
-    # Mean distance of successful emigrants in this replicate
-    mean_dist_emig = mean(
-      DistMoved[Disp_type == "Inter-patch dispersal"],
-      na.rm = TRUE
-    ),
-    
-    .groups = "drop"
-  ) %>% 
-  dplyr::rename(
-    patch_id = Orig_patch_name
-  ) %>% 
-  dplyr::group_by(
-    patch_id,
-    Year
-  ) %>% 
-  dplyr::summarise(
-    # Average across replicates
-    mean_n_emig = round(mean(n_emig), 1),
-    mean_n_emig_failed = round(mean(n_emig_failed), 1),
-    mean_dist_emig = mean(mean_dist_emig, na.rm = TRUE),
-    .groups = "drop"
-  )
-
-# Immigrants: focus on the destination
-immig = disp_subset %>% 
-  dplyr::filter(
-    Disp_type == "Inter-patch dispersal"
-    ) %>% 
-  dplyr::group_by(
-    Dest_patch_name,
-    Year,
-    Rep
-  ) %>% 
-  dplyr::summarise(
-    
-    # Number of successful immigrants
-    n_immig = dplyr::n_distinct(IndID),
-    .groups = "drop",
-    
-    # Mean dispersal distance of immigrants
-    mean_dist_immig = mean(
-      DistMoved,
-      na.rm = TRUE
-    ),
-    
-    
-  ) %>% 
-  dplyr::rename(
-    patch_id = Dest_patch_name
-  ) %>% 
-  dplyr::group_by(
-    patch_id,
-    Year
-  ) %>% 
-  # Average across replicates
-  dplyr::summarise(
-    mean_n_immig = round(mean(n_immig),1),
-    mean_dist_immig = mean(mean_dist_immig),
-    .groups = "drop"
-  )
-
-# Bind
-emig_immig = emig %>% 
-  dplyr::full_join(immig, by=c("patch_id","Year"))
-
-# Complete missing years
-emig_immig = emig_immig %>% 
-  tidyr::complete(
-    patch_id,
-    Year,
-    fill = list(
-      mean_n_immig = 0,
-      mean_n_emig = 0,
-      mean_n_emig_failed = 0
-    )
-  )
-
-# Mean across patches
-emig_immig %>% 
-  dplyr::select(-Year) %>% 
-  dplyr::summarise(
-    dplyr::across(
-      dplyr::where(is.numeric),
-      ~ mean(.x, na.rm = TRUE)
-    )
-  )
-
-###### Categorize as source/sink ------
-# Merge pop and disp data
-pop_disp_patch_uncut = pop_patch_uncut %>% 
-  dplyr::left_join(emig_immig, by=c("patch_id","Year"))
-
-# Categorize patches as sources and sinks
-# Sources: patches with positive growth rates (lambda>1) and emigrants>immigrants
-# Sinks: patches with negative growth rates (lambda<1) and immigrants>emigrants
-pop_disp_patch_uncut = pop_disp_patch_uncut %>% 
-  dplyr::mutate(
-    source_sink = dplyr::case_when(
-      dyn == "+" & mean_n_emig>mean_n_immig ~ "Viable source",
-      dyn == "=" & mean_n_emig>mean_n_immig ~ "Viable source",
-      dyn == "-" & mean_n_emig>mean_n_immig ~ "Unviable source",
-      dyn == "+" & mean_n_immig>mean_n_emig ~ "Viable sink",
-      dyn == "=" & mean_n_immig>mean_n_emig ~ "Viable sink",
-      dyn == "-" & mean_n_immig>mean_n_emig ~ "Unviable sink",
-      dyn == "=" & mean_n_immig==mean_n_emig ~ "Equilibrium",
-      dyn == "+" & mean_n_emig==mean_n_immig ~ "Other viable patches",
-      dyn == "-" & mean_n_emig==mean_n_immig ~ "Other unviable patches",
-      MeanN_Tot > 0 & lag_value == 0 ~ "Recolonized",
-      MeanN_Tot == 0 ~ "Unoccupied",
-      TRUE ~ "Other"
-    )
-    )
-pop_disp_patch_uncut %>% 
-  dplyr::count(source_sink)
-
-###### Patch dynamics ------
-# Filter using the list of patches
-patch_dyn_select = pop_disp_patch_uncut %>% 
-  dplyr::filter(patch_id %in% patch_list)
-  
-# In long format
-patch_dyn_select_long = patch_dyn_select %>% 
+    Year = as.integer(Year)
+  ) %>%
   dplyr::select(
-    patch_id,
-    Year,
-    MeanN_Tot,
-    mean_n_emig,
-    mean_n_immig
-  ) %>% 
-  tidyr::pivot_longer(
-    cols = c(
-      MeanN_Tot,
-      mean_n_emig,
-      mean_n_immig
-    ),
-    names_to = "Variable",
-    values_to = "Value"
-  ) %>% 
-  dplyr::mutate(
-    Variable = dplyr::recode(
-      Variable,
-      MeanN_Tot = "Population size",
-      mean_n_emig = "Emigrants",
-      mean_n_immig = "Immigrants"
-    )
+    Rep, Year, IndID,
+    Status, Natal_patch, PatchID, Age, Stage,
+    DistMoved, Nsteps
   )
-# Plot
-png(here::here("data",
-               "rangeshifter",
-               "tests",
-               test_config$test_name,
-               "plot",
-               "patch_dyn.png"),
-    width = 3000, height = 2000, res = 300, type="cairo")
-# Plot
-ggplot2::ggplot(
-  patch_dyn_select_long,
-  ggplot2::aes(
-    x = Year,
-    y = Value,
-    colour = Variable,
-    group = Variable
-  )
-) +
-  ggplot2::geom_line(linewidth = 0.9) +
-  ggplot2::geom_point(size = 0.5) +
-  ggplot2::facet_wrap(
-    ~ patch_id,
-    scales = "free_y"
-  ) +
-  ggplot2::labs(
-    x = "Year",
-    y = "Number of individuals",
-    colour = NULL
-  ) +
-  ggplot2::theme_bw() +
-  ggplot2::theme(
-    legend.position = "bottom",
-    strip.text = ggplot2::element_text(face = "bold")
-  )
-dev.off()
 
-###### Patch status ------
-# Proportion of patches in each source/sink category per year
-source_sink_prop = pop_disp_patch_uncut %>% 
-  dplyr::filter(!is.na(source_sink),
-                source_sink != "Unoccupied",
-                source_sink != "Equilibrium",
-                source_sink != "Recolonized") %>% 
-  dplyr::group_by(Year, source_sink) %>% 
+# Check duplicated individuals
+dup = inds_filter %>%
+  dplyr::count(
+    Rep, IndID, Year,
+    name = "n_records"
+  ) %>%
+  dplyr::filter(n_records > 1)
+# There are duplicated individuals
+
+# Details about duplicated individuals
+dup_details = inds_filter %>%
+  dplyr::semi_join(
+    dup,
+    by = c("Rep", "IndID", "Year")
+  ) %>%
+  dplyr::select(
+    Rep, IndID, Year,
+    Status, PatchID, Age, Stage
+  ) %>%
+  dplyr::arrange(
+    Rep, IndID, Year, Status
+  )
+
+# Status of duplicates
+dup_details %>%
+  dplyr::group_by(Rep, IndID, Year) %>%
   dplyr::summarise(
-    n_patches = dplyr::n_distinct(patch_id),
+    n_records = dplyr::n(),
+    status = paste(sort(unique(Status)), collapse = ", "),
     .groups = "drop"
-  ) %>% 
-  dplyr::group_by(Year) %>% 
-  dplyr::mutate(
-    prop_patches = n_patches / sum(n_patches)
-  ) %>% 
-  dplyr::ungroup()
+  ) %>%
+  dplyr::arrange(Rep, IndID, Year)
 
-# Plot
-png(here::here("data",
-               "rangeshifter",
-               "tests",
-               test_config$test_name,
-               "plot",
-               "source_sink_dyn.png"),
-    width = 2000, height = 1200, res = 300, type="cairo")
-ggplot2::ggplot(
-  source_sink_prop,
-  ggplot2::aes(
-    x = Year,
-    y = prop_patches,
-    fill = source_sink
-  )
-) +
-  ggplot2::geom_col(width = 0.8) +
-  ggplot2::scale_fill_manual(
-    values = c(
-      "Viable source" = "#00F5DC",
-      "Unviable source" = "#00453E",
-      "Viable sink" = "#FF2273",
-      "Unviable sink" = "#71002A",
-      "Other viable patches" = "#CFFFFE",
-      "Other unviable patches" = "#FFCFE1"
-    )
-  ) +
-  ggplot2::scale_y_continuous(
-    labels = scales::percent_format()
-  ) +
-  ggplot2::labs(
-    x = "Year",
-    y = "Proportion of patches",
-    fill = "Patch category"
-  ) +
-  ggplot2::theme_bw() +
-  ggplot2::theme(
-    legend.position = "bottom"
-  )
-dev.off()
+# -> Duplicated individuals are individuals dying of age (reach max. age)
+
+### TO COMPLETE
+
+# # Patch occupied in the previous year
+# previous_patch = inds_filter %>%
+#   dplyr::transmute(
+#     Rep,
+#     IndID,
+#     Year = Year + 1L,
+#     previous_patch = PatchID
+#   )
+# 
+# # Join previous patch to the current-year record
+# inds_transitions = inds_sim2 %>%
+#   dplyr::left_join(
+#     previous_patch,
+#     by = c("Rep", "IndID", "Year")
+#   ) %>%
+#   dplyr::mutate(
+#     current_patch = PatchID) %>% 
+#   dplyr::filter(Year != 0) # Remove the first year
+# 
+# # Classify all individuals
+# inds_classified = inds_transitions %>%
+#   dplyr::mutate(
+#     outcome = dplyr::case_when(
+#       # Adults
+#       Stage == 2 & Status %in% c(0, 4) &
+#         previous_patch == current_patch ~ "Adults surviving in patch",
+#       
+#       Stage == 2 & Status == 4 &
+#         previous_patch != current_patch ~ "Adults emigrating",
+#       
+#       Stage == 2 & Status %in% c(8, 9) &
+#         previous_patch == current_patch ~ "Adults dying in patch",
+#       
+#       Stage == 2 & Status %in% c(6, 7) &
+#         previous_patch != current_patch ~ "Adults dying in transfer",
+#       
+#       # Juveniles
+#       Stage %in% c(0, 1) & Status %in% c(0, 4) &
+#         previous_patch == current_patch ~ "Juveniles surviving in patch",
+#       
+#       Stage %in% c(0, 1) & Status == 4 &
+#         previous_patch != current_patch ~ "Juveniles emigrating",
+#       
+#       Stage %in% c(0, 1) & Status %in% c(8, 9) &
+#         previous_patch == current_patch ~ "Juveniles dying in patch",
+#       
+#       Stage %in% c(0, 1) & Status %in% c(6, 7) &
+#         previous_patch != current_patch ~ "Juveniles dying in transfer",
+#       
+#       # Local recruits (no previous patch)
+#       Stage %in% c(0, 1) & is.na(previous_patch) &
+#         Status %in% c(0, 4) & !is.na(current_patch) ~ "Local recruits surviving in patch",
+#       
+#       Stage %in% c(0, 1) & is.na(previous_patch) &
+#         Status == 4 & !is.na(current_patch) ~ "Local recruits emigrating",
+#       
+#       Stage %in% c(0, 1) & is.na(previous_patch) &
+#         Status %in% c(6, 7) ~ "Local recruits dying in transfer",
+#       
+#       TRUE ~ NA_character_
+#     )
+#   )
+# table(inds_classified$outcome)
+# 
+# # Aggregate by patch
+# patch_dyn = inds_classified %>%
+#   dplyr::group_by(
+#     Rep,
+#     Year,
+#     current_patch
+#   ) %>%
+#   dplyr::summarise(
+#     adults_surviving_locally = sum(outcome == "Adults surviving in patch", na.rm = TRUE),
+#     adults_emigrating = sum(outcome == "Adults emigrating", na.rm = TRUE),
+#     adults_dying_locally = sum(outcome == "Adults dying in patch", na.rm = TRUE),
+#     adults_dying_in_transfer = sum(outcome == "Adults dying in transfer", na.rm = TRUE),
+#     
+#     juveniles_surviving_locally = sum(outcome == "Juveniles surviving in patch", na.rm = TRUE),
+#     juveniles_emigrating = sum(outcome == "Juveniles emigrating", na.rm = TRUE),
+#     juveniles_dying_locally = sum(outcome == "Juveniles dying in patch", na.rm = TRUE),
+#     juveniles_dying_in_transfer = sum(outcome == "Juveniles dying in transfer", na.rm = TRUE),
+#     
+#     local_recruits_surviving_locally = sum(outcome == "Local recruits surviving in patch", na.rm = TRUE),
+#     local_recruits_dying_in_transfer = sum(outcome == "Local recruits dying in transfer", na.rm = TRUE),
+#     
+#     .groups = "drop"
+#   ) %>%
+#   dplyr::rename(
+#     PatchID = current_patch
+#   )
 
 #### Heatmaps ----
 # Because movement is stochastic, the number of visits per cell and the colonisation of empty patches are different for each replicate. 

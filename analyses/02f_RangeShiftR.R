@@ -63,7 +63,7 @@ library(viridis)
 
 # List with components stored
 test_config = list(
-  test_name = "test_resist_25", # Name of the folder
+  test_name = "test_resist_26", # Name of the folder
   
   # Parameters tested with sensitivity analysis (i.e., those varying during simulations)
   parameters = c(
