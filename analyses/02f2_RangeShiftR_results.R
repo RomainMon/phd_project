@@ -135,11 +135,16 @@ params_tested = test_config$parameters
 # - Occupancy_stats.txt: Summary occupancy statistics, i.e. the mean ratio between  occupied and suitable cells (Mean_OccupSuit) and its standard error (Std_error) at the set time interval.
 
 ## Population files: statistics regarding each population present in the landscape at a given time interval.
+# IMPORTANT: Data are collected BEFORE reproduction at each reproductive season
 # - Species number (Species); not yet used, always zero 
 # - Number of individuals in the population (NInd). In the case of a stage-structured population, the number of individuals in each stage (NInd_stageX). If the reproduction is sexual, these columns will be replaced by the number of females (Nfemales_stageX) and of males (Nmales_stageX) in each stage. In the case of sexual model without stage structure, two columns will indicate the number of females (Nfemales) and of males (Nmales) in the population. 
 # - In the case of a stage-structured population, the number of juveniles born (NJuvs). If the  reproduction is sexual, these columns will be replaced by the number of females juveniles (NJuvFemales) and males (NJuvMales).
 
 ## Individuals
+# Contains information regarding each individual at a given time step.
+# Data are recorded after settlement and before aging (in the case of overlapping generations), in order that dispersal data for individuals which die may be reported.
+# IMPORTANT: Individuals data for year T therefore correspond to Population and Traits summary data for year T+1 (and individuals which die in year T must be excluded for the data to match at population level).
+
 # 1. Replicate number (Rep) 
 # 2. Year 
 # 3. Reproductive season within the year (RepSeason) 
@@ -156,6 +161,7 @@ params_tested = test_config$parameters
 # 14. If there is a density-dependent settlement rule for a movement model, and there is interindividual variability, three traits determining settlement probability (S0, alphaS and betaS) 
 # 15. Distance moved in meters (linear distance from the centre of the starting cell to the centre  of the arrival cell - DistMoved); if the individual has crossed an absorbing landscape or ‘nodata’ boundary, the distance moved will be missing (set to -1) 
 # 16. Number of steps taken (Nsteps) for movement models
+
 
 ## Genetics
 
@@ -286,9 +292,9 @@ pop_total = pop_all_complete %>%
   # Female proportion: 100-56=44
   # Multiplier: 1/0.44 = 2.3
   # IF sex model, the population includes both males and females
-  dplyr::summarise(NInd = sum(NInd), # N Adults (Stage 1 + Stage 2)
-                   NJuvs = sum(NJuvs), # N Juveniles
-                   NTot = (NInd+NJuvs)*2.3, # Total population
+  dplyr::summarise(NInd = sum(NInd), # N Adults (Stage 1 + Stage 2) BEFORE REPRODUCTION
+                   NJuvs = sum(NJuvs), # N births
+                   NTot = (NInd+NJuvs)*2.3, # Total population AFTER REPRODUCTION
                    .groups = "drop") %>% 
   dplyr::filter(Year != max(Year, na.rm = TRUE)) # Remove the last Year
 
@@ -495,7 +501,7 @@ inds_files = list.files(
   full.names = TRUE
 )
 
-# Read and stack all pop files
+# Read and stack all ind files
 inds_all = purrr::map_dfr(inds_files, function(f){
   
   # Simulation id
@@ -504,7 +510,7 @@ inds_all = purrr::map_dfr(inds_files, function(f){
     "(?<=Sim)\\d+(?=_Land)"
   ) %>%  as.numeric()
   
-  # Read pop file
+  # Read file
   read.table(
     f,
     header = TRUE,
@@ -865,6 +871,7 @@ ggplot2::ggplot(
 dev.off()
 
 ###### Dispersal distance -----
+# We focus on SUCCESSFUL dispersal events
 disp_dist = dispersers_all %>% 
   dplyr::filter(
     Disp_type != "Died in matrix" # Remove failed dispersal events
@@ -1856,31 +1863,36 @@ ggplot(
 dev.off()
 
 ##### Source/sink dynamics -----
-# We work at the scale of real patches (uncut)
 # We compute the contribution from focal subpopulation r to the metapopulation (metric C; Runge et al. 2006)
 # This enables distinguishing between sources and patches
+# Natal patch is not necessarily the patch an individual emigrates from. An individual may have dispersed several times during its lifetime
+# Population size in a patch is given by: N = Survivals + Births + Immigrants - Emigrants - Deaths(local) - Deaths(emigrants)
 
-# To do so, we need: adults surviving and staying in focal patch, adults surviving and successfully emigrating to other patches, juveniles surviving and staying in focal patch, juveniles surviving and successfully emigrating to other patches
-# Adults surviving locally: Stage 2	; Status 0 or 4	; Same patch (previous vs current)
-# Adults surviving and emigrating successfully: Stage 2	; Status 4 ; Different
-# Juveniles surviving locally: Stage	0 or 1; Status 0 or 4;	Same
-# Juveniles surviving and emigrating successfully: Stage	0 or 1; Status	4;	Different
-# Adults dying locally: Stage 2; Status	8 or 9;	Same
-# Juveniles dying locally: Stage	0 or 1; Status	8 or 9;	Same
-# Adults dying in transfer: Stage 2; Status	6 or 7;	Different
-# Juveniles dying in transfer: Stage	0 or 1; Status 6 or 7;	Different
-# Newborns (recruitment): Stage 0; Previous patch NA current patch is not matrix
-# Newborns (dead): Stage 0; Previous patch NA current patch is matrix
+# We need:
+# Survivals: individuals with status 0 or 4, previous patch = current patch, WITHOUT duplicated individuals (dying in the course of the year)
+# Immigrants: individuals with status 4 with current patch =! previous patch
+# Emigrants: individuals with status 4 with previous patch =! current patch
+# Births: individuals with stage 0 and not present the year before (except for year 0)
+# Deaths (local): individuals with status 8 or 9 with previous patch = current patch
+# Deaths (in transfer): individuals with status 6 or 7 with previous patch =! current patch and current patch = 0 (matrix)
 
-# Filter the dataset
+# WARNING: Inds and POP files record the population at different points in the simulation year.
+# Inds file for year T: records individual-level demographic events during the simulation year, including recruits, individuals surviving, and individuals that die. It can therefore contain individuals that contribute to reproduction but die later in the same year.
+# POP year T+1 reflects the resulting population after survival and aging, together with the new juvenile cohort reported for that reproductive cycle.
+# Example: (Ind file) the population of patch A in year T has 2 local recruits + 1 subadult + 5 adults = 8
+# (Pop file) the population of patch A in year T+1 has 2 of stage 1 (2 local recruits aged) + 6 of stages 2 (1 subadult aged + 5 adults) = 8 individuals
+# (Pop file) it also includes 6 juveniles born immediately after reproduction which only appear in the ind file the year T+1
+# THEREFORE: the individual file may have DUPLICATED inds because they are recorded AFTER survival AND AFTER aging
+# WHAT CORRESPONDS IS: Births+Survivals+Immigrants-Deaths-Emigrants (Ind File, Year T) = NInd (Pop File, Year T+1)
+# WHAT CORRESPONDS ALSO IS: Births+Survivals+Immigrants-Deaths-Emigrants (Ind File, Year T) + Newborns (Juveniles born (staying or leaving), Year T+1) = NInd + NJuvs (Pop File, Year T+1)
+
+###### Cut scale (territory) ------
+### Filter the dataset
 inds_filter = inds_all %>%
   # Filter using the best simulations
   dplyr::semi_join(
     best_values,
     by = params_tested) %>% 
-  # Remove the last year and the matrix
-  dplyr::filter(
-    Year != max(Year, na.rm = TRUE)) %>% 
   dplyr::mutate(
     Year = as.integer(Year)
   ) %>%
@@ -1890,6 +1902,43 @@ inds_filter = inds_all %>%
     DistMoved, Nsteps
   )
 
+# Add the uncut patch ID for the current location
+inds_filter = inds_filter %>%
+  dplyr::left_join(
+    patch_corres_id,
+    by = c("PatchID" = "cut_patch_id")
+  )
+
+### CHECKS
+## Status column
+unique(inds_filter$Status)
+
+## Example per status
+example_ids = inds_filter %>%
+  dplyr::filter(Rep == 1) %>%
+  dplyr::group_by(Status) %>%
+  dplyr::summarise(IndID = dplyr::first(IndID), .groups = "drop") %>%
+  dplyr::distinct(IndID)
+
+examples_history = inds_filter %>%
+  dplyr::filter(Rep == 1, IndID %in% example_ids$IndID) %>%
+  dplyr::arrange(IndID, Year) %>%
+  dplyr::select(
+    Rep, IndID, Year, Status, PatchID, uncut_patch_id,
+    Natal_patch, Age, Stage, DistMoved, Nsteps
+  )
+
+print(examples_history)
+
+## Number of patches per individual
+inds_filter %>%
+  dplyr::group_by(Rep, IndID) %>%
+  dplyr::summarise(
+    n_distinct_patches = dplyr::n_distinct(PatchID, na.rm = TRUE)
+  ) %>%
+  dplyr::arrange(dplyr::desc(n_distinct_patches))
+
+## Duplicates
 # Check duplicated individuals
 dup = inds_filter %>%
   dplyr::count(
@@ -1908,115 +1957,791 @@ dup_details = inds_filter %>%
   dplyr::select(
     Rep, IndID, Year,
     Status, PatchID, Age, Stage
-  ) %>%
-  dplyr::arrange(
-    Rep, IndID, Year, Status
-  )
-
-# Status of duplicates
-dup_details %>%
+  ) %>% 
   dplyr::group_by(Rep, IndID, Year) %>%
   dplyr::summarise(
     n_records = dplyr::n(),
-    status = paste(sort(unique(Status)), collapse = ", "),
+    Diff_status = paste(sort(unique(Status)), collapse = ", "),
     .groups = "drop"
+  )
+
+# Status of duplicates
+unique(dup_details$Diff_status)
+# -> Duplicated individuals are individuals dying of age (reach max. age) (Status 9)
+
+## Mutate the previous patch
+# Compute the patch occupied in the previous year
+previous_patches = inds_filter %>%
+  dplyr::transmute(
+    Rep,
+    IndID,
+    Year = Year + 1L,
+    previous_patch = PatchID
+  )
+
+# Join the previous patch
+inds_history = inds_filter %>%
+  dplyr::left_join(
+    previous_patches,
+    by = c("Rep", "IndID", "Year")
+  )
+
+## Individuals dying of age
+deaths_aging = inds_history %>%
+  dplyr::filter(Status == 9) %>%
+  dplyr::distinct(Rep, Year, IndID)
+
+## Individuals born and dispersing in the same year
+same_year_dispersers = inds_history %>%
+  dplyr::filter(
+    Status == 4,
+    is.na(previous_patch),
+    !is.na(Natal_patch),
+    PatchID != Natal_patch
   ) %>%
-  dplyr::arrange(Rep, IndID, Year)
+  dplyr::distinct(Rep, Year, IndID, .keep_all = TRUE)
 
-# -> Duplicated individuals are individuals dying of age (reach max. age)
+## Helper: count juveniles and adults in wide format
+# WARNING: use this helper where it makes sense
+# For instance, due to Juv survival = 1 in the pop matrix, no juvenile will die from one year to another in a local patch -> does not make sense to apply it to local survivals
+count_by_stage = function(data, prefix) {
+  data %>%
+    dplyr::group_by(Rep, Year, PatchID) %>%
+    dplyr::summarise(
+      !!paste0(prefix, "_juv") :=
+        dplyr::n_distinct(IndID[Stage == 0], na.rm = TRUE),
+      !!paste0(prefix, "_adult") :=
+        dplyr::n_distinct(IndID[Stage %in% c(1, 2)], na.rm = TRUE),
+      .groups = "drop"
+    )
+}
 
-### TO COMPLETE
+## Local survivors
+# Survivals: individuals surviving in the same patch from one year to another
+survivors = inds_history %>%
+  dplyr::filter(
+    Status %in% c(0, 4),
+    previous_patch == PatchID
+  ) %>%
+  # Excluding individuals dying from aging
+  dplyr::anti_join(
+    deaths_aging,
+    by = c("Rep", "Year", "IndID")
+  ) %>%
+  dplyr::group_by(Rep, Year, PatchID) %>%
+  dplyr::summarise(
+    n_surv = dplyr::n_distinct(IndID),
+    .groups = "drop"
+  )
 
-# # Patch occupied in the previous year
-# previous_patch = inds_filter %>%
-#   dplyr::transmute(
-#     Rep,
-#     IndID,
-#     Year = Year + 1L,
-#     previous_patch = PatchID
-#   )
-# 
-# # Join previous patch to the current-year record
-# inds_transitions = inds_sim2 %>%
-#   dplyr::left_join(
-#     previous_patch,
-#     by = c("Rep", "IndID", "Year")
-#   ) %>%
-#   dplyr::mutate(
-#     current_patch = PatchID) %>% 
-#   dplyr::filter(Year != 0) # Remove the first year
-# 
-# # Classify all individuals
-# inds_classified = inds_transitions %>%
-#   dplyr::mutate(
-#     outcome = dplyr::case_when(
-#       # Adults
-#       Stage == 2 & Status %in% c(0, 4) &
-#         previous_patch == current_patch ~ "Adults surviving in patch",
-#       
-#       Stage == 2 & Status == 4 &
-#         previous_patch != current_patch ~ "Adults emigrating",
-#       
-#       Stage == 2 & Status %in% c(8, 9) &
-#         previous_patch == current_patch ~ "Adults dying in patch",
-#       
-#       Stage == 2 & Status %in% c(6, 7) &
-#         previous_patch != current_patch ~ "Adults dying in transfer",
-#       
-#       # Juveniles
-#       Stage %in% c(0, 1) & Status %in% c(0, 4) &
-#         previous_patch == current_patch ~ "Juveniles surviving in patch",
-#       
-#       Stage %in% c(0, 1) & Status == 4 &
-#         previous_patch != current_patch ~ "Juveniles emigrating",
-#       
-#       Stage %in% c(0, 1) & Status %in% c(8, 9) &
-#         previous_patch == current_patch ~ "Juveniles dying in patch",
-#       
-#       Stage %in% c(0, 1) & Status %in% c(6, 7) &
-#         previous_patch != current_patch ~ "Juveniles dying in transfer",
-#       
-#       # Local recruits (no previous patch)
-#       Stage %in% c(0, 1) & is.na(previous_patch) &
-#         Status %in% c(0, 4) & !is.na(current_patch) ~ "Local recruits surviving in patch",
-#       
-#       Stage %in% c(0, 1) & is.na(previous_patch) &
-#         Status == 4 & !is.na(current_patch) ~ "Local recruits emigrating",
-#       
-#       Stage %in% c(0, 1) & is.na(previous_patch) &
-#         Status %in% c(6, 7) ~ "Local recruits dying in transfer",
-#       
-#       TRUE ~ NA_character_
-#     )
-#   )
-# table(inds_classified$outcome)
-# 
-# # Aggregate by patch
-# patch_dyn = inds_classified %>%
-#   dplyr::group_by(
-#     Rep,
-#     Year,
-#     current_patch
-#   ) %>%
-#   dplyr::summarise(
-#     adults_surviving_locally = sum(outcome == "Adults surviving in patch", na.rm = TRUE),
-#     adults_emigrating = sum(outcome == "Adults emigrating", na.rm = TRUE),
-#     adults_dying_locally = sum(outcome == "Adults dying in patch", na.rm = TRUE),
-#     adults_dying_in_transfer = sum(outcome == "Adults dying in transfer", na.rm = TRUE),
-#     
-#     juveniles_surviving_locally = sum(outcome == "Juveniles surviving in patch", na.rm = TRUE),
-#     juveniles_emigrating = sum(outcome == "Juveniles emigrating", na.rm = TRUE),
-#     juveniles_dying_locally = sum(outcome == "Juveniles dying in patch", na.rm = TRUE),
-#     juveniles_dying_in_transfer = sum(outcome == "Juveniles dying in transfer", na.rm = TRUE),
-#     
-#     local_recruits_surviving_locally = sum(outcome == "Local recruits surviving in patch", na.rm = TRUE),
-#     local_recruits_dying_in_transfer = sum(outcome == "Local recruits dying in transfer", na.rm = TRUE),
-#     
-#     .groups = "drop"
-#   ) %>%
-#   dplyr::rename(
-#     PatchID = current_patch
-#   )
+## Local births
+# Births: individuals appearing over the course of the simulations in a patch
+births = inds_history %>%
+  dplyr::filter(Stage == 0, PatchID != 0) %>%
+  # Excluding individuals born and dispersing the same year
+  dplyr::anti_join(
+    same_year_dispersers %>% dplyr::distinct(Rep, Year, IndID),
+    by = c("Rep", "Year", "IndID")
+  ) %>% 
+  # Identify first appearance of each individual
+  dplyr::group_by(Rep, IndID) %>%
+  dplyr::filter(Year == min(Year, na.rm = TRUE)) %>%
+  dplyr::ungroup() %>%
+  dplyr::group_by(Rep, Year, PatchID) %>%
+  dplyr::summarise(
+    n_births = dplyr::n_distinct(IndID),
+    .groups = "drop"
+  )
+
+## Identify movement events
+movement_events = inds_history %>%
+  dplyr::filter(DistMoved > 0) %>%
+  dplyr::mutate(
+    origin_patch = dplyr::coalesce(previous_patch, Natal_patch)
+  ) %>%
+  dplyr::filter(
+    !is.na(origin_patch),
+    !is.na(PatchID),
+    PatchID != 0,
+    origin_patch != PatchID
+  ) %>%
+  dplyr::distinct(
+    Rep, Year, IndID, origin_patch, PatchID, Stage
+  )
+
+## Immigrants
+# Immigrants: individuals arriving in a patch B from patch A
+immigration_ids = movement_events %>%
+  dplyr::distinct(Rep, Year, IndID, PatchID, Stage)
+immigrants = count_by_stage(immigration_ids, "n_imm")
+
+## Immigrants dying in the destination patch in the same year
+immigrants_dying_ids = movement_events %>%
+  dplyr::inner_join(
+    inds_history %>%
+      dplyr::filter(Status %in% c(8, 9)) %>%
+      dplyr::select(Rep, Year, IndID, PatchID, Stage),
+    by = c("Rep", "Year", "IndID", "PatchID"),
+    suffix = c("_movement", "_death")
+  ) %>%
+  dplyr::transmute(
+    Rep,
+    Year,
+    IndID,
+    PatchID,
+    Stage = Stage_death
+  ) %>%
+  dplyr::distinct(Rep, Year, IndID, PatchID, Stage)
+immigrants_dying = count_by_stage(
+  immigrants_dying_ids,
+  "n_imm_dying"
+)
+
+## Emigrants
+# Emigrants: individuals arriving in a patch A from patch B
+emigration_ids = movement_events %>%
+  dplyr::transmute(
+    Rep,
+    Year,
+    IndID,
+    PatchID = origin_patch,
+    Stage
+  ) %>%
+  dplyr::distinct(Rep, Year, IndID, PatchID, Stage)
+emigrants = count_by_stage(emigration_ids, "n_emi")
+
+## Deaths during transfer
+deaths_transfer_ids = inds_history %>%
+  dplyr::filter(
+    Status %in% c(6, 7),
+    PatchID == 0
+  ) %>%
+  dplyr::mutate(
+    PatchID = dplyr::coalesce(previous_patch, Natal_patch)
+  ) %>%
+  dplyr::filter(!is.na(PatchID), PatchID != 0) %>%
+  dplyr::distinct(Rep, Year, IndID, PatchID, Stage)
+deaths_transfer = count_by_stage(
+  deaths_transfer_ids,
+  "n_deaths_transfer"
+)
+
+## Local deaths
+# Local deaths: individuals dying in the patch
+deaths_local = inds_history %>% 
+  # Keep individuals with status 8 or 9 (local deaths)
+  dplyr::filter(
+    Status %in% c(8, 9)
+  ) %>%
+  # Excluding immigrants who die in the same year
+  dplyr::anti_join(
+    immigrants_dying_ids %>%
+      dplyr::select(Rep, Year, PatchID, IndID),
+    by = c("Rep", "Year", "PatchID", "IndID")
+  ) %>%
+  # Total number
+  dplyr::group_by(Rep, Year, PatchID) %>%
+  dplyr::summarise(
+    n_deaths_local= dplyr::n_distinct(IndID),
+    .groups = "drop"
+  )
+
+## Merge all demographic tables
+patch_demography = list(
+  survivors,
+  births,
+  deaths_local,
+  deaths_transfer,
+  immigrants,
+  immigrants_dying,
+  emigrants
+) %>%
+  purrr::reduce(
+    dplyr::full_join,
+    by = c("Rep", "Year", "PatchID")
+  ) %>%
+  dplyr::mutate(
+    dplyr::across(
+      dplyr::starts_with("n_"),
+      ~ tidyr::replace_na(.x, 0)
+    )
+  ) %>%
+  dplyr::filter(PatchID != 0)
+
+# Count pop size
+patch_demography = patch_demography %>%
+  dplyr::mutate(
+    N = n_surv + n_births + n_imm_juv - n_imm_dying_juv + n_imm_adult - n_imm_dying_adult
+  )
+
+
+## Check the correspondence between inds files and population files
+# Population files
+pop_patch_cut = pop_all_complete %>%
+  # Keep the best simulation
+  dplyr::semi_join(
+    best_values,
+    by = params_tested) %>%
+  # Remove the matrix
+  dplyr::filter(
+    PatchID != 0
+    ) %>% 
+  dplyr::group_by(Rep, Year, PatchID) %>%
+  dplyr::summarise(
+    NInd = sum(NInd, na.rm = TRUE),
+    NJuvs = sum(NJuvs, na.rm = TRUE),
+    NTot = NInd + NJuvs,
+    .groups = "drop"
+  )
+
+# Join population sizes and compare both relationships
+patch_demography_check = patch_demography %>%
+  dplyr::mutate(
+    Year_pop = Year + 1L
+  ) %>%
+  # Population output for year T+1
+  dplyr::left_join(
+    pop_patch_cut %>%
+      dplyr::rename(Year_pop = Year),
+    by = c("Rep", "Year_pop", "PatchID")
+  ) %>%
+  # Births recorded in year T+1
+  dplyr::left_join(
+    births %>%
+      dplyr::transmute(
+        Rep,
+        Year_pop = Year,
+        PatchID,
+        n_births_next = n_births
+      ),
+    by = c("Rep", "Year_pop", "PatchID")
+  ) %>%
+  # Juveniles emigrating during year T+1, counted in their origin patch
+  dplyr::left_join(
+    patch_demography %>%
+      dplyr::transmute(
+        Rep,
+        Year_pop = Year,
+        PatchID,
+        n_emi_juv_next = n_emi_juv
+      ),
+    by = c("Rep", "Year_pop", "PatchID")
+  ) %>%
+  # Juveniles dying during transfer in year T+1, attributed to origin patch
+  dplyr::left_join(
+    patch_demography %>%
+      dplyr::transmute(
+        Rep,
+        Year_pop = Year,
+        PatchID,
+        n_deaths_transfer_juv_next = n_deaths_transfer_juv
+      ),
+    by = c("Rep", "Year_pop", "PatchID")
+  ) %>%
+  dplyr::mutate(
+    n_births_next = tidyr::replace_na(n_births_next, 0),
+    n_emi_juv_next = tidyr::replace_na(n_emi_juv_next, 0),
+    n_deaths_transfer_juv_next =
+      tidyr::replace_na(n_deaths_transfer_juv_next, 0),
+    
+    # Comparison 1: year T demographic balance vs NInd in year T+1
+    diff_NInd = N - NInd,
+    
+    # Comparison 2: add births and emigrating juvenile in year T+1
+    N_next = N +
+      n_births_next +
+      n_emi_juv_next +
+      n_deaths_transfer_juv_next,
+    
+    # Compare with total population in POP year T+1
+    diff_NTot = N_next - NTot,
+    
+    correspondence_NInd = dplyr::if_else(
+      diff_NInd == 0, "Match", "Mismatch"
+    ),
+    
+    correspondence_NTot = dplyr::if_else(
+      diff_NTot == 0, "Match", "Mismatch"
+    )
+  ) %>%
+  dplyr::filter(Year != 0)
+
+# Summarize
+patch_demography_check %>%
+  dplyr::summarise(
+    n_patches = dplyr::n(),
+    
+    matches_NInd = sum(correspondence_NInd == "Match"),
+    mismatches_NInd = sum(correspondence_NInd == "Mismatch"),
+    
+    matches_NTot = sum(correspondence_NTot == "Match"),
+    mismatches_NTot = sum(correspondence_NTot == "Mismatch")
+  )
+# -> The pop size counted from individual files and NInd from pop files match
+# -> The pop size counted from individual files and NTot from pop files match
+# THIS MEANS THAT: total population size (adults + juveniles) in pop file in T+1 equals: 
+# the number of individuals in the patch + the juveniles born the next year (staying and emigrating)
+
+### Mean across replicates
+patch_demography_mean = patch_demography %>%
+  dplyr::group_by(Year, PatchID) %>%
+  dplyr::summarise(
+    dplyr::across(
+      dplyr::starts_with("n_"),
+      ~ round(mean(.x, na.rm = TRUE),1)
+    ),
+    N = round(mean(N, na.rm = TRUE),1),
+    .groups = "drop"
+  )
+
+###### Uncut scale (real patch) ------
+# Movements between cut patches within the same uncut patch can be counted as survivors at the uncut scale.
+# We only need to count movements that cross an uncut-patch boundary:
+# - individuals entering an uncut patch from another uncut patch.
+# - individuals leaving an uncut patch for another uncut patch.
+# - Intra-uncut movements are not counted separately as immigration or emigration.
+
+### Filter the dataset
+inds_filter_uncut = inds_all %>%
+  # Keep best simulation
+  dplyr::semi_join(
+    best_values,
+    by = params_tested
+  ) %>%
+  dplyr::mutate(
+    Year = as.integer(Year)
+  ) %>%
+  dplyr::select(
+    Rep, Year, IndID,
+    Status, Natal_patch, PatchID, Age, Stage,
+    DistMoved, Nsteps
+  ) %>%
+  # Add the uncut patch corresponding to the current cut patch
+  dplyr::left_join(
+    patch_corres_id,
+    by = c("PatchID" = "cut_patch_id")
+  )
+
+## Previous cut patch and previous uncut patch
+previous_patches_uncut = inds_filter_uncut %>%
+  dplyr::transmute(
+    Rep,
+    IndID,
+    Year = Year + 1L,
+    previous_patch = PatchID,
+    previous_uncut_patch_id = uncut_patch_id
+  )
+inds_history_uncut = inds_filter_uncut %>%
+  dplyr::left_join(
+    previous_patches_uncut,
+    by = c("Rep", "IndID", "Year")
+  )
+
+## Individuals dying of age
+deaths_aging_uncut = inds_history_uncut %>%
+  # Status 9 means it reached max age
+  dplyr::filter(Status == 9) %>%
+  dplyr::distinct(Rep, Year, IndID)
+
+## Individuals born and dispersing in the same year
+same_year_dispersers_uncut = inds_history_uncut %>%
+  # Individuals successfully settling in a patch but with different Natal and Patch IDs
+  dplyr::filter(
+    Status == 4,
+    is.na(previous_patch),
+    !is.na(Natal_patch),
+    PatchID != Natal_patch
+  ) %>%
+  dplyr::distinct(Rep, Year, IndID, .keep_all = TRUE) %>%
+  dplyr::mutate(
+    natal_patch = Natal_patch
+  ) %>%
+  dplyr::left_join(
+    patch_corres_id %>%
+      dplyr::transmute(
+        natal_patch = cut_patch_id,
+        natal_uncut_patch_id = uncut_patch_id
+      ),
+    by = "natal_patch"
+  )
+
+
+## Local survivors
+# survivors are individuals who remain in the same uncut patch, regardless of which cut patch they occupy
+survivors_uncut = inds_history_uncut %>%
+  # Survivors = individuals born here (0) or settled (4)
+  # With the same previous patch
+  dplyr::filter(
+    Status %in% c(0, 4),
+    !is.na(previous_uncut_patch_id),
+    previous_uncut_patch_id == uncut_patch_id,
+    !is.na(uncut_patch_id)
+  ) %>%
+  # Remove those dying of age the same year
+  dplyr::anti_join(
+    deaths_aging_uncut,
+    by = c("Rep", "Year", "IndID")
+  ) %>%
+  dplyr::group_by(Rep, Year, uncut_patch_id) %>%
+  dplyr::summarise(
+    n_surv = dplyr::n_distinct(IndID),
+    .groups = "drop"
+  )
+
+## Births
+births_uncut = inds_history_uncut %>%
+  # Juveniles (stage 0)
+  dplyr::filter(
+    Stage == 0,
+    PatchID != 0,
+    !is.na(uncut_patch_id)
+  ) %>%
+  # Count individuals who dispersed after being born
+  dplyr::left_join(
+    same_year_dispersers_uncut %>%
+      dplyr::select(
+        Rep, Year, IndID, natal_uncut_patch_id
+      ),
+    by = c("Rep", "Year", "IndID")
+  ) %>%
+  dplyr::filter(
+    is.na(natal_uncut_patch_id) |
+      natal_uncut_patch_id == uncut_patch_id
+  ) %>%
+  dplyr::group_by(Rep, IndID) %>%
+  # First occurrence of the individual
+  dplyr::filter(Year == min(Year, na.rm = TRUE)) %>%
+  dplyr::ungroup() %>%
+  dplyr::group_by(Rep, Year, uncut_patch_id) %>%
+  dplyr::summarise(
+    n_births = dplyr::n_distinct(IndID),
+    .groups = "drop"
+  )
+
+## Movements between different uncut patches only
+movement_events_uncut = inds_history_uncut %>%
+  # DistMoved indicates a dispersal event
+  dplyr::filter(DistMoved > 0) %>%
+  dplyr::mutate(
+    origin_patch = dplyr::coalesce(previous_patch, Natal_patch)
+  ) %>%
+  dplyr::left_join(
+    patch_corres_id %>%
+      dplyr::rename(
+        origin_patch = cut_patch_id,
+        origin_uncut_patch_id = uncut_patch_id
+      ),
+    by = "origin_patch"
+  ) %>%
+  dplyr::filter(
+    !is.na(origin_uncut_patch_id),
+    !is.na(uncut_patch_id),
+    !is.na(origin_patch),
+    !is.na(PatchID),
+    PatchID != 0,
+    origin_uncut_patch_id != uncut_patch_id
+  ) %>%
+  dplyr::distinct(
+    Rep, Year, IndID,
+    origin_uncut_patch_id, uncut_patch_id,
+    .keep_all = TRUE
+  )
+
+## Immigrants: entering an uncut patch from another uncut patch
+immigrants_uncut = movement_events_uncut %>%
+  dplyr::group_by(Rep, Year, uncut_patch_id) %>%
+  dplyr::summarise(
+    n_imm_inter_uncut = dplyr::n_distinct(IndID),
+    .groups = "drop"
+  )
+
+## Immigrants dying in their destination uncut patch
+immigrants_dying_ids_uncut = movement_events_uncut %>%
+  dplyr::inner_join(
+    inds_history_uncut %>%
+      dplyr::filter(
+        # Dead individuals
+        Status %in% c(8, 9),
+        !is.na(uncut_patch_id)
+      ) %>%
+      dplyr::select(
+        Rep, Year, IndID, uncut_patch_id
+      ) %>%
+      dplyr::distinct(),
+    by = c("Rep", "Year", "IndID", "uncut_patch_id")
+  ) %>%
+  dplyr::distinct(
+    Rep, Year, IndID, uncut_patch_id
+  )
+
+immigrants_dying_uncut = immigrants_dying_ids_uncut %>%
+  dplyr::group_by(Rep, Year, uncut_patch_id) %>%
+  dplyr::summarise(
+    n_imm_dying = dplyr::n_distinct(IndID),
+    .groups = "drop"
+  )
+
+## Emigrants: leaving an uncut patch for another uncut patch
+emigrants_uncut = movement_events_uncut %>%
+  dplyr::group_by(
+    Rep, Year,
+    uncut_patch_id = origin_uncut_patch_id
+  ) %>%
+  dplyr::summarise(
+    n_emi_inter_uncut = dplyr::n_distinct(IndID),
+    .groups = "drop"
+  )
+
+## Deaths during transfer, assigned to origin uncut patch
+deaths_transfer_ids_uncut = inds_history_uncut %>%
+  dplyr::filter(
+    # Death during transfer in the matrix (patch 0)
+    Status %in% c(6, 7),
+    PatchID == 0
+  ) %>%
+  dplyr::mutate(
+    origin_patch = dplyr::coalesce(previous_patch, Natal_patch)
+  ) %>%
+  dplyr::left_join(
+    patch_corres_id %>%
+      dplyr::rename(
+        origin_patch = cut_patch_id,
+        uncut_patch_origin = uncut_patch_id
+      ),
+    by = "origin_patch"
+  ) %>%
+  dplyr::filter(!is.na(uncut_patch_origin)) %>%
+  dplyr::transmute(
+    Rep, Year, IndID,
+    uncut_patch_id = uncut_patch_origin
+  ) %>%
+  dplyr::distinct(Rep, Year, IndID, uncut_patch_id)
+
+deaths_transfer_uncut = deaths_transfer_ids_uncut %>%
+  dplyr::group_by(Rep, Year, uncut_patch_id) %>%
+  dplyr::summarise(
+    n_deaths_transfer = dplyr::n_distinct(IndID),
+    .groups = "drop"
+  )
+
+## Local deaths, excluding immigrants dying in the destination
+deaths_local_uncut = inds_history_uncut %>%
+  dplyr::filter(
+    # Death of age
+    Status %in% c(8, 9),
+    !is.na(uncut_patch_id)
+  ) %>%
+  # Excluding immigrants dying in the destination
+  dplyr::anti_join(
+    immigrants_dying_ids_uncut %>%
+      dplyr::select(Rep, Year, IndID, uncut_patch_id),
+    by = c("Rep", "Year", "IndID", "uncut_patch_id")
+  ) %>%
+  dplyr::group_by(Rep, Year, uncut_patch_id) %>%
+  dplyr::summarise(
+    n_deaths_local = dplyr::n_distinct(IndID),
+    .groups = "drop"
+  )
+
+## Build the table
+patch_demography_uncut = list(
+  survivors_uncut,
+  births_uncut,
+  deaths_local_uncut,
+  deaths_transfer_uncut,
+  immigrants_uncut,
+  immigrants_dying_uncut,
+  emigrants_uncut
+) %>%
+  purrr::reduce(
+    dplyr::full_join,
+    by = c("Rep", "Year", "uncut_patch_id")
+  ) %>%
+  dplyr::mutate(
+    dplyr::across(
+      dplyr::starts_with("n_"),
+      ~ tidyr::replace_na(.x, 0)
+    )
+  ) %>%
+  dplyr::filter(
+    !is.na(uncut_patch_id),
+    Year != 0
+  ) %>%
+  dplyr::mutate(
+    N = n_surv +
+      n_births +
+      n_imm_inter_uncut -
+      n_imm_dying
+  )
+
+## Check 
+# Pop files
+pop_patch_uncut = pop_all_complete %>%
+  # Keep the best simulation
+  dplyr::semi_join(
+    best_values,
+    by = params_tested) %>%
+  # Remove the matrix
+  dplyr::filter(
+    PatchID != 0
+  ) %>% 
+  dplyr::left_join(
+    patch_corres_id,
+    by = c("PatchID" = "cut_patch_id")
+  ) %>%
+  dplyr::group_by(Rep, Year, uncut_patch_id) %>%
+  dplyr::summarise(
+    NInd = sum(NInd, na.rm = TRUE),
+    NJuvs = sum(NJuvs, na.rm = TRUE),
+    NTot = NInd + NJuvs,
+    .groups = "drop"
+  )
+
+# Join population sizes and compare both relationships at uncut-patch level
+patch_demography_check_uncut = patch_demography_uncut %>%
+  dplyr::mutate(
+    Year_pop = Year + 1L
+  ) %>%
+  # Population output for year T+1
+  dplyr::left_join(
+    pop_patch_uncut %>%
+      dplyr::rename(Year_pop = Year),
+    by = c("Rep", "Year_pop", "uncut_patch_id")
+  ) %>%
+  dplyr::mutate(
+    diff_NInd = N - NInd,
+    correspondence_NInd = dplyr::if_else(
+      diff_NInd == 0, "Match", "Mismatch"
+    )
+  ) %>%
+  dplyr::filter(Year != 0)
+
+# Summarize
+patch_demography_check_uncut %>%
+  dplyr::summarise(
+    n_patches = dplyr::n(),
+    matches_NInd = sum(correspondence_NInd == "Match", na.rm = TRUE),
+    mismatches_NInd = sum(correspondence_NInd == "Mismatch", na.rm = TRUE)
+  )
+
+### Mean values across replicates
+dplyr::group_vars(patch_demography_uncut) # Check
+patch_demography_uncut_mean = patch_demography_uncut %>% 
+  dplyr::group_by(Year, uncut_patch_id) %>% 
+  dplyr::summarise(
+    dplyr::across(
+      dplyr::starts_with("n_"),
+      ~ round(mean(.x, na.rm = TRUE), 0)
+    ),
+    N = round(mean(N, na.rm = TRUE), 0),
+    .groups = "drop"
+  )
+
+###### Basic source/sink -----
+# Following Pulliam (1988)
+# Compute lambda
+patch_source_sink = patch_demography_uncut_mean %>%
+  dplyr::arrange(uncut_patch_id, Year) %>%
+  dplyr::group_by(uncut_patch_id) %>%
+  dplyr::mutate(
+    lambda = dplyr::if_else(
+      N > 0 & !is.na(dplyr::lead(N)),
+      dplyr::lead(N) / N,
+      NA_real_
+    ),
+    k = lambda - 1
+  ) %>%
+  dplyr::ungroup()
+
+# Basic annual source/sink classification
+patch_source_sink = patch_source_sink %>% 
+  dplyr::group_by(uncut_patch_id) %>%
+  dplyr::mutate(
+    annual_status = dplyr::case_when(
+      (n_births > n_deaths_local &
+         n_emi_inter_uncut > n_imm_inter_uncut) |
+        lambda > 1 ~ "Source",
+      
+      (n_births < n_deaths_local &
+         n_imm_inter_uncut < n_emi_inter_uncut) |
+        lambda < 1 ~ "Sink",
+      
+      TRUE ~ "Balanced"
+    )
+  ) %>%
+  dplyr::ungroup()
+table(patch_source_sink$annual_status)
+
+# Overall classification per patch across years
+patch_source_sink = patch_source_sink %>%
+  dplyr::group_by(uncut_patch_id) %>%
+  dplyr::summarise(
+    classification = dplyr::case_when(
+      all(annual_status == "Source") ~ "Unconditional source",
+      all(annual_status == "Sink") ~ "Unconditional sink",
+      
+      any(annual_status == "Source") &
+        any(annual_status == "Sink") &
+        sum(annual_status == "Source") > sum(annual_status == "Sink") ~
+        "Conditional source",
+      
+      any(annual_status == "Source") &
+        any(annual_status == "Sink") &
+        sum(annual_status == "Sink") > sum(annual_status == "Source") ~
+        "Conditional sink",
+      
+      TRUE ~ "Balanced"
+    ),
+    .groups = "drop"
+  )
+table(patch_source_sink$classification)
+
+### MAP
+patch_map = patch_uncut %>%
+  dplyr::left_join(
+    patch_corres_id %>%
+      dplyr::distinct(uncut_patch_name, uncut_patch_id) %>%
+      dplyr::left_join(
+        patch_source_sink,
+        by = "uncut_patch_id"
+      ) %>%
+      dplyr::select(uncut_patch_name, classification) %>%
+      dplyr::distinct(uncut_patch_name, .keep_all = TRUE),
+    by = c("patch_id" = "uncut_patch_name")
+  )
+
+# Plot source/sink status
+ggplot2::ggplot(patch_map) +
+  ggplot2::geom_sf(
+    ggplot2::aes(fill = classification),
+    colour = "white",
+    linewidth = 0.2
+  ) +
+  ggplot2::scale_fill_manual(
+    values = c(
+      "Unconditional source" = "#238443",
+      "Conditional source"   = "#78C679",
+      "Unconditional sink"   = "#CB181D",
+      "Conditional sink"     = "#FB6A4A",
+      "Unstable (source-sink alternance)" = "#984EA3",
+      "Balanced" = "yellow"
+    ),
+    na.value = "grey80"
+  ) +
+  ggplot2::labs(
+    fill = "Patch status",
+    title = "Source–sink classification by patch"
+  ) +
+  ggplot2::theme_minimal() +
+  ggplot2::theme(
+    axis.title = ggplot2::element_blank(),
+    panel.grid = ggplot2::element_blank()
+  )
+
+###### C metric -----
+# See Runge et al. 2006, The Role of Local Populations within a Landscape Context: Defining and Classifying Sources and Sinks, The American Naturalist
+# See Newby et al. 2013, Human-caused mortality influences spatial population dynamics: Pumas in landscapes with varying mortality risks, Biological Conservation
+
 
 #### Heatmaps ----
 # Because movement is stochastic, the number of visits per cell and the colonisation of empty patches are different for each replicate. 
@@ -2925,7 +3650,7 @@ summary = read_excel(here::here("data",
 #### Information to add manually ----
 
 test_aim = "Tests IndsHaCell using the 2023 map and 70 HA TERRITORIES with NEW DISTRIB. MAP (added territories to Pirineus)"
-test_remarks = "IndsHaCell between 0.1 and 0.14"
+test_remarks = "IndsHaCell = 0.11"
 
 #### Test name -----
 test_name = basename(normalizePath(dirpath))

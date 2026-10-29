@@ -1303,6 +1303,55 @@ for (i in seq_along(rasters_lf)) {
 ### 1b) - Vector metrics on UMMPs patches -----
 # Here, we work with patches as sets of patches within a UMMP (i.e., isolated populations)
 
+#### Reclass high forests ------
+# GLTs do not occupy forests above 500 m -> they are reclassified and take the value 10
+reclass_high_forest = function(r, topo, forest_value,
+                               elev_threshold,
+                               new_value) {
+  
+  # Align DEM if needed
+  if (!compareGeom(r, topo, stopOnError = FALSE)) {
+    topo = terra::resample(topo, r, method = "bilinear")
+  }
+  
+  r_out = r
+  
+  # Forest cells above threshold
+  idx = r == forest_value & topo > elev_threshold
+  
+  r_out[idx] = new_value
+  
+  return(r_out)
+}
+
+# Reclass
+# forest cells above 500 m take the value 10
+rasters_mspa_alt = lapply(
+  rasters_mspa,
+  reclass_high_forest,
+  topo = topo_r,
+  forest_value = 1,
+  elev_threshold = 500,
+  new_value = 10
+)
+# corridor cells above 500 m take the value 10
+rasters_mspa_alt = lapply(
+  rasters_mspa_alt,
+  reclass_high_forest,
+  topo = topo_r,
+  forest_value = 33,
+  elev_threshold = 500,
+  new_value = 10
+)
+
+# Check
+plot(
+  rasters_mspa_alt[[36]],
+  col = c(
+    "#32a65e", "#ad975a", "#519799","#FFFFB2", "#0000FF", "#d4271e","purple","orange"
+  )
+)
+
 #### Overlay linear features -----
 # Here, we overlay vector linear features to the rasters using a buffer width and assign the intersected cells a new numeric value
 # -> Adapt the buffer width and value according to the linear feature (for instance: roads = 15m)
@@ -1328,7 +1377,7 @@ plot(highway)
 # Second, we apply linear features
 # Main roads take the value "artificial" (6)
 # WARNING: at this resolution (30 x 30 m), a minimum of 20 m is needed for linear features to create continuous linear features (below, some cells are not overwritten, and some raster cells are still connected through their vertices)
-rasters_lf = purrr::map2(rasters_reclass, years, function(r, yr) {
+rasters_lf = purrr::map2(rasters_mspa_alt, years, function(r, yr) {
   message("  - Applying linear features for year ", yr)
   r_lin = r
   r_lin = apply_linear_feature_single(r_lin, yr, pipelines, buffer_width = 20, value = 4, use_date = TRUE)
@@ -1342,7 +1391,7 @@ forest_patches = purrr::map(rasters_lf, ~ landscapemetrics::get_patches(.x, clas
 patches_sf = purrr::map(forest_patches, ~ sf::st_as_sf(terra::as.polygons(.x[[1]][[1]], dissolve = TRUE)))
 
 # visualize
-plot(rasters_lf[[36]], col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e"))
+plot(rasters_lf[[36]], col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e", "purple","orange"))
 plot(sf::st_geometry(patches_sf[[36]]), col="darkgreen", add=TRUE)
 
 #### Dissolve by UMMP ------
@@ -1548,7 +1597,7 @@ ummp_cols = setNames(rainbow(length(ummp_ids), alpha = 0.7),
                      ummp_ids)
 
 # Plot base raster
-plot(rasters_lf[[36]], col = c("#32a65e", "#ad975a", "#519799", "#FFFFB2","#0000FF", "#d4271e"))
+plot(rasters_lf[[36]], col = c("#32a65e", "#ad975a", "#519799", "#FFFFB2","#0000FF", "#d4271e", "purple", "orange"))
 
 # 1. Plot outside fragments in gray
 plot(st_geometry(outside), add = TRUE, col = "grey80", border = "grey50", lwd = 0.5)
@@ -1816,7 +1865,7 @@ ummp_ids = sort(unique(patches_selected[[36]]$patch_id))
 ummp_cols = setNames(rainbow(length(ummp_ids), alpha = 0.7),
                      ummp_ids)
 # Plot base raster
-plot(rasters_lf[[36]],col = c("#32a65e", "#ad975a", "#519799", "#FFFFB2","#0000FF", "#d4271e"))
+plot(rasters_lf[[36]],col = c("#32a65e", "#ad975a", "#519799", "#FFFFB2","#0000FF", "#d4271e", "purple","orange"))
 # All patches in gray
 plot(st_geometry(patches_sf[[36]]), add = TRUE, col = "grey80",border = "grey50",lwd = 0.5)
 # Selected patches
@@ -2026,17 +2075,24 @@ patches_metrics = progressr::with_progress({
         dplyr::rename(area_ha = value) %>%
         dplyr::select(patch_id, area_ha)
       
+      shape_tbl = vm_p_shape(.x, patch_col = "patch_id") %>%
+        dplyr::rename(patch_id = id) %>%
+        dplyr::rename(shape = value) %>%
+        dplyr::select(patch_id, shape)
+      
       enn_tbl = vm_p_enn(.x, patch_col = "patch_id") %>% 
         dplyr::rename(patch_id = id) %>%
-        dplyr::rename(enn = value) %>%
-        dplyr::select(patch_id, enn)
+        dplyr::rename(enn_m = value) %>%
+        dplyr::select(patch_id, enn_m)
       
       .x %>%
         dplyr::left_join(area_tbl, by = "patch_id") %>%
+        dplyr::left_join(shape_tbl, by = "patch_id") %>%
         dplyr::left_join(enn_tbl, by = "patch_id") %>%
         dplyr::mutate(
           area_ha = round(area_ha, 2),
-          enn = round(enn, 2),
+          shape = round(shape, 2),
+          enn_m = round(enn_m, 2),
         )
     }
   )
@@ -2047,32 +2103,33 @@ patches_metrics = progressr::with_progress({
 
 ### Example
 patches2024 = patches_metrics[[36]]
-lu2024 = rasters_mspa[[36]]
+lu2024 = rasters_alt[[36]]
+plot(lu2024, col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e", "purple", "orange"))
 res2024 = terra::subst(
   lu2024,
-  from = c(1, 2, 3, 4, 5, 6, 33),
-  to = c(1, 20, 20, 100, 50, 100, 5)
+  from = c(1, 2, 3, 4, 5, 6, 10, 33),
+  to = c(1, 20, 20, 50, 100, 100, 20, 5)
 )
-plot(res2024, col=c("white","yellow","lightblue","blue","navy"))
+plot(res2024, col=c("white","yellow","lightblue","navy","black"))
 plot(sf::st_geometry(patches2024), col="darkgreen", add=TRUE)
 
 # Compute metric
 PC_res = Makurhini::MK_dPCIIC(
-  nodes = patches2024,
-  attribute = "area_ha",
-  area_unit = "ha",
+  nodes = patches2024, # Object containing nodes
+  attribute = "area_ha", # Column with area
+  area_unit = "ha", # Unit
   distance = list(
     type = "least-cost",
     resistance = res2024
-  ),
-  metric = "IIC",
-  probability = 0.5, # for a median dispersal distance, use a probability of 0.5 (50%)
+  ), # A matrix or list to establish the distance between each pair of nodes. Distance between nodes may be Euclidean distances (straight-line distance) or effective distances (cost distances) by considering the landscape resistance to the species movements.
+  metric = "PC",
+  probability = 0.05, # if the distance_threshold is a median dispersal distance, use a probability of 0.5 (50%). If the distance_threshold is a maximum dispersal distance, set a probability of 0.05 (5%) or 0.01 (1%)
   distance_thresholds = 2000
 )
 # Plot
-breaks = classInt::classIntervals(PC_res$dIIC, n = 9, style = "jenks")
+breaks = classInt::classIntervals(PC_res$dPC, n = 9, style = "jenks")
 PC_res = PC_res %>%
-  dplyr::mutate(dPC_q = cut(dIIC,
+  dplyr::mutate(dPC_q = cut(dPC,
                             breaks = breaks$brks,
                             include.lowest = TRUE,
                             dig.lab = 5))  
@@ -2082,8 +2139,8 @@ ggplot() +
   scale_fill_brewer(palette = "RdYlGn", direction = 1, name = "dIIC (jenks)") +
   theme_minimal() +
   labs(
-    title = "dIIC Least-cost distance",
-    fill = "dIIC"
+    title = "dPC Least-cost distance",
+    fill = "dPC"
   ) +
   theme(
     legend.position = "right",
@@ -2094,10 +2151,11 @@ ggplot() +
 ### Apply to all patches
 compute_connectivity = function(patches, r) {
   
+  # Resistance values
   resist_lc = terra::subst(
     r,
-    from = c(1, 2, 3, 4, 5, 6, 33),
-    to   = c(1, 20, 20, 100, 50, 100, 5)
+    from = c(1, 2, 3, 4, 5, 6, 10, 33),
+    to = c(1, 20, 20, 50, 100, 100, 20, 5)
   )
   
   PC_res = MK_dPCIIC(
@@ -2108,9 +2166,9 @@ compute_connectivity = function(patches, r) {
       type = "least-cost",
       resistance = resist_lc
     ),
-    metric = "IIC",
-    probability = 0.5,
-    distance_thresholds = 2000
+    metric = "PC",
+    probability = 0.05, # if the distance_threshold is a median dispersal distance, use a probability of 0.5 (50%). If the distance_threshold is a maximum dispersal distance, set a probability of 0.05 (5%) or 0.01 (1%)
+    distance_thresholds = 2000 # In meters
   )
   
   PC_res
@@ -2150,12 +2208,31 @@ ggplot(
     color = "Patch"
   )
 
+# Shape
+ggplot(
+  PC_long,
+  aes(
+    x = year,
+    y = shape,
+    color = patch_id,
+    group = patch_id
+  )
+) +
+  geom_line() +
+  geom_point(size = 1) +
+  theme_bw() +
+  labs(
+    x = "Year",
+    y = "Shape",
+    color = "Patch"
+  )
+
 # ENN
 ggplot(
   PC_long,
   aes(
     x = year,
-    y = enn,
+    y = enn_m,
     color = patch_id,
     group = patch_id
   )
@@ -2174,7 +2251,7 @@ ggplot(
   PC_long,
   aes(
     x = year,
-    y = dIIC,
+    y = dPC,
     color = patch_id,
     group = patch_id
   )
@@ -2184,7 +2261,7 @@ ggplot(
   theme_bw() +
   labs(
     x = "Year",
-    y = "dIIC",
+    y = "dPC",
     color = "Patch"
   )
 
@@ -2194,11 +2271,11 @@ PC_long %>%
     year,
     patch_id,
     area_ha,
-    enn,
-    dIIC
+    enn_m,
+    dPC
   ) %>%
   tidyr::pivot_longer(
-    cols = c(area_ha, enn, dIIC),
+    cols = c(area_ha, enn_m, dPC),
     names_to = "metric",
     values_to = "value"
   ) %>%
@@ -2215,6 +2292,27 @@ PC_long %>%
   ) +
   theme_bw()
 
+## Correlations
+cor.test(
+  PC_long$area_ha,
+  PC_long$dPC,
+  method = "spearman",
+  exact = FALSE
+)
+
+cor.test(
+  PC_long$area_ha,
+  PC_long$enn_m,
+  method = "spearman",
+  exact = FALSE
+)
+
+cor.test(
+  PC_long$enn_m,
+  PC_long$dPC,
+  method = "spearman",
+  exact = FALSE
+)
 
 #### Export patches ----------
 # Patch metrics

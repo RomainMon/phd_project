@@ -1,6 +1,6 @@
 #------------------------------------------------#
 # Author: Romain Monassier
-# Objective: Extract dispersal events
+# Objective: Extract dispersal events from long-term datasets, associate them to patch delimitations and export them as spatial lines
 #------------------------------------------------#
 
 ### Load packages ------
@@ -46,7 +46,8 @@ for (i in seq_along(corridors)) {
 names(corridors) = vector_df$year # Name by year
 
 # Patches
-base_path = here::here("outputs", "data", "patches_rshifter")
+# base_path = here::here("outputs", "data", "patches_rshifter") # REAL PATCHES
+base_path = here::here("outputs", "data", "patchmetrics") # UMMP PATCHES
 vect_files = list.files(base_path, pattern = "\\.gpkg$", full.names = TRUE)
 
 # Extract years
@@ -155,6 +156,7 @@ data.disp.filter.grp %>%
 # 5. Frequency of individuals by age
 data.disp.filter.grp %>%
   dplyr::count(IdadeOK, name = "Frequency") %>%
+  dplyr::mutate(Proportion = Frequency / sum(Frequency)) %>% 
   dplyr::arrange(dplyr::desc(Frequency))
 
 # 6. Number of groups GLTs departed from or immigrated to
@@ -277,6 +279,8 @@ disp.final = disp.final %>%
   dplyr::mutate(
     intra_patch = ifelse(patch_from == patch_to, 1, 0)
   )
+# Intra-patch dispersal: 1
+# Inter-patch dispersal: 0
 table(disp.final$intra_patch)
 
 # Join GLT information
