@@ -639,7 +639,16 @@ disp.final.glt %>%
   dplyr::arrange(dplyr::desc(n)) %>% 
   print(n=80)
 
-#### Export dispersal lines ---------
+### Export ---------
+#### Dispersal events (table) -----
+write.xlsx(as.data.frame(data.disp.filter.grp),
+           file=here::here("outputs","data","dispersal","Successful_dispersal.xlsx"),
+           sheetName = "Sheet1",
+           col.names=T,
+           row.names=F)
+
+
+#### Dispersal lines -----
 sf::st_write(
   disp.final.glt,
   dsn = here::here("outputs", "data", "dispersal", "disp_lines.gpkg"),

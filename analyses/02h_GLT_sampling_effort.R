@@ -14,9 +14,11 @@ library(patchwork)
 
 ### Import datasets -----
 
+#### GLT DATA -----
 # GLT data
 load(here::here("data", "glt", "APonchon", "data_clean_long_final.RData"))
 
+#### Group locations -----
 # Group locations
 regions = sf::st_read(here::here("data", "geo", "APonchon", "GLT", "RegionsName.shp"))
 regions_csv = readr::read_csv2(
@@ -25,7 +27,7 @@ regions_csv = readr::read_csv2(
   na = ""
 )
 
-# Patches
+#### Patches -----
 # base_path = here::here("outputs", "data", "patches_rshifter") # REAL PATCHES
 base_path = here::here("outputs", "data", "patchmetrics") # UMMP PATCHES
 vect_files = list.files(base_path, pattern = "\\.gpkg$", full.names = TRUE)
@@ -729,17 +731,26 @@ dev.off()
 
 #### Parameters -----
 # Choose the criterion:
-# "annual_1" = at least 1 distinct observation date per year
-# "annual_2" = at least 2 distinct observation dates per year
-# "dry-dry"  = at least 1 observation date in the Dry season (April-May-June) per year
-# "dry-wet"  = at least 1 observation date in the Dry season (April-May-June) AND at least 1 at the end of the reproductive season (December-January-February-March) within the same annual cycle.
+# "annual" = at least N distinct observation date per year
+# "dry-dry"  = at least N observation date in the Dry season (April-May-June) per year
+# "dry-wet"  = at least N observation date in the Dry season (April-May-June) AND at least N at the end of the reproductive season (December-January-February-March) within the same annual cycle.
 # Annual cycle Y = Dry season of year Y + Dec of year Y + Jan-Mar of year Y+1
 # (i.e., Jan-Mar observations are attributed to the cycle of the previous year)
 
-criteria = "dry-dry"
+criteria = "dry-wet"
 
-# Minimum number of consecutive qualifying years
-threshold = 3
+# Minimum number of DISTINCT observation dates required per year (annual cycle)
+# min_obs_year = in the whole window (all months considered by `criteria`)
+# min_obs_dry = in the dry months (dry_months)
+# min_obs_wet = in the wet months (wet_months)
+# Use 0 to ignore a condition. Examples (former criteria):
+min_obs_year = 0
+min_obs_dry = 1
+min_obs_wet = 2
+
+# Minimum number of consecutive years
+# i.e., nb of continuous monitoring required (e.g., 3 years means that a group monitored in 2005-2007 is excluded)
+threshold = 2
 
 # Years excluded because of Yellow Fever
 excluded_years = 2017:2019
@@ -755,9 +766,8 @@ wet_months = c(12, 1:3)
 # Maximum number of missing years tolerated between two qualifying years within a run
 # 0 = strictly consecutive years
 # 1 = e.g., 2003, 2005, 2006 form a single run (even if 2004 is missing)
+# NB: this limits each gap individually = there could be several gaps within a run (e.g., 2003-2005-2006-2008 with a gap of 1 year), as long as the gap is below the threshold retained
 max_gap_years = 1
-
-stopifnot(max_gap_years >= 0)
 
 # Label reused in the plot subtitles
 threshold_label = paste0(
@@ -765,10 +775,27 @@ threshold_label = paste0(
   max_gap_years, " yr)"
 )
 
+# Label describing the observation criterion (reused in the figure)
+dry_label = paste(month.abb[dry_months], collapse = "-")
+wet_label = paste(month.abb[wet_months], collapse = "-")
+obs_label = paste(
+  c(
+    if (min_obs_year > 0) paste0("≥", min_obs_year, " obs. date(s) per year"),
+    if (min_obs_dry > 0) paste0("≥", min_obs_dry, " in dry season (", dry_label, ")"),
+    if (min_obs_wet > 0) paste0("≥", min_obs_wet, " in wet season (", wet_label, ")")
+  ),
+  collapse = " + "
+)
+
 stopifnot(
   length(criteria) == 1,
-  criteria %in% c("annual_1", "annual_2", "dry-dry", "dry-wet")
+  criteria %in% c("annual", "dry-dry", "dry-wet"),
+  min_obs_year >= 0, min_obs_dry >= 0, min_obs_wet >= 0,
+  min_obs_year + min_obs_dry + min_obs_wet >= 1
 )
+if (criteria == "dry-dry" && min_obs_wet > 0) {
+  stop("criteria = 'dry-dry' only keeps dry months: min_obs_wet must be 0")
+}
 stopifnot(threshold >= 1)
 
 
@@ -849,6 +876,7 @@ patches_sf %>%
 monitoring_ind = data.clean.final %>%
   dplyr::filter(
     !is.na(GLT),
+    # Remove bad individuals
     !GLT %in% bad,
     !is.na(Group),
     !is.na(UMMPs),
@@ -894,16 +922,20 @@ monitoring = monitoring_ind %>%
   dplyr::distinct(
     UMMPs, Region, Group, Year, Cycle, Month, DateObs, season
   ) %>%
+  # Join UMMP name based on the correspondence with the patch file
   dplyr::left_join(
     UMMP_crosswalk,
     by = "UMMPs"
   )
 
+### Summary of criteria
 cat("\nCriterion:", criteria,
-    "\nThreshold:", threshold, "consecutive years",
+    "\nObservations required:", obs_label,
+    "\nThreshold:", threshold, "qualifying years per run",
+    "\nMax gap:", max_gap_years, "year(s)",
     "\nExcluded years:", paste(excluded_years, collapse = ", "),
     "\nBridge excluded years:", bridge_excluded_years,
-    "\nNumber of monitoring records:", nrow(monitoring), "\n")
+    "\nNumber of observations:", nrow(monitoring), "\n")
 
 cat("\nMonitoring data preview:\n")
 head(monitoring, n = 10)
@@ -915,31 +947,25 @@ head(monitoring, n = 10)
 annual_counts = monitoring %>%
   dplyr::group_by(UMMPs, Group, Cycle) %>%
   dplyr::summarise(
-    n_observations = dplyr::n_distinct(DateObs),
-    n_dry = dplyr::n_distinct(DateObs[Month %in% dry_months]),
-    n_wet = dplyr::n_distinct(DateObs[Month %in% wet_months]),
+    n_observations = dplyr::n_distinct(DateObs), # Number of distinct observations
+    n_dry = dplyr::n_distinct(DateObs[Month %in% dry_months]), # Number of distinct observations in dry months
+    n_wet = dplyr::n_distinct(DateObs[Month %in% wet_months]), # Number of distinct observations in wet months
     .groups = "drop"
   )
 
-# Apply the observation-count criterion
+# Apply the observation criteria (i.e., min nb. of observations)
 years = annual_counts %>%
-  # Number of required observations
   dplyr::mutate(
-    qualifies = switch(
-      criteria,
-      "annual_1" = n_observations >= 1,
-      "annual_2" = n_observations >= 2,
-      "dry-dry"  = n_dry >= 1,
-      "dry-wet"  = n_dry >= 1 & n_wet >= 1
-    )
+    qualifies = n_observations >= min_obs_year &
+      n_dry >= min_obs_dry &
+      n_wet >= min_obs_wet
   ) %>%
   dplyr::filter(qualifies) %>%
   dplyr::distinct(UMMPs, Group, Cycle) %>%
   dplyr::arrange(UMMPs, Group, Cycle)
 
 
-#### Consecutive monitoring periods -----
-#### Monitoring runs (gaps tolerated up to max_gap_years) -----
+#### Consecutive monitoring runs (gaps tolerated up to max_gap_years) -----
 year_runs = years %>%
   dplyr::group_by(UMMPs, Group) %>%
   dplyr::arrange(Cycle, .by_group = TRUE) %>%
@@ -950,13 +976,17 @@ year_runs = years %>%
     } else {
       Cycle
     },
-    # A new run starts when the gap since the previous qualifying year
-    # is larger than max_gap_years + 1 (e.g., 2003 -> 2005 = gap of 1 missing year)
+    # A new run starts when the gap since the previous qualifying year is larger than max_gap_years + 1 (e.g., 2003 -> 2005 = gap of 1 missing year)
+    # Example: group CLA monitored in Aldeia I is monitored in 1991-1993, 1996-1999, 2002-2007 (except 2006)
+    # Given an accepted gap of 1 year (e.g., 1994, 1995, or 2006 are gaps because there was no monitoring these years), there will be 3 RUNS
     run_id = cumsum(
       dplyr::row_number() == 1 |
         (Cycle_index - dplyr::lag(Cycle_index)) > (max_gap_years + 1)
     )
-  ) %>%
+  )
+
+# Summarise the number of years per run
+year_runs = year_runs %>% 
   dplyr::group_by(UMMPs, Group, run_id) %>%
   dplyr::summarise(
     # Number of qualifying years in the run
@@ -1001,7 +1031,6 @@ summary_monitoring = longest %>%
 
 # Include durations with zero groups, if any
 max_duration = max(summary_monitoring$max_consecutive_years)
-
 summary_monitoring = summary_monitoring %>%
   tidyr::complete(
     max_consecutive_years = seq_len(max_duration),
@@ -1018,6 +1047,7 @@ print(summary_monitoring, n = Inf)
 
 
 #### Keep runs based on the threshold -----
+# Remove runs based on the min. nb of consecutive years required
 qualifying_runs = year_runs %>%
   dplyr::filter(n_consecutive_years >= threshold)
 
@@ -1030,12 +1060,7 @@ print(qualifying_runs, n = Inf)
 qualifying_groups = qualifying_runs %>%
   dplyr::distinct(UMMPs, Group)
 
-cat("\nDistinct qualifying UMMP-group combinations:\n")
-print(qualifying_groups, n = Inf)
-
-
 #### Groups per patch -----
-
 # All patch IDs, including patches with no observations
 all_patches = patches_sf %>%
   sf::st_drop_geometry() %>%
@@ -1043,24 +1068,31 @@ all_patches = patches_sf %>%
 
 # Count groups by matching observation UMMPs to patch IDs
 groups_per_patch = qualifying_groups %>%
+  # Join to groups the UMMP name (from patches)
   dplyr::left_join(
     UMMP_crosswalk,
     by = "UMMPs"
   ) %>%
+  # Remove those without UMMPs
   dplyr::filter(!is.na(patch_id)) %>%
   dplyr::count(
     patch_id,
     name = "n_groups"
   )
+# Number of groups
+groups_per_patch %>% dplyr::select(n_groups) %>% colSums()
 
 # Keep every patch, assigning zero to those without qualifying groups
 groups_per_patch = all_patches %>%
+  # Join to patches the number of groups
   dplyr::left_join(
     groups_per_patch,
     by = "patch_id"
   ) %>%
   dplyr::mutate(
+    # 0 if NO group
     n_groups = dplyr::coalesce(n_groups, 0L),
+    # Mutate a variable where the patch is included in the dataset if it has >0 group
     included = n_groups > 0,
     status = ifelse(included, "Included", "Not included")
   ) %>%
@@ -1077,7 +1109,7 @@ cat("Number of patches with zero qualifying groups:",
 
 
 #### PLOT: Cum groups ----
-
+# Plot the cumulative number of groups included in the dataset (based on the threshold)
 plot_duration = ggplot2::ggplot(
   summary_monitoring %>%
     dplyr::mutate(
@@ -1123,7 +1155,7 @@ print(plot_duration)
 
 
 #### PLOT: Nb. grp per UMMP ------
-
+# Plot the number of groups per UMMP (when using the dataset filtered by the min. nb of consecutive years)
 plot_groups_UMMP = ggplot2::ggplot(
   groups_per_patch,
   ggplot2::aes(
@@ -1154,7 +1186,7 @@ print(plot_groups_UMMP)
 
 
 #### MAP: Included patches -----
-
+# Map the patches included in the analysis (when using the dataset filtered by the min. nb of consecutive years)
 map_data = patches_sf %>%
   dplyr::left_join(
     groups_per_patch %>%
@@ -1211,7 +1243,7 @@ print(map_UMMPs)
 
 #### Progressive inclusion of UMMPs ------
 
-# Longest run achieved by any group within each UMMP
+# Longest run (i.e., continuous monitoring of a group) within each UMMP
 longest_UMMP = longest %>%
   dplyr::group_by(UMMPs) %>%
   dplyr::summarise(
@@ -1223,6 +1255,7 @@ longest_UMMP = longest %>%
     UMMPs
   )
 
+# By period of time, count the number of UMMPs monitored
 progressive_UMMP = longest_UMMP %>%
   dplyr::group_by(max_consecutive_years) %>%
   dplyr::summarise(
@@ -1235,6 +1268,7 @@ progressive_UMMP = longest_UMMP %>%
   ) %>%
   dplyr::arrange(dplyr::desc(max_consecutive_years))
 
+# Check what UMMPs are included and excluded based on the number of consecutive years selected
 cat("\nProgressive inclusion of UMMPs by monitoring duration:\n")
 print(progressive_UMMP, n = Inf)
 
@@ -1242,13 +1276,11 @@ print(progressive_UMMP, n = Inf)
 #### Temporal observations ------
 
 # Retain observations falling within each qualifying run.
-# The previous version joined on (UMMPs, Group) only and then filtered the years,
-# which created a many-to-many join (several runs x many dates per group).
-# Here a range join links each observation to the single run containing its cycle:
+# Here a join links each observation to the single run containing its cycle:
 # each run matches many observations, but each observation matches at most one run
 # (runs of a group never overlap), hence relationship = "one-to-many".
-# NB: inside join_by(), between() is used without namespace on purpose
 retained_data = qualifying_runs %>%
+  # Cross the data with the long-ter monitoring data
   dplyr::inner_join(
     monitoring,
     by = dplyr::join_by(
@@ -1267,6 +1299,8 @@ retained_data = qualifying_runs %>%
     run_label = paste(group_label, run_id, sep = " | ")
   ) %>%
   dplyr::arrange(UMMPs, Group, DateObs)
+# Check the number of groups
+retained_data %>% dplyr::summarise(n_group = dplyr::n_distinct(Group))
 
 # Same retained observations, at the individual level (for the summary panel)
 retained_ind = qualifying_runs %>%
@@ -1287,11 +1321,15 @@ cat("\nNumber of retained observation dates:",
 #### Summary statistics of the retained data ------
 info_stats = retained_ind %>%
   dplyr::summarise(
+    # Number of distinct observations
     n_dates = dplyr::n_distinct(DateObs),
-    n_group_visits = dplyr::n_distinct(UMMPs, Group, DateObs),
+    # Number of distinct groups 
     n_groups = dplyr::n_distinct(UMMPs, Group),
+    # Number of distinct individuals
     n_individuals = dplyr::n_distinct(GLT),
+    # Number of distinct UMMPs
     n_UMMPs = dplyr::n_distinct(UMMPs),
+    # Range
     year_min = min(Year),
     year_max = max(Year)
   )
@@ -1311,12 +1349,13 @@ retained_year = retained_data %>%
     .groups = "drop"
   )
 
-# Order groups by UMMP and group identifier
+# Groups IDs (ordonned)
 group_order = retained_year %>%
   dplyr::distinct(UMMPs, Group, group_label) %>%
   dplyr::arrange(UMMPs, Group) %>%
   dplyr::pull(group_label)
 
+# Group level to factor
 retained_year = retained_year %>%
   dplyr::mutate(
     group_label = factor(
@@ -1326,6 +1365,7 @@ retained_year = retained_year %>%
   ) %>%
   dplyr::arrange(UMMPs, Group, Cycle)
 
+# Plot the group monitoring along time
 temporal_plot = ggplot2::ggplot(
   retained_year,
   ggplot2::aes(
@@ -1371,10 +1411,9 @@ print(temporal_plot)
 
 #### PLOT: summary panel ------
 info_df = data.frame(
-  x = 1:6,
+  x = 1:5,
   value = c(
     format(info_stats$n_dates, big.mark = ","),
-    format(info_stats$n_group_visits, big.mark = ","),
     format(info_stats$n_groups, big.mark = ","),
     format(info_stats$n_individuals, big.mark = ","),
     format(info_stats$n_UMMPs, big.mark = ","),
@@ -1382,7 +1421,6 @@ info_df = data.frame(
   ),
   label = c(
     "Distinct observation dates",
-    "Group visits\n(group x date)",
     "Distinct groups",
     "Distinct individuals",
     "Distinct UMMPs",
@@ -1491,8 +1529,10 @@ synthetic_figure = (
   ) +
   patchwork::plot_annotation(
     title = "Continuous monitoring of groups across UMMPs",
-    subtitle = paste0(criteria, " | ", threshold_label,
-                      " | Excluded years: ", paste(excluded_years, collapse = ", ")),
+    subtitle = paste0(
+      "Criterion: ", criteria, " | Observations required: ", obs_label, "\n",
+      threshold_label, " | Excluded years: ", paste(excluded_years, collapse = ", ")
+    ),
     theme = ggplot2::theme(
       plot.title = ggplot2::element_text(
         face = "bold",
@@ -1513,11 +1553,13 @@ synthetic_figure = (
 print(synthetic_figure)
 
 
-### Save the figure
+###### Save the figure ------
 png(here("outputs",
          "plot",
          "Axis2",
-         "GLT_sampling_effort_dry-wet_0gap.png"),
-    width = 3000, height = 2800, res = 300, type="cairo")
+         paste0("GLT_sampling_effort_", criteria,
+                "_y", min_obs_year, "_d", min_obs_dry, "_w", min_obs_wet,
+                "_gap", max_gap_years, ".png")),
+    width = 3000, height = 2800, res = 300, type = "cairo")
 print(synthetic_figure)
 dev.off()

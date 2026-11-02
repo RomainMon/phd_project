@@ -2645,7 +2645,7 @@ patch_source_sink = patch_demography_uncut_mean %>%
   dplyr::group_by(uncut_patch_id) %>%
   dplyr::mutate(
     lambda = dplyr::if_else(
-      N > 0 & !is.na(dplyr::lead(N)),
+      N > 0 & !is.na(dplyr::lead(N)), # Lead finds the next value
       dplyr::lead(N) / N,
       NA_real_
     ),
