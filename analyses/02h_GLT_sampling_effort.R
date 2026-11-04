@@ -7,6 +7,7 @@
 library(dplyr)
 library(here)
 library(xlsx)
+library(readxl)
 library(terra)
 library(sf)
 library(lubridate)
@@ -26,6 +27,11 @@ regions_csv = readr::read_csv2(
   locale = readr::locale(encoding = "ISO-8859-1"),
   na = ""
 )
+
+#### Population data -----
+real_census_data = read_excel(here::here("data", "glt", "JDietz", "GLT_POP_2005_2023.xlsx"), na="NA")
+real_census_data %>%
+  dplyr::summarise(dplyr::across(where(is.numeric), \(x) sum(x, na.rm = TRUE)))
 
 #### Patches -----
 # base_path = here::here("outputs", "data", "patches_rshifter") # REAL PATCHES
@@ -48,9 +54,98 @@ names(patches) = vector_df$year # Name by year
 # Patches in 2024
 patches_sf = patches[[36]]
 
-### Sampling effort -----
-# Problematic individuals
+### Reassign season -----
+data.clean.final = data.clean.final %>%
+  dplyr::mutate(
+    DateObs = as.Date(DateObs),
+    Month = lubridate::month(DateObs),
+    season = dplyr::case_when(
+      Month %in% 1:3 ~ "Wet 1",
+      Month %in% 4:8 ~ "Dry",
+      Month %in% 9:12 ~ "Wet 2",
+      TRUE ~ NA_character_
+    ),
+    season = factor(
+      season,
+      levels = c("Wet 1", "Dry", "Wet 2")
+    )
+  )
+
+### Correspondence UUMP-Patch names -----
+UMMP_crosswalk = data.frame(
+  # UMMPs names in the long-term dataset
+  UMMPs = c(
+    "Uniao I",
+    "Uniao II",
+    "Poco das Antas",
+    "Rio Vermelho",
+    "Imbau II",
+    "Aldeia I",
+    "Aldeia II",
+    "Imbau I",
+    "Imbau III",
+    "Pirineus",
+    "Faz. Boa Esperanza",
+    # UMMPs reassigned below (see "Correct UMMP")
+    # CHECK: patch_id must match the names used in the patch file
+    "4_Irmaos",
+    "Recanto_Preservar",
+    "Sao_Joao"
+  ),
+  # Equivalent in the patch file
+  patch_id = c(
+    "Uniao.I",
+    "Uniao.II",
+    "Poco.das.Antas",
+    "Rio.Vermelho",
+    "Imbau.II",
+    "Aldeia.I",
+    "Aldeia.II",
+    "Imbau.I",
+    "Imbau.III",
+    "Pirineus",
+    "Boa_Esperanca",
+    "4_Irmaos",
+    "Recanto_Preservar",
+    "Sao_Joao"
+  ),
+  stringsAsFactors = FALSE
+)
+
+# Correct UMMP
+# We reassign some groups to other UMMPs when relevant
+# For instance, we consider 4 Irmaos as a distinct patch (not as part of Aldeia I)
+# NB: this must be done BEFORE checking the correspondences
+data.clean.final = data.clean.final %>%
+  dplyr::mutate(
+    UMMPs = dplyr::case_when(
+      Region == "Sitio 4 Irmaos" ~ "4_Irmaos",
+      Region == "Sitio Recanto Preservar" ~ "Recanto_Preservar",
+      Region == "Faz. Sao Joao" ~ "Sao_Joao",
+      TRUE ~ as.character(UMMPs)
+    )
+  )
+
+# Any forgotten correspondence in the long-term dataset?
+data.clean.final %>%
+  dplyr::filter(!is.na(UMMPs)) %>%
+  dplyr::distinct(UMMPs) %>%
+  dplyr::mutate(UMMPs = as.character(UMMPs)) %>%
+  dplyr::anti_join(UMMP_crosswalk, by = "UMMPs")
+
+# Any forgotten correspondence in the patch file?
+patches_sf %>%
+  sf::st_drop_geometry() %>%
+  dplyr::distinct(patch_id) %>%
+  dplyr::anti_join(
+    UMMP_crosswalk %>% dplyr::distinct(patch_id),
+    by = "patch_id"
+  )
+
+### Problematic individuals -----
 bad = c("?","T0","IN","?-1","?-2","?-3","FT","?-4","?-5","?-6","MP489","MP490") # Last list of problematic individuals (see Aurore Zenodo)
+
+### Sampling effort -----
 
 #### Number of observations -----
 # 1. Distinct individuals
@@ -219,34 +314,7 @@ purrr::pwalk(
   }
 )
 
-#### Sampling effort in space/time -----
-### Chronological order
-# Count observations by month and season
-data.clean.final %>%
-  dplyr::filter(!is.na(DateObs), 
-                !is.na(season)) %>%
-  dplyr::mutate(
-    Month = lubridate::month(DateObs)) %>%
-  dplyr::count(Month, season, name = "n_observations") %>%
-  dplyr::arrange(Month, season)
-
-##### Reassign season -----
-data.clean.final = data.clean.final %>%
-  dplyr::mutate(
-    DateObs = as.Date(DateObs),
-    Month = lubridate::month(DateObs),
-    season = dplyr::case_when(
-      Month %in% 1:3 ~ "Wet 1",
-      Month %in% 4:8 ~ "Dry",
-      Month %in% 9:12 ~ "Wet 2",
-      TRUE ~ NA_character_
-    ),
-    season = factor(
-      season,
-      levels = c("Wet 1", "Dry", "Wet 2")
-    )
-  )
-
+#### By group -----
 # Define the chronological order of seasons
 effort_plot = data.clean.final %>%
   dplyr::filter(
@@ -307,7 +375,7 @@ effort_plot = effort_plot %>%
     )
   )
 
-### Build separate season and year axis labels
+# Build separate season and year axis labels
 year_season_labels = effort_plot %>%
   dplyr::distinct(time_index, Year, season) %>%
   dplyr::arrange(time_index) %>%
@@ -321,7 +389,7 @@ year_season_labels = effort_plot %>%
     )
   )
 
-##### Export the sampling effort plot ----
+##### Export plot ----
 png(here("outputs",
          "plot",
          "Axis2",
@@ -417,6 +485,499 @@ ggplot2::ggplot(
   )
 dev.off()
 
+#### By patch -----
+##### Overall -----
+# Patch size (patches_sf = most recent patch map)
+patch_size = patches_sf %>%
+  sf::st_drop_geometry() %>%
+  dplyr::distinct(patch_id, area_ha)
+
+# Sampling effort per patch (1 visit = 1 group x 1 observation date)
+effort_patch = data.clean.final %>%
+  dplyr::filter(
+    !is.na(GLT),
+    !GLT %in% bad,
+    !is.na(Group),
+    !is.na(UMMPs),
+    !is.na(DateObs)
+  ) %>%
+  dplyr::mutate(
+    UMMPs = as.character(UMMPs),
+    Group = as.character(Group),
+    DateObs = as.Date(DateObs)
+  ) %>%
+  # Link UMMP names to patch names
+  dplyr::left_join(UMMP_crosswalk, by = "UMMPs") %>%
+  dplyr::filter(!is.na(patch_id)) %>%
+  dplyr::distinct(patch_id, Group, DateObs) %>%
+  dplyr::group_by(patch_id) %>%
+  dplyr::summarise(
+    n_visits = dplyr::n_distinct(DateObs),
+    n_groups = dplyr::n_distinct(Group),
+    n_years = dplyr::n_distinct(lubridate::year(DateObs)),
+    .groups = "drop"
+  )
+
+# Keep every patch (0 if never monitored) and add effort relative to patch size
+effort_patch = patch_size %>%
+  dplyr::left_join(effort_patch, by = "patch_id") %>%
+  dplyr::mutate(
+    dplyr::across(c(n_visits, n_groups, n_years), ~ dplyr::coalesce(.x, 0L)),
+    visits_per_group = dplyr::if_else(n_groups > 0, n_visits / n_groups, NA_real_),
+    # Patches ordered by size (largest at the top of the plots)
+    patch_id = stats::reorder(patch_id, area_ha)
+  )
+
+effort_patch %>%
+  dplyr::arrange(dplyr::desc(area_ha))
+
+# Common theme
+theme_patch = ggplot2::theme_minimal(base_size = 11) +
+  ggplot2::theme(
+    plot.title = ggplot2::element_text(face = "bold", size = 11),
+    panel.grid.major.y = ggplot2::element_blank()
+  )
+
+# A. Patch size
+p_area = ggplot2::ggplot(
+  effort_patch,
+  ggplot2::aes(x = area_ha, y = patch_id)
+) +
+  ggplot2::geom_col(fill = "grey60") +
+  ggplot2::geom_text(
+    ggplot2::aes(label = format(round(area_ha), big.mark = ",")),
+    hjust = -0.15,
+    size = 3
+  ) +
+  ggplot2::scale_x_log10(
+    expand = ggplot2::expansion(mult = c(0, 0.3))
+  ) +
+  ggplot2::labs(
+    title = "A. Patch size",
+    x = "Area (ha, log scale)",
+    y = "UMMP (patch), ordered by size"
+  ) +
+  theme_patch
+
+# B. Number of distinct groups monitored
+p_groups = ggplot2::ggplot(
+  effort_patch,
+  ggplot2::aes(x = n_groups, y = patch_id)
+) +
+  ggplot2::geom_col(fill = "#1b9e77") +
+  ggplot2::geom_text(
+    ggplot2::aes(label = n_groups),
+    hjust = -0.3,
+    size = 3
+  ) +
+  ggplot2::scale_x_continuous(
+    expand = ggplot2::expansion(mult = c(0, 0.2))
+  ) +
+  ggplot2::labs(
+    title = "B. Distinct groups monitored",
+    x = "Number of groups",
+    y = NULL
+  ) +
+  theme_patch +
+  ggplot2::theme(
+    axis.text.y = ggplot2::element_blank(),
+    axis.ticks.y = ggplot2::element_blank()
+  )
+
+# C. Number of visits
+p_visits = ggplot2::ggplot(
+  effort_patch,
+  ggplot2::aes(x = n_visits, y = patch_id)
+) +
+  ggplot2::geom_col(fill = "#7570b3") +
+  ggplot2::geom_text(
+    ggplot2::aes(label = format(n_visits, big.mark = ",")),
+    hjust = -0.2,
+    size = 3
+  ) +
+  ggplot2::scale_x_continuous(
+    expand = ggplot2::expansion(mult = c(0, 0.25))
+  ) +
+  ggplot2::labs(
+    title = "C. Visits",
+    x = "Number of visits",
+    y = NULL
+  ) +
+  theme_patch +
+  ggplot2::theme(
+    axis.text.y = ggplot2::element_blank(),
+    axis.ticks.y = ggplot2::element_blank()
+  )
+
+patch_effort_plot = patchwork::wrap_plots(
+  p_area, p_groups, p_visits,
+  nrow = 1,
+  widths = c(1.2, 1, 1)
+) +
+  patchwork::plot_annotation(
+    title = "Sampling effort per UMMP, ordered by patch size",
+    subtitle = paste0(
+      "Patch size from the ", names(patches)[36], " patch map; ",
+      "visits = distinct group x observation date"
+    ),
+    theme = ggplot2::theme(
+      plot.title = ggplot2::element_text(face = "bold", size = 14),
+      plot.subtitle = ggplot2::element_text(size = 9)
+    )
+  )
+
+print(patch_effort_plot)
+
+###### Export plot ----
+png(here("outputs",
+         "plot",
+         "Axis2",
+         "GLT_sampling_effort_per_patch.png"),
+    width = 3000, height = 1800, res = 300, type = "cairo")
+print(patch_effort_plot)
+dev.off()
+
+##### By season/year ----
+# Helper function to remove accents
+norm_name = function(x) {
+  tolower(gsub("[^A-Za-z0-9]", "", stringi::stri_trans_general(x, "Latin-ASCII")))
+}
+
+# Unique patches ids in the spatial patches
+patch_ids = unique(as.character(patches_sf$patch_id))
+patch_ids
+
+# Match between all patches names found in several datasets
+match_patch = function(ummp) {
+  from_crosswalk = UMMP_crosswalk$patch_id[match(ummp, UMMP_crosswalk$UMMPs)]
+  from_name = patch_ids[match(norm_name(ummp), norm_name(patch_ids))]
+  dplyr::coalesce(from_crosswalk, from_name)
+}
+
+# UMMPs of the long-term data without any patch
+ummp_patch = dplyr::tibble(
+  UMMPs = unique(as.character(data.clean.final$UMMPs))
+) %>%
+  dplyr::filter(!is.na(UMMPs)) %>%
+  # Correspondence with spatial patches
+  dplyr::mutate(patch_id = match_patch(UMMPs))
+
+### Visits table
+visits_tbl = data.clean.final %>%
+  dplyr::filter(
+    !is.na(GLT), 
+    !GLT %in% bad,
+    !is.na(Group), 
+    !is.na(UMMPs), 
+    !is.na(DateObs)
+  ) %>%
+  dplyr::mutate(
+    UMMPs = as.character(UMMPs),
+    Group = as.character(Group),
+    DateObs = as.Date(DateObs),
+    Year = lubridate::year(DateObs),
+    season = as.character(season)
+  ) %>%
+  # Join patches ids
+  dplyr::left_join(ummp_patch, by = "UMMPs") %>%
+  dplyr::filter(!is.na(patch_id)) %>%
+  dplyr::group_by(patch_id, Group, DateObs, Year, season) %>%
+  dplyr::summarise(
+    # Group size on that date (distinct GLT)
+    GS = dplyr::n_distinct(GLT),
+    .groups = "drop"
+  )
+
+### Effort per patch x year x season
+season_levels = c("Wet 1", "Dry", "Wet 2")
+patch_levels = levels(effort_patch$patch_id) # ordered by patch size
+year_range = range(visits_tbl$Year)
+
+# Number of visits
+visits_grid = visits_tbl %>%
+  dplyr::group_by(patch_id, Year, season) %>%
+  dplyr::summarise(
+    n_visits = dplyr::n_distinct(DateObs),
+    n_groups = dplyr::n_distinct(Group),
+    .groups = "drop"
+  ) %>%
+  # Complete the grid by adding 0 where there is no monitoring
+  dplyr::right_join(
+    tidyr::expand_grid(
+      patch_id = patch_levels,
+      Year = year_range[1]:year_range[2],
+      season = season_levels
+    ),
+    by = c("patch_id", "Year", "season")
+  ) %>%
+  dplyr::mutate(
+    n_visits = dplyr::coalesce(n_visits, 0L),
+    n_groups = dplyr::coalesce(n_groups, 0L),
+    patch_id = factor(patch_id, levels = patch_levels),
+    # Chronological index: Wet 1 / Dry / Wet 2 within each year
+    time_index = 3 * (Year - year_range[1]) + match(season, season_levels)
+  )
+
+# X axis: one label every 2 years, centred on the Dry season
+year_seq = seq(year_range[1], year_range[2], by = 2)
+year_breaks = 3 * (year_seq - year_range[1]) + 2
+
+# One facet per year: the three seasons (W1 / D / W2) are on the axis, the year is below
+tile_panel = function(df, title, legend_name) {
+  df = df %>%
+    dplyr::mutate(season = factor(season, levels = season_levels))
+  
+  ggplot2::ggplot(
+    df,
+    ggplot2::aes(x = season, y = patch_id, fill = value)
+  ) +
+    ggplot2::geom_tile(colour = "white", linewidth = 0.1) +
+    ggplot2::facet_grid(
+      cols = ggplot2::vars(Year),
+      switch = "x"
+    ) +
+    ggplot2::scale_fill_viridis_c(
+      name = legend_name,
+      trans = "log10",
+      direction = -1,
+      na.value = "grey93"      # grey = no monitoring
+    ) +
+    ggplot2::scale_x_discrete(
+      labels = c("Wet 1" = "W1", "Dry" = "D", "Wet 2" = "W2")
+    ) +
+    ggplot2::labs(
+      title = title,
+      x = NULL,
+      y = "UMMP (patch), ordered by size"
+    ) +
+    ggplot2::theme_minimal(base_size = 11) +
+    ggplot2::theme(
+      plot.title = ggplot2::element_text(face = "bold", size = 11),
+      panel.grid = ggplot2::element_blank(),
+      panel.spacing.x = ggplot2::unit(0.15, "lines"),
+      axis.text.x = ggplot2::element_text(size = 5, angle = 90, vjust = 0.5, hjust = 1),
+      strip.placement = "outside",
+      strip.background = ggplot2::element_blank(),
+      strip.text.x = ggplot2::element_text(size = 7, angle = 90, hjust = 1)
+    )
+}
+
+p_tiles_visits = tile_panel(
+  visits_grid %>% dplyr::mutate(value = dplyr::na_if(n_visits, 0L)),
+  "A. Visits per season and year", "Visits"
+)
+
+p_tiles_groups = tile_panel(
+  visits_grid %>% dplyr::mutate(value = dplyr::na_if(n_groups, 0L)),
+  "B. Distinct groups monitored per season and year", "Groups"
+)
+
+patch_effort_years = (p_tiles_visits / p_tiles_groups) +
+  patchwork::plot_annotation(
+    title = "Sampling effort per UMMP through time",
+    subtitle = paste0(
+      "UMMPs ordered by patch size (largest at the top); ",
+      "W1 = Wet 1 (Jan-Mar), D = Dry (Apr-Aug), W2 = Wet 2 (Sep-Dec); ",
+      "grey = no monitoring"
+    ),
+    theme = ggplot2::theme(
+      plot.title = ggplot2::element_text(face = "bold", size = 14),
+      plot.subtitle = ggplot2::element_text(size = 9)
+    )
+  )
+
+print(patch_effort_years)
+
+###### Export plot ----
+png(here("outputs",
+         "plot",
+         "Axis2",
+         "GLT_sampling_effort_per_patch_years.png"),
+    width = 3500, height = 2400, res = 300, type = "cairo")
+print(patch_effort_years)
+dev.off()
+
+##### Snapshots ----
+# Compare the census data with the estimated population size at census dates (Dietz et al. 2024)
+census_years = c(2005, 2013, 2018, 2022)   # years with a census
+census_window = 1 # years before AND after each census (1 = e.g., 2012-2013-2014 for 2013)
+mean_GS = 4.5 # mean group size used to convert groups into individuals
+
+# Census: remove the "n_glt_" prefix and reshape to long format
+census_patch = real_census_data %>%
+  tidyr::pivot_longer(
+    cols = dplyr::starts_with("n_glt_"),
+    names_to = "Year",
+    names_prefix = "n_glt_",
+    names_transform = list(Year = as.integer),
+    values_to = "pop"
+  ) %>%
+  dplyr::filter(Year %in% census_years) %>%
+  dplyr::mutate(patch_id = match_patch(UMMPs))
+
+# Census UMMPs without patch (to add to UMMP_crosswalk if needed)
+census_patch %>%
+  dplyr::filter(is.na(patch_id)) %>%
+  dplyr::distinct(UMMPs, FragName)
+
+# Summarise pop
+census_patch = census_patch %>%
+  dplyr::filter(!is.na(patch_id)) %>%
+  dplyr::group_by(patch_id, Year) %>%
+  dplyr::summarise(
+    pop = if (all(is.na(pop))) NA_real_ else sum(pop, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# Monitoring pooled over the window around each census year
+effort_census = dplyr::bind_rows(lapply(census_years, function(cy) {
+  win = visits_tbl %>%
+    dplyr::filter(abs(Year - cy) <= census_window # keep years of the window
+                  )
+  
+  # Largest size reached by each group in the window
+  per_group = win %>%
+    dplyr::group_by(patch_id, Group) %>%
+    dplyr::summarise(GS_max = max(GS), .groups = "drop")
+  
+  # Visits and number of years actually monitored in the window
+  per_patch = win %>%
+    dplyr::group_by(patch_id) %>%
+    dplyr::summarise(
+      n_visits = dplyr::n_distinct(DateObs),
+      n_years = dplyr::n_distinct(Year),
+      .groups = "drop"
+    )
+  
+  per_group %>%
+    dplyr::group_by(patch_id) %>%
+    dplyr::summarise(
+      n_groups = dplyr::n(),
+      # Individuals actually counted (sum of the maximum size of each group)
+      n_ind_obs = sum(GS_max),
+      .groups = "drop"
+    ) %>%
+    dplyr::left_join(per_patch, by = "patch_id") %>%
+    dplyr::mutate(Year = cy)
+}))
+
+period_labels = paste0(
+  census_years, " (", census_years - census_window, "–",
+  census_years + census_window, ")"
+)
+
+census_effort = tidyr::expand_grid(patch_id = patch_levels, Year = census_years) %>%
+  dplyr::left_join(effort_census, by = c("patch_id", "Year")) %>%
+  dplyr::left_join(census_patch, by = c("patch_id", "Year")) %>%
+  dplyr::mutate(
+    dplyr::across(c(n_groups, n_visits, n_years, n_ind_obs), ~ dplyr::coalesce(.x, 0L)),
+    # Individuals expected in the monitored groups
+    est_pop_monitored = n_groups * mean_GS,
+    # Share of the census population covered by monitored groups
+    coverage = dplyr::if_else(!is.na(pop) & pop > 0, est_pop_monitored / pop, NA_real_),
+    patch_id = factor(patch_id, levels = patch_levels),
+    # Legend: census year and monitoring window
+    Year_f = factor(Year, levels = census_years, labels = period_labels)
+  )
+
+census_effort %>%
+  dplyr::arrange(Year, dplyr::desc(pop)) %>%
+  print(n = Inf)
+
+# Remove 2018 (yellow fever) and prepare labels
+census_effort = census_effort %>%
+  dplyr::filter(Year != 2018) %>%
+  dplyr::mutate(
+    # Largest patch on the left
+    patch_id = factor(patch_id, levels = rev(patch_levels)),
+    facet_label = paste0(
+      "Census ", Year, "  (monitoring ",
+      Year - census_window, "–", Year + census_window, ")"
+    )
+  ) %>%
+  dplyr::arrange(Year) %>%
+  dplyr::mutate(facet_label = factor(facet_label, levels = unique(facet_label)))
+
+# Long format: for each UMMP x census year, the census and the estimate side by side
+census_long_plot = census_effort %>%
+  dplyr::select(
+    patch_id, facet_label,
+    Census = pop,
+    Monitored = n_ind_obs
+  ) %>%
+  tidyr::pivot_longer(
+    cols = c(Census, Monitored),
+    names_to = "type",
+    values_to = "value"
+  ) %>%
+  dplyr::mutate(type = factor(type, levels = c("Census", "Monitored")))
+
+# The ratio monitored GLTs to estimated GLTs in the patch, written above each pair of bars
+coverage_labels = census_effort %>%
+  dplyr::filter(!is.na(pop), pop > 0) %>%
+  dplyr::transmute(
+    patch_id, facet_label,
+    y = pmax(pop, n_ind_obs),
+    label = scales::percent(n_ind_obs / pop, accuracy = 1)
+  )
+
+census_figure = ggplot2::ggplot(
+  census_long_plot,
+  ggplot2::aes(x = patch_id, y = value, fill = type)
+) +
+  ggplot2::geom_col(
+    position = ggplot2::position_dodge(width = 0.8, preserve = "single"),
+    width = 0.75,
+    na.rm = TRUE       # UMMP without census value: no bar (not a zero)
+  ) +
+  ggplot2::geom_text(
+    data = coverage_labels,
+    ggplot2::aes(x = patch_id, y = y, label = label),
+    inherit.aes = FALSE,
+    vjust = -0.5,
+    size = 2.4
+  ) +
+  ggplot2::facet_wrap(
+    ggplot2::vars(facet_label),
+    ncol = 1,
+    scales = "free_y"
+  ) +
+  ggplot2::scale_fill_manual(
+    values = c("Census" = "grey35", "Monitored" = "#e08214"),
+    name = NULL
+  ) +
+  # Square-root scale: starts at 0 and keeps small populations visible
+  ggplot2::scale_y_sqrt(
+    breaks = scales::breaks_extended(n = 5),
+    labels = scales::label_number(big.mark = ","),
+    expand = ggplot2::expansion(mult = c(0, 0.15))
+  ) +
+  ggplot2::labs(
+    title = "Census population vs. population covered by monitoring",
+    subtitle = paste0(
+      "UMMPs ordered by patch size (largest on the left); \nPercentages = nb. GLTs monitored / census"
+    ),
+    x = "UMMP (patch), ordered by size",
+    y = "Individuals (sqrt scale)"
+  ) +
+  theme_patch +
+  ggplot2::theme(
+    plot.title = ggplot2::element_text(face = "bold", size = 14),
+    plot.subtitle = ggplot2::element_text(size = 9),
+    strip.text = ggplot2::element_text(face = "bold", hjust = 0),
+    axis.text.x = ggplot2::element_text(angle = 90, vjust = 0.5, hjust = 1),
+    panel.grid.major.y = ggplot2::element_line(colour = "grey90", linewidth = 0.3),
+    panel.grid.major.x = ggplot2::element_blank(),
+    legend.position = "bottom"
+  )
+
+print(census_figure)
+
+###### Export plot -----
+png(here("outputs", "plot", "Axis2", "GLT_sampling_effort_patch_2005-2013-2022.png"),
+    width = 2600, height = 1800, res = 300, type = "cairo")
+print(census_figure)
+dev.off()
 
 ### Natural group dynamic -----
 # Dietz et al. (1994): most litters from september to march (with a few at the end of august)
@@ -797,78 +1358,6 @@ if (criteria == "dry-dry" && min_obs_wet > 0) {
   stop("criteria = 'dry-dry' only keeps dry months: min_obs_wet must be 0")
 }
 stopifnot(threshold >= 1)
-
-
-#### Correspondence UUMP-Patch names -----
-UMMP_crosswalk = data.frame(
-  # UMMPs names in the long-term dataset
-  UMMPs = c(
-    "Uniao I",
-    "Uniao II",
-    "Poco das Antas",
-    "Rio Vermelho",
-    "Imbau II",
-    "Aldeia I",
-    "Aldeia II",
-    "Imbau I",
-    "Imbau III",
-    "Pirineus",
-    "Faz. Boa Esperanza",
-    # UMMPs reassigned below (see "Correct UMMP")
-    # CHECK: patch_id must match the names used in the patch file
-    "4_Irmaos",
-    "Recanto_Preservar",
-    "Sao_Joao"
-  ),
-  # Equivalent in the patch file
-  patch_id = c(
-    "Uniao.I",
-    "Uniao.II",
-    "Poco.das.Antas",
-    "Rio.Vermelho",
-    "Imbau.II",
-    "Aldeia.I",
-    "Aldeia.II",
-    "Imbau.I",
-    "Imbau.III",
-    "Pirineus",
-    "Boa_Esperanca",
-    "4_Irmaos",
-    "Recanto_Preservar",
-    "Sao_Joao"
-  ),
-  stringsAsFactors = FALSE
-)
-
-### Correct UMMP
-# We reassign some groups to other UMMPs when relevant
-# For instance, we consider 4 Irmaos as a distinct patch (not as part of Aldeia I)
-# NB: this must be done BEFORE checking the correspondences
-data.clean.final = data.clean.final %>%
-  dplyr::mutate(
-    UMMPs = dplyr::case_when(
-      Region == "Sitio 4 Irmaos" ~ "4_Irmaos",
-      Region == "Sitio Recanto Preservar" ~ "Recanto_Preservar",
-      Region == "Faz. Sao Joao" ~ "Sao_Joao",
-      TRUE ~ as.character(UMMPs)
-    )
-  )
-
-# Any forgotten correspondence in the long-term dataset?
-data.clean.final %>%
-  dplyr::filter(!is.na(UMMPs)) %>%
-  dplyr::distinct(UMMPs) %>%
-  dplyr::mutate(UMMPs = as.character(UMMPs)) %>%
-  dplyr::anti_join(UMMP_crosswalk, by = "UMMPs")
-
-# Any forgotten correspondence in the patch file?
-patches_sf %>%
-  sf::st_drop_geometry() %>%
-  dplyr::distinct(patch_id) %>%
-  dplyr::anti_join(
-    UMMP_crosswalk %>% dplyr::distinct(patch_id),
-    by = "patch_id"
-  )
 
 
 #### Select monitoring data -----

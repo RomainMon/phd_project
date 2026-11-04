@@ -13,9 +13,18 @@ library(lubridate)
 
 ### Import datasets -----
 
-#### GLT DATA -----
-# GLT data
+#### Long-term GLT data -----
+# Long-term data corrected by Aurore Ponchon
 load(here::here("data", "glt", "APonchon", "data_clean_long_final.RData"))
+
+#### Mating system data -----
+# Data regarding GLT behavior in fragmented patches
+# From Andressa Sales Coelho thesis
+# See: Conservação do mico-leão-dourado: Enfrentando os desafios de uma paisagem fragmentada. vol. 3 (Editora da Universidade Estadual do Norte Fluminense Darcy Ribeiro – UENF, Campos dos Goytacazes, RJ, 2008).
+mat_system = xlsx::read.xlsx(
+  here::here("data", "glt", "ACoelho", "dadosAndressa_V2.xlsx"),
+  sheetName = "Sheet1"
+)
 
 #### Group locations -----
 # Group locations
