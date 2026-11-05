@@ -58,21 +58,7 @@ for (i in seq_along(patches)) {
 }
 names(patches) = vector_df$year # Name by year
 
-### Parameters -----
-# Problematic individuals
-bad = c("?","T0","IN","?-1","?-2","?-3","FT","?-4","?-5","?-6","MP489","MP490") # Last list of problematic individuals (see Aurore Zenodo)
-
-### Select the data -----
-#### Filter out bad data -----
-data.clean.filter = data.clean.final %>%
-  dplyr::filter(
-    !is.na(GLT),
-    !GLT %in% bad,
-    Disp!="1", # Dispersers
-    Death !="1" # Dead individuals
-    )
-
-#### Correspondence UUMP-Patch names -----
+##### Correspondence UUMP-Patch names -----
 # We create a correspondence list between the names in the long-term dataset
 # And the names of the UMMPs in the patch file
 UMMP_crosswalk = data.frame(
@@ -114,6 +100,35 @@ UMMP_crosswalk = data.frame(
   stringsAsFactors = FALSE
 )
 
+##### Unlist -----
+# Unlist the patch metrics
+patch_metrics = purrr::list_rbind(
+  purrr::imap(
+    patches,
+    function(x, nm) {
+      x %>%
+        sf::st_drop_geometry() %>%
+        dplyr::select(patch_id, area_ha, shape, enn_m, dPC) %>%
+        dplyr::mutate(Year = as.integer(nm))
+    }
+  )
+)
+
+### Long-term dataset -----
+#### Parameters ----------
+# Problematic individuals
+bad = c("?","T0","IN","?-1","?-2","?-3","FT","?-4","?-5","?-6","MP489","MP490") # Last list of problematic individuals (see Aurore Zenodo)
+
+#### Filter the long-term dataset -----
+##### Filter out bad data -----
+data.clean.filter = data.clean.final %>%
+  dplyr::filter(
+    !is.na(GLT),
+    !GLT %in% bad,
+    Disp!="1", # Dispersers
+    Death !="1" # Dead individuals
+    )
+
 ### Correct UMMP
 # We reassign some groups to other UMMPs when relevant
 # For instance, we consider 4 Irmaos as a distinct patch (not as part of Aldeia I)
@@ -128,10 +143,10 @@ data.clean.filter = data.clean.filter %>%
     )
   )
 
-#### Apply selection criteria ----
+##### Apply selection criteria ----
 # Based on 02h_GLT_sampling effort.R
 
-##### Criteria ----
+###### Criteria ----
 # In which seasons should the observations occur?
 criteria = "dry-dry"
 # "dry-dry" for observations at the dry season only
@@ -188,7 +203,7 @@ window_months = switch(
   "dry-wet" = c(dry_months, wet_months)
 )
 
-##### Prepare the observations ----
+###### Prepare the observations ----
 data.prep = data.clean.filter %>%
   dplyr::filter(
     !is.na(Group), !is.na(UMMPs), !is.na(Year), !is.na(DateObs),
@@ -211,7 +226,7 @@ data.prep = data.clean.filter %>%
     in_window = Month %in% window_months
   )
 
-##### Qualifying years ----
+###### Qualifying years ----
 # Count distinct observation dates per group and annual cycle
 annual_counts = data.prep %>%
   # Keep only observations in the selected temporal window (e.g., dry months)
@@ -236,7 +251,7 @@ years = annual_counts %>%
   dplyr::distinct(UMMPs, Group, Cycle) %>%
   dplyr::arrange(UMMPs, Group, Cycle)
 
-##### Monitoring runs ----
+###### Monitoring runs ----
 # A new run starts when the gap between two qualifying years is larger than max_gap_years
 # E.g., with max_gap_years=1, observations in 2000-2001-2003-2004 create two runs: 2000-2001 and 2003-2004
 year_runs = years %>%
@@ -289,7 +304,7 @@ selected_group_years = qualifying_runs %>%
     first_year, last_year, n_consecutive_years
   )
 
-##### Filter the dataset ----
+###### Filter the dataset ----
 data.selected = data.prep
 
 # Optionally keep only the months used by the criterion
@@ -308,7 +323,7 @@ data.selected = data.selected %>%
   ) %>%
   dplyr::select(-in_window)
 
-##### Checks ----
+###### Checks ----
 cat("\nCriterion:", criteria,
     "| min obs (year/dry/wet):", min_obs_year, "/", min_obs_dry, "/", min_obs_wet,
     "| threshold:", threshold, "years | max gap:", max_gap_years, "yr",
@@ -326,8 +341,8 @@ data.selected %>%
     year_max = max(Year)
   )
 
-### Mutate variables-GLT -----
-#### Composition -----
+#### Mutate variables-GLT -----
+##### Composition -----
 # Group-level variables (1 row = group x cycle x season)
 season_data = data.selected %>%
   # Reassign the season based on the season categorization
@@ -409,7 +424,7 @@ demography = date_max %>%
     )
   )
 
-#### Immigrations -----
+##### Immigrations -----
 # From the dispersal dataset where one row of disp = one dispersal event
 # An immigrant = an event where the origin and destination Group differ.
 disp_prep = disp %>%
@@ -459,7 +474,7 @@ demography = demography %>%
     n_immigrants = dplyr::coalesce(n_immigrants, 0L)
   )
 
-#### Growth rate and turnover relative to the previous observation ----
+##### Growth rate and turnover relative to the previous observation ----
 # Value at year t = change between the previous survey (t-1, or earlier if gap) and t
 # Same run, same season. NA for the first survey of each run
 
@@ -528,7 +543,7 @@ intervals = intervals %>%
     turnover_jaccard = 1 - jaccard
   )
 
-### Join to the dataset (by the CURRENT year) ----
+#### Join to the dataset (by the CURRENT year) ----
 demography = demography %>%
   dplyr::left_join(
     intervals %>%
@@ -554,19 +569,55 @@ demography %>%
     )
   )
 
-### Patch data -----
-# Unlist the patch metrics
-patch_metrics = purrr::list_rbind(
-  purrr::imap(
-    patches,
-    function(x, nm) {
-      x %>%
-        sf::st_drop_geometry() %>%
-        dplyr::select(patch_id, area_ha, shape, enn_m, dPC) %>%
-        dplyr::mutate(Year = as.integer(nm))
-    }
+#### Join patch data to GLT dataset -----
+# Join to the group-level data
+demo_patch = demography %>%
+  dplyr::mutate(
+    # Calendar year of the sampling date (not the annual cycle)
+    Year = lubridate::year(date_max_GS)
+  ) %>%
+  # UMMP -> patch_id
+  dplyr::left_join(
+    UMMP_crosswalk,
+    by = "UMMPs"
+  ) %>%
+  # Patch metrics of the sampling year
+  dplyr::left_join(
+    patch_metrics,
+    by = c("patch_id", "Year"),
+    relationship = "many-to-one"
   )
-)
+
+### Checks
+# Rows without patch_id
+demo_patch %>%
+  dplyr::filter(is.na(patch_id)) %>%
+  dplyr::distinct(UMMPs)
+
+# Rows with a patch_id but without metrics (no map for that year, or patch absent from it)
+demo_patch %>%
+  dplyr::filter(!is.na(patch_id), is.na(area_ha)) %>%
+  dplyr::count(patch_id, Year)
+
+### Mating system data -----
+# From Andressa Sales Coelho thesis
+
+#### Join patch data -----
+mat_system = mat_system %>%
+  # UMMP -> patch_id
+  dplyr::left_join(
+    UMMP_crosswalk,
+    by = "UMMPs"
+  ) %>%
+  # Patch metrics of the sampling year
+  dplyr::left_join(
+    patch_metrics,
+    by = c("patch_id", "Year"),
+    relationship = "many-to-one"
+  )
+
+
+### Patch data -----
 
 #### Biplot area ~ connectivity across time -------
 # Years to plot
@@ -744,34 +795,3 @@ patch_change_plot = ggplot2::ggplot(
   ggplot2::theme_minimal(base_size = 12)
 
 print(patch_change_plot)
-
-
-### Join patch data to demography -----
-# Join to the group-level data
-demo_patch = demography %>%
-  dplyr::mutate(
-    # Calendar year of the sampling date (not the annual cycle)
-    Year = lubridate::year(date_max_GS)
-  ) %>%
-  # UMMP -> patch_id
-  dplyr::left_join(
-    UMMP_crosswalk,
-    by = "UMMPs"
-  ) %>%
-  # Patch metrics of the sampling year
-  dplyr::left_join(
-    patch_metrics,
-    by = c("patch_id", "Year"),
-    relationship = "many-to-one"
-  )
-
-### Checks
-# Rows without patch_id
-demo_patch %>%
-  dplyr::filter(is.na(patch_id)) %>%
-  dplyr::distinct(UMMPs)
-
-# Rows with a patch_id but without metrics (no map for that year, or patch absent from it)
-demo_patch %>%
-  dplyr::filter(!is.na(patch_id), is.na(area_ha)) %>%
-  dplyr::count(patch_id, Year)
