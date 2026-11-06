@@ -100,6 +100,275 @@ UMMP_crosswalk = data.frame(
   stringsAsFactors = FALSE
 )
 
+### HOW DISPERSAL IS CODED?
+ex = data.clean.final %>%
+  dplyr::filter(Disp %in% 1, !GLT %in% bad) %>%
+  dplyr::distinct(GLT) %>%
+  dplyr::slice_head(n = 3) %>%
+  dplyr::pull(GLT)
+
+data.clean.final %>%
+  dplyr::filter(GLT %in% ex) %>%
+  dplyr::arrange(GLT, DateObs) %>%
+  dplyr::select(GLT, Group, Region, DateObs, Disp, Death, ObsOrder)
+# Disp 1 means an individual is observed alone or dispersing in another fragment
+# WARNING: It does not mean that the individual has left their group THAT DAY
+# WARNING: DISP was computed from ONE YEAR TO ANOTHER by Aurore (Ponchon et al. 2026)
+
+# Individuals without groups
+data.clean.final %>%
+  dplyr::count(group_missing = is.na(Group), Disp, Solo)
+
+### Individual histories ----
+
+### OBSERVATIONS -> STATUS OF EACH OBSERVATION
+
+# Filter the data
+obs_raw = data.clean.final %>%
+  dplyr::mutate(
+    DateObs = lubridate::as_date(DateObs),  # calendar date (DateObs is a POSIXct)
+    UMMPs = as.character(UMMPs)
+  ) %>%
+  # Remove bad individuals
+  dplyr::filter(!is.na(GLT), !GLT %in% bad, !is.na(DateObs))
+
+# Build an observation table:
+# 1 row = 1 individual (GLT) on 1 date, with its status on that date:
+#   "group" in a group (and the same group as the last group where it was seen)
+#   "satellite" observed without a group (Group is NA)
+#   "immigration"  in a group DIFFERENT from the last group where it was seen
+#   "dead" observed dead (the history stops there)
+#   "disappearance": absent from a monitored group after its last sighting
+
+# For individuals observed several times a day:
+# n_groups_day = number of distinct groups that day
+# n_sat_day = number of satellite records that day
+# day_conflict = NA for ordinary days; otherwise "group + satellite same day" or "two groups same day"
+# Rules applied to individuals with >1 observations the SAME DAY, in ObsOrder:
+# same place several times -> one row (the first one, by ObsOrder)
+# different places -> all rows are kept and flagged
+
+obs = obs_raw %>%
+  # Mutate the status: dead, in a group, sallite if outside a group, or translocated
+  dplyr::mutate(
+    status = dplyr::case_when(
+      Death %in% "1" ~ "dead",
+      !is.na(Group) ~ "group",
+      TRUE ~ "satellite"
+    ),
+    # GLT key = union of group and UMMP (e.g., AF | Imbau II)
+    g_key = dplyr::if_else(status == "group", paste(UMMPs, Group, sep = " | "), NA_character_),
+    # If the individual is in a group, the place is the GROUP, if not it's the STATUS (e.g., dead)
+    place = dplyr::if_else(status == "group", g_key, status),
+    transloc = Disp %in% "2" # translocated individuals
+  ) %>%
+  
+  # Arrange chronologically
+  dplyr::arrange(GLT, DateObs, ObsOrder) %>%
+  dplyr::group_by(GLT, DateObs) %>%
+  dplyr::mutate(transloc = any(transloc)) %>%
+  # Same place several times on the same date = one record (first by ObsOrder)
+  # This happens with multiple observations of an individual in the same group the same day
+  dplyr::distinct(place, .keep_all = TRUE) %>%
+  # Falg individuals with several observations per date
+  dplyr::mutate(
+    # Observations in the same group at the same date
+    n_groups_day = sum(status == "group"),
+    # Satellite observations at the same day
+    n_sat_day = sum(status == "satellite"),
+    conflict = dplyr::case_when(
+      # When the individual is observed in >1 groups the same day
+      n_groups_day >= 2 ~ "two groups same day",
+      # When the individual is observed in a group and satellite at the same time
+      n_groups_day == 1 & n_sat_day >= 1 ~ "group + satellite same day",
+      TRUE ~ NA_character_
+    ),
+    # If a satellite is also recorded in a group -> "contact"
+    status = dplyr::if_else(status == "satellite" & n_groups_day >= 1, "contact", status),
+    place = dplyr::if_else(status == "contact", "contact", place)
+  ) %>%
+  dplyr::ungroup() %>%
+  
+  # Arrange chronologically
+  dplyr::arrange(GLT, DateObs, ObsOrder) %>%
+  dplyr::group_by(GLT) %>%
+  # Nothing after the first record of death and 0 before death
+  dplyr::filter(cumsum(dplyr::lag(status == "dead", default = FALSE)) == 0) %>%
+  dplyr::mutate(
+    # Last group in which the individual was seen BEFORE this record
+    prev_g_key = dplyr::lag(g_key)
+  ) %>%
+  # Fill with the same value
+  tidyr::fill(prev_g_key, .direction = "down") %>%
+  dplyr::mutate(
+    # A group different from the previous one = immigration
+    # (going out and back to the SAME group stays "group")
+    status = dplyr::if_else(
+      status == "group" & !is.na(prev_g_key) & g_key != prev_g_key,
+      "immigration", status
+    ),
+    place = dplyr::if_else(status %in% c("group", "immigration"), g_key, place)
+  ) %>%
+  dplyr::ungroup() %>%
+  dplyr::select(GLT, Tattoo, SexOK, BirthOK, IdadeOK, UMMPs, Group, Region,
+                DateObs, ObsOrder, status, place, g_key, transloc, File,
+                n_groups_day, n_sat_day, conflict)
+
+
+### Individuals with several places on the same date
+# 1 row = 1 individual observed twice a day with a conflict 
+doublons = obs %>%
+  dplyr::filter(!is.na(conflict)) %>%
+  dplyr::group_by(GLT, DateObs, conflict) %>%
+  dplyr::summarise(
+    groups = paste(unique(na.omit(g_key)), collapse = " & "), # group(s) seen that day
+    n_records = dplyr::n(),
+    .groups = "drop"
+  )
+# Diagnostic
+doublons %>% dplyr::count(conflict)
+
+# Days when an individual has several places on the same date (used to flag events)
+conflict_days = obs %>%
+  dplyr::filter(!is.na(conflict)) %>%
+  dplyr::distinct(GLT, DateObs, conflict)
+
+# Fixed characteristics of each individual (kept out of the stays table)
+individuals = obs %>%
+  dplyr::group_by(GLT) %>%
+  dplyr::summarise(
+    dplyr::across(c(Tattoo, SexOK, BirthOK), ~ .x[!is.na(.x)][1]),
+    .groups = "drop"
+  )
+
+#### Disappearances ----
+# Individual whose LAST sighting is in a group that was surveyed afterwards, without it 
+# i.e., the group was monitored, the individual was not seen in it
+# NB: a disappearance is an absence (death OR emigration), not an observation
+# This does not work with a satellite animal (we need a revisit to assess the individual has disappeared)
+
+# Dates where groups were surveyed
+group_dates = obs_raw %>%
+  dplyr::filter(!is.na(Group)) %>%
+  dplyr::distinct(g_key = paste(UMMPs, Group, sep = " | "), survey_date = DateObs)
+
+# Last observations of each individual (in a group)
+last_obs = obs %>%
+  # Contact days are not used to decide where an individual was last seen
+  dplyr::filter(status != "contact") %>%
+  dplyr::group_by(GLT) %>%
+  dplyr::arrange(DateObs, ObsOrder, .by_group = TRUE) %>%
+  dplyr::slice_tail(n = 1) %>%
+  dplyr::ungroup() %>%
+  dplyr::filter(status %in% c("group", "immigration")) # to keep individuals in groups
+
+# Disappearance tables
+disappearance = last_obs %>%
+  dplyr::select(GLT, g_key, 
+                last_seen = DateObs) %>% # Rename DateObs -> last observation
+  # JOIN ALL posterior recordings of the group
+  dplyr::inner_join(
+    group_dates,
+    by = dplyr::join_by(g_key, last_seen < survey_date),
+    relationship = "many-to-many"
+  ) %>%
+  dplyr::group_by(GLT, g_key, last_seen) %>%
+  # Compute the first observation of the group without the GLT (date_missing) and the number of posterior surveys without the individual
+  dplyr::summarise(
+    date_missing = min(survey_date), # first survey of the group without the individual
+    n_surveys_missed = dplyr::n(), # how many later surveys without it
+    .groups = "drop"
+  )
+
+# 1 row = 1 individual missing from a monitored group after its last sighting
+disappear_events = disappearance %>%
+  # Join GLT informations
+  dplyr::left_join(
+    last_obs %>% dplyr::select(GLT, UMMPs, Group, IdadeOK), # IdadeOK = stage at the last sighting
+    by = "GLT"
+  ) %>%
+  dplyr::left_join(individuals, by = "GLT") %>%
+  dplyr::mutate(
+    days_missing = as.numeric(difftime(date_missing, last_seen, units = "days")),
+    Year = lubridate::year(date_missing)
+  ) %>%
+  dplyr::select(GLT, Tattoo, SexOK, BirthOK, IdadeOK, UMMPs, Group,
+                last_seen, date_missing, n_surveys_missed, days_missing, Year)
+
+
+#### Individual history ----
+# 1 row = 1 observation of 1 individual with its status: group / immigration / satellite / dead
+# A CONTACT (alone AND in a group the same day) is considered a satellite observation
+# i.e., the individual is floating and approaching groups. It is kept as "satellite" with contact = TRUE
+# On a given date, satellite rows come first, then group rows.
+
+# Compute the contact column (TRUE if contact, FALSE otherwise)
+# Replace contact in status with satellite
+history = obs %>%
+  dplyr::mutate(
+    contact = status == "contact",
+    status = dplyr::if_else(contact, "satellite", status),
+    place = dplyr::if_else(status == "satellite", "satellite", place)
+  ) %>%
+  dplyr::arrange(GLT, DateObs, !contact, ObsOrder)
+history %>% dplyr::count(status, contact)
+
+
+#### Stays ----
+# HOW TO READ THE STAYS TABLE
+# 1 row = 1 uninterrupted stay of 1 individual, i.e., it remained in the same place either as a group member (natal group or immigrant), a floater, or dead
+# IF IN A GROUP: UMMP, Group, Region, place
+# TIMING: first_seen, last_seen, n_obs, dates and number of observations of the stay
+# AGE: age_first, age_last, stage at the first and at the last observation of the stay
+# transloc = TRUE if the individual was translocated during the stay (Disp = 2)
+# cum_tl = number of translocated stays so far (increasing = translocation)
+# If observed both alone and in a group on the same date, priority is given to satellite.
+# n_contact = number of satellite observations that were also in a group the same day.
+
+stays = history %>%
+  dplyr::group_by(GLT, DateObs) %>%
+  dplyr::mutate(has_contact = any(contact, na.rm = TRUE)) %>%
+  # On contact days, keep satellite observations and remove group observations
+  dplyr::filter(!(has_contact & status %in% c("group", "immigration"))) %>%
+  dplyr::ungroup() %>%
+  dplyr::group_by(GLT) %>%
+  # New stay id each time the status or place changes
+  dplyr::mutate(stay = dplyr::consecutive_id(status, place))
+
+# Aggregate by period (stay)
+stays = stays %>%
+  dplyr::group_by(GLT, stay) %>%
+  dplyr::summarise(
+    # Status during the stay
+    status = dplyr::first(status),
+    # Location
+    UMMP = dplyr::first(UMMPs), Group = dplyr::first(Group), Region = dplyr::first(Region),
+    # Timing
+    first_seen = min(DateObs), last_seen = max(DateObs), n_obs = dplyr::n(),
+    # Number of times the GLT is approaching groups
+    n_contact = sum(contact),
+    # Age
+    age_first = dplyr::first(IdadeOK), age_last = dplyr::last(IdadeOK),
+    transloc = any(transloc),
+    .groups = "drop"
+  ) %>%
+  dplyr::mutate(
+    dplyr::across(
+      c(UMMP, Group, Region),
+      ~ dplyr::if_else(status %in% c("group", "immigration"), .x, NA_character_)
+    )
+  ) %>%
+  dplyr::group_by(GLT) %>%
+  dplyr::mutate(cum_tl = cumsum(transloc)) %>%
+  dplyr::ungroup()
+
+stays %>% dplyr::count(status)
+# Individuals recorded in two groups at the same time
+stays %>% dplyr::group_by(GLT) %>% dplyr::count(first_seen) %>% dplyr::filter(n>1) %>% print(n=30)
+
+
+
+## AURORE CODE -----
 ### SUCCESSFUL IMMIGRATION ------
 # Here, we identify individuals located in at least two groups, i.e., we remove individuals leaving a group and not resighted later on
 # WARNING: it does not mean it's dispersal: it can be prospection (we do not know whether it is followed with REPRODUCTION)
@@ -108,6 +377,7 @@ UMMP_crosswalk = data.frame(
 
 # Filter out "bad" individuals, dead individuals, and individuals not observed at a given time (disp == 1)
 data.filter = data.clean.final %>% 
+  # Disp = 1 means the individual was not observed at that time (i.e., he left the group)
   dplyr::filter(!GLT %in% bad & Disp!=1 & Death==0) %>% 
   dplyr::arrange(DateObs, GLT) %>% 
   dplyr::group_by(GLT) 
@@ -123,8 +393,8 @@ dispind = data.filter %>%
 data.disp = data.filter %>% 
   dplyr::filter(GLT %in% dispind$GLT) %>% # Select dispersing individuals
   dplyr::arrange(GLT,DateObs) %>% # Arrange by GLT and date of observation
-  dplyr::mutate(FromGroup=dplyr::lag(Group),
-                ToGroup=Group,
+  dplyr::mutate(FromGroup=dplyr::lag(Group), # Previous group
+                ToGroup=Group, # Current group
                 FromRegion=dplyr::lag(Region),
                 ToRegion=Region,
                 FromUMMP=dplyr::lag(UMMPs),
@@ -136,9 +406,9 @@ data.disp = data.filter %>%
                                 1,0)) %>% 
   dplyr::filter(ObsOrder > 1) %>% # remove first observation
   
-  dplyr::mutate(Change=ifelse(ToGroup != FromGroup, 1,0)) %>% 
+  dplyr::mutate(Change=ifelse(ToGroup != FromGroup, 1, 0)) %>% 
   
-  # Keep dispersal individuals ONLY (remove translocated ones)
+  # Keep individuals who changed their group and dispersal events ONLY (remove translocated ones)
   dplyr::filter(Change > 0 & Transloc == 0) %>% 
   dplyr::select(Year,DateObs,GLT,Tattoo,SexOK,BirthOK,IdadeOK,
                 FromGroup,ToGroup,FromRegion,ToRegion,FromUMMP,ToUMMP) %>% 
@@ -147,33 +417,18 @@ data.disp = data.filter %>%
   # Dispersal id
   dplyr::mutate(disp_id = paste0("disp", row_number()))
 
-#### Spatial filter ------
-# Keep only dispersal between known locations
-# Create a vector of all unique group names from FromGroup and ToGroup
-valid_groups = data.disp %>%
-  dplyr::select(FromGroup, ToGroup) %>%
-  unlist() %>%
-  unique()
-
-# Filter to keep only rows where both FromGroup and ToGroup are known locations
-data.disp.filter.grp = data.disp %>%
-  dplyr::filter(
-    FromGroup %in% regions_csv$Abreviation,
-    ToGroup %in% regions_csv$Abreviation
-  )
-
 #### Summary statistics -----
 ##### 1. Number of distinct GLTs -----
-data.disp.filter.grp %>%
+data.disp %>%
   dplyr::distinct(GLT) %>%
   nrow()
 
 ##### 2. Monthly observations ----
-data.disp.filter.grp %>%
+data.disp %>%
   dplyr::mutate(Month = lubridate::month(DateObs)) %>% 
   dplyr::count(Month)
 
-dispersal_months = data.disp.filter.grp %>%
+dispersal_months = data.disp %>%
   dplyr::mutate(
     Month = lubridate::month(DateObs)
   ) %>%
@@ -226,18 +481,18 @@ dev.off()
 ##### 3. Annual observations -----
 # time range
 paste(
-  min(data.disp.filter.grp$Year),
+  min(data.disp$Year),
   "to",
-  max(data.disp.filter.grp$Year)
+  max(data.disp$Year)
 )
 
 # annual observations
-data.disp.filter.grp %>%
+data.disp %>%
   dplyr::count(Year, name = "Observations") %>%
   dplyr::arrange(Year) %>% 
   print(n=31)
 
-dispersal_year = data.disp.filter.grp %>%
+dispersal_year = data.disp %>%
   dplyr::count(Year, name = "Observations") %>%
   dplyr::arrange(Year)
 
@@ -271,11 +526,11 @@ ggplot2::ggplot(
 dev.off()
 
 ##### 4. Sex ratio ------
-data.disp.filter.grp %>%
+data.disp %>%
   dplyr::count(SexOK) %>%
   dplyr::mutate(Proportion = n / sum(n))
 
-dispersal_sex = data.disp.filter.grp %>%
+dispersal_sex = data.disp %>%
   dplyr::filter(!is.na(SexOK)) %>%
   dplyr::count(SexOK, name = "Frequency") %>%
   dplyr::mutate(
@@ -318,12 +573,12 @@ ggplot2::ggplot(
 dev.off()
 
 ##### 5. By stage ----
-data.disp.filter.grp %>%
+data.disp %>%
   dplyr::count(IdadeOK, name = "Frequency") %>%
   dplyr::mutate(Proportion = Frequency / sum(Frequency)) %>% 
   dplyr::arrange(dplyr::desc(Frequency))
 
-dispersal_age = data.disp.filter.grp %>%
+dispersal_age = data.disp %>%
   dplyr::filter(!is.na(IdadeOK)) %>%
   dplyr::mutate(IdadeOK = dplyr::case_when(
     IdadeOK == "AD" ~ "Adult",
@@ -377,20 +632,20 @@ ggplot2::ggplot(
 dev.off()
 
 ##### 6. Number of groups GLTs departed from or immigrated to -----
-data.disp.filter.grp %>%
+data.disp %>%
   dplyr::distinct(FromGroup) %>%
   nrow()
-data.disp.filter.grp %>%
+data.disp %>%
   dplyr::distinct(ToGroup) %>%
   nrow()
 
 ##### 7. To-From associations (Groups, Regions, UMMPs) -----
 # Groups
-data.disp.filter.grp %>%
+data.disp %>%
   dplyr::count(FromGroup, ToGroup) %>% 
   dplyr::arrange(dplyr::desc(n))
 
-transitions_group = data.disp.filter.grp %>%
+transitions_group = data.disp %>%
   dplyr::filter(!is.na(FromGroup), !is.na(ToGroup)) %>%
   dplyr::count(FromGroup, ToGroup, name = "Frequency") %>%
   dplyr::mutate(
@@ -398,7 +653,8 @@ transitions_group = data.disp.filter.grp %>%
   ) %>%
   dplyr::slice_max(
     order_by = Frequency,
-    n = 30,
+    # Number of top associations to keep
+    n = 40,
     with_ties = FALSE
   )
 
@@ -407,7 +663,7 @@ png(here("outputs",
          "plot",
          "Axis2",
          "GLT_success_immig_byGroup.png"),
-    width = 1800, height = 1600, res = 300, type="cairo")
+    width = 1800, height = 1800, res = 300, type="cairo")
 ggplot2::ggplot(
   transitions_group,
   ggplot2::aes(
@@ -420,7 +676,7 @@ ggplot2::ggplot(
                     width = 0.75) +
   ggplot2::coord_flip() +
   ggplot2::labs(
-    title = "Most frequent group transitions (n=30)",
+    title = "Most frequent group transitions (n=40)",
     x = "Origin → destination group",
     y = "Number of dispersal observations"
   ) +
@@ -433,11 +689,11 @@ ggplot2::ggplot(
 dev.off()
 
 # Region
-data.disp.filter.grp %>%
+data.disp %>%
   dplyr::count(FromRegion, ToRegion)  %>% 
   dplyr::arrange(dplyr::desc(n))
 
-transitions_region = data.disp.filter.grp %>%
+transitions_region = data.disp %>%
   dplyr::filter(!is.na(FromRegion), !is.na(ToRegion)) %>%
   dplyr::count(FromRegion, ToRegion, name = "Frequency") %>%
   dplyr::mutate(
@@ -479,11 +735,11 @@ ggplot2::ggplot(
 dev.off()
 
 # UMMP
-data.disp.filter.grp %>%
+data.disp %>%
   dplyr::count(FromUMMP, ToUMMP)  %>% 
   dplyr::arrange(dplyr::desc(n))
 
-transitions_UMMP = data.disp.filter.grp %>%
+transitions_UMMP = data.disp %>%
   dplyr::filter(
     !is.na(FromUMMP),
     !is.na(ToUMMP)
@@ -546,6 +802,20 @@ ggplot2::ggplot(
 dev.off()
 
 #### Join spatial information ------
+# Keep only dispersal between known locations
+# Create a vector of all unique group names from FromGroup and ToGroup
+valid_groups = data.disp %>%
+  dplyr::select(FromGroup, ToGroup) %>%
+  unlist() %>%
+  unique()
+
+# Filter to keep only rows where both FromGroup and ToGroup are known locations
+data.disp.filter.grp = data.disp %>%
+  dplyr::filter(
+    FromGroup %in% regions_csv$Abreviation,
+    ToGroup %in% regions_csv$Abreviation
+  )
+
 ## Based on group location (regions file)
 # Reformat regions
 grp.loc = regions_csv %>% 
@@ -665,51 +935,88 @@ disp.final.glt %>%
 ### ALL EMIGRATIONS EVENTS ----
 # Here, we identify individuals leaving groups, irrespective of whether they were located after in another group (i.e., emigration events)
 
-#### Filter the data -----
-#filter data and add id count over time
-data.filter = data.clean.final %>% 
-  dplyr::filter(!GLT %in% bad & Disp!=1 & Death==0) %>% 
-  dplyr::arrange(DateObs, GLT) %>% 
-  group_by(GLT) 
+#### Emigration events from individual histories -----
+hist = data.clean.final %>%
+  # Remove bad individuals and dead individuals
+  dplyr::filter(!is.na(GLT), !GLT %in% bad, Death %in% 0) %>%
+  dplyr::mutate(
+    DateObs = as.Date(DateObs),
+    state = dplyr::case_when(
+      Disp %in% 1 ~ "solitary", # seen outside any group
+      Disp %in% 2 ~ "translocated",
+      Disp %in% 0 & !is.na(Group) ~ "group",
+      TRUE ~ NA_character_
+    )
+  ) %>%
+  dplyr::arrange(GLT, DateObs, ObsOrder) %>%
+  dplyr::group_by(GLT) %>%
+  dplyr::mutate(
+    # Group information, only on rows where the individual is in a group
+    g_date = dplyr::if_else(state == "group", DateObs, as.Date(NA)),
+    g_group = dplyr::if_else(state == "group", as.character(Group), NA_character_),
+    g_UMMP = dplyr::if_else(state == "group", as.character(UMMPs), NA_character_),
+    g_region = dplyr::if_else(state == "group", as.character(Region), NA_character_),
+    # Previous row
+    prev_state = dplyr::lag(state),
+    prev_date = dplyr::lag(DateObs),
+    prev_group = dplyr::lag(g_group),
+    prev_UMMP = dplyr::lag(g_UMMP),
+    prev_region = dplyr::lag(g_region),
+    # Last group seen before the row (filled down), next group after it (filled up)
+    last_date = g_date, last_group = g_group, last_UMMP = g_UMMP, last_region = g_region,
+    next_date = g_date, next_group = g_group, next_UMMP = g_UMMP, next_region = g_region
+  ) %>%
+  tidyr::fill(dplyr::starts_with("last_"), .direction = "down") %>%
+  tidyr::fill(dplyr::starts_with("next_"), .direction = "up") %>%
+  dplyr::ungroup()
 
-disp<-NULL
+# Group -> solitary (first solitary sighting after a group sighting)
+ev_solitary = hist %>%
+  dplyr::filter(state == "solitary", prev_state %in% "group") %>%
+  dplyr::transmute(
+    GLT, Tattoo, SexOK, BirthOK, IdadeOK,
+    type = "to solitary",
+    DateLastSeen = last_date, # last sighting in the group
+    DateOut = DateObs, # first sighting outside the group
+    FromGroup = last_group, FromUMMP = last_UMMP, FromRegion = last_region,
+    ToGroup = next_group, ToUMMP = next_UMMP, ToRegion = next_region,
+    DateNextGroup = next_date # next sighting in any group (NA = never)
+  )
 
-gp<-sort(unique(data.filter$Group))
+# Group -> another group without a solitary sighting in between
+# (translocations are excluded: their previous state is "translocated")
+ev_transfer = hist %>%
+  dplyr::filter(
+    state == "group", prev_state %in% "group",
+    g_group != prev_group | g_UMMP != prev_UMMP
+  ) %>%
+  dplyr::transmute(
+    GLT, Tattoo, SexOK, BirthOK, IdadeOK,
+    type = "direct transfer",
+    DateLastSeen = prev_date,
+    DateOut = DateObs,
+    FromGroup = prev_group, FromUMMP = prev_UMMP, FromRegion = prev_region,
+    ToGroup = g_group, ToUMMP = g_UMMP, ToRegion = g_region,
+    DateNextGroup = DateObs
+  )
 
-for (i in 1:length(gp)){
-  
-  singlegp<-data.filter %>% 
-    dplyr::filter(Group==gp[i])
-  
-  dateobs<-sort(unique(singlegp$DateObs))
-  
-  if(length(dateobs)>1){
-    for (j in 2:length(dateobs)){
-      
-      daygpbef<-singlegp %>% 
-        dplyr::filter(DateObs==dateobs[j-1])
-      
-      daygp<-singlegp %>% 
-        dplyr::filter(DateObs==dateobs[j])
-      
-      miss<-anti_join(daygpbef,daygp,by="GLT")
-      
-      if(nrow(miss)>0){
-        disp<-rbind(disp,miss)
-        
-      }
-      setTxtProgressBar(progress_bar(length(gp)),i)  
-    }
-  }
-}
+emigr_events = dplyr::bind_rows(ev_solitary, ev_transfer) %>%
+  dplyr::arrange(GLT, DateOut) %>%
+  dplyr::mutate(
+    UMMPs = FromUMMP, # origin UMMP (used by the downstream code)
+    Year = lubridate::year(DateOut),
+    days_to_next_group = as.integer(DateNextGroup - DateOut),
+    fate = dplyr::case_when(
+      type == "direct transfer" ~ "joined another group",
+      is.na(ToGroup) ~ "not seen in a group afterwards",
+      ToGroup == FromGroup & ToUMMP == FromUMMP ~ "returned to origin group",
+      TRUE ~ "joined another group"
+    ),
+    emig_id = paste0("emig", dplyr::row_number())
+  )
 
-# To data frame
-emigr = disp %>% 
-  # Remove reintroductions
-  dplyr::filter(Year > 1994) %>% 
-  dplyr::group_by(GLT) %>% 
-  dplyr::slice(max(ObsOrder)) %>% 
-  as.data.frame(.)
+##### Checks -----
+emigr_events %>% dplyr::count(type, fate)
 
 #### Summary statistics -----
 ##### 1. Number of distinct GLTs -----
@@ -1021,7 +1328,8 @@ write.xlsx(as.data.frame(emigr),
 
 
 #### Immigration (table) -----
-write.xlsx(as.data.frame(data.disp.filter.grp),
+# Export the table BEFORE spatial filter (all immigration events)
+write.xlsx(as.data.frame(data.disp),
            file=here::here("outputs","data","dispersal","Successful_dispersal.xlsx"),
            sheetName = "Sheet1",
            col.names=T,

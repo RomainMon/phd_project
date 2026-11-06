@@ -21,8 +21,29 @@ load(here::here("data", "glt", "APonchon", "data_clean_long_final.RData"))
 # Data regarding GLT behavior in fragmented patches
 # From Andressa Sales Coelho thesis
 # See: Conservação do mico-leão-dourado: Enfrentando os desafios de uma paisagem fragmentada. vol. 3 (Editora da Universidade Estadual do Norte Fluminense Darcy Ribeiro – UENF, Campos dos Goytacazes, RJ, 2008).
-mat_system = xlsx::read.xlsx(
-  here::here("data", "glt", "ACoelho", "dadosAndressa_V2.xlsx"),
+# Reproductive females and litters
+reprod = xlsx::read.xlsx(
+  here::here("data", "glt", "ACoelho", "data_clean", "dadosAndressa_V2.xlsx"),
+  sheetName = "Sheet1"
+)
+# Dispersal
+disp_andressa = xlsx::read.xlsx(
+  here::here("data", "glt", "ACoelho", "data_clean", "dispersao_andressa_V2.xls"),
+  sheetName = "Sheet1"
+)
+# Status
+status = xlsx::read.xlsx(
+  here::here("data", "glt", "ACoelho", "data_clean", "duasfemeas_andressa_V2.xls"),
+  sheetName = "Sheet1"
+)
+
+#### Dispersal events -----
+all_disp = xlsx::read.xlsx(
+  here::here("outputs", "data", "dispersal", "All_dispersal_events.xlsx"),
+  sheetName = "Sheet1"
+)
+immig = xlsx::read.xlsx(
+  here::here("outputs", "data", "dispersal", "Successful_dispersal.xlsx"),
   sheetName = "Sheet1"
 )
 
@@ -603,7 +624,7 @@ demo_patch %>%
 # From Andressa Sales Coelho thesis
 
 #### Join patch data -----
-mat_system = mat_system %>%
+reprod = reprod %>%
   # UMMP -> patch_id
   dplyr::left_join(
     UMMP_crosswalk,
