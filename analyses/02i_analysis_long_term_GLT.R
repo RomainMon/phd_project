@@ -38,8 +38,8 @@ status = xlsx::read.xlsx(
 )
 
 #### Dispersal events -----
-all_disp = xlsx::read.xlsx(
-  here::here("outputs", "data", "dispersal", "All_dispersal_events.xlsx"),
+emig = xlsx::read.xlsx(
+  here::here("outputs", "data", "dispersal", "All_emigration_events.xlsx"),
   sheetName = "Sheet1"
 )
 immig = xlsx::read.xlsx(
@@ -55,10 +55,6 @@ regions_csv = readr::read_csv2(
   locale = readr::locale(encoding = "ISO-8859-1"),
   na = ""
 )
-
-#### Successful dispersal events -----
-disp = xlsx::read.xlsx(here::here("outputs", "data", "dispersal", "Successful_dispersal.xlsx"),
-                       sheetName = "Sheet1")
 
 #### Patches -----
 # base_path = here::here("outputs", "data", "patches_rshifter") # REAL PATCHES
@@ -135,6 +131,7 @@ patch_metrics = purrr::list_rbind(
   )
 )
 
+
 ### Long-term dataset -----
 #### Parameters ----------
 # Problematic individuals
@@ -145,8 +142,8 @@ bad = c("?","T0","IN","?-1","?-2","?-3","FT","?-4","?-5","?-6","MP489","MP490") 
 data.clean.filter = data.clean.final %>%
   dplyr::filter(
     !is.na(GLT),
-    !GLT %in% bad,
-    Disp!="1", # Dispersers
+    # !GLT %in% bad,
+    # Disp!="1", # Dispersers
     Death !="1" # Dead individuals
     )
 
@@ -620,8 +617,71 @@ demo_patch %>%
   dplyr::filter(!is.na(patch_id), is.na(area_ha)) %>%
   dplyr::count(patch_id, Year)
 
+
 ### Mating system data -----
 # From Andressa Sales Coelho thesis
+
+#### By GLT/month -----
+# One row = one female (GLT) x one reproductive event (month)
+# Source of the litter/age/status: 'status' (GLT level)
+# Source of the fragment/patch/supplementation: 'reprod' (group x year level)
+
+# Events outside the reproductive season (April to August), which get Season = NA
+status %>%
+  dplyr::filter(!lubridate::month(Date) %in% c(9:12, 1:3)) %>%
+  dplyr::count(Month = lubridate::month(Date))
+# Reproductions in July!
+
+# Mutate reproductive season
+repro_month = status %>%
+  dplyr::mutate(
+    Age_months = as.numeric(Age_months), # stored as character in the file
+    Age_years = round(Age_months / 12, 1),
+    Year = lubridate::year(Date),# calendar year of the event
+    Month = lubridate::month(Date),
+    Month_name = month.abb[Month],
+    # Reproductive season: July-Dec belong to the season starting that year,
+    # Jan-Mar to the season that started the year before
+    Season = dplyr::case_when(Month >= 7 ~ paste0("wet ", Year, "-", Year + 1),
+                              Month <= 3 ~ paste0("wet ", Year - 1, "-", Year),
+                              TRUE ~ NA_character_),
+    # Starting year of the season (useful to join yearly data)
+    Season_start = dplyr::case_when(Month >= 7 ~ Year,
+                                    Month <= 3 ~ Year - 1,
+                                    TRUE ~ NA_real_),
+    # Litter characteristics
+    litter_size = n_infants,
+    litter_prop_males = dplyr::if_else(n_in_males + n_in_females > 0,
+                                       n_in_males / (n_in_males + n_in_females), NA_real_),
+    litter_surv_1y = dplyr::if_else(n_infants > 0, n_infants_surv_1y / n_infants, NA_real_)
+  ) %>%
+  # Add group x year information (one row per group x year in reprod)
+  dplyr::left_join(
+    reprod %>%
+      dplyr::select(Group, Year, UMMPs, Fragment, IQH, IQHS,
+                    n_days_supp_food, n_months_supp_food,
+                    mean_days.month_supp, mean_days.year_supp),
+    by = c("Group", "Year"), relationship = "many-to-one"
+  ) %>%
+  dplyr::rename(Dominance = Status) %>%
+  dplyr::arrange(GLT, Date) %>%
+  dplyr::relocate(GLT, Group, Date, Year, Month, Month_name, Season, Season_start,
+                  Age_months, Age_years, Dominance,
+                  litter_size, n_in_males, n_in_females, n_in_sex_unknown,
+                  litter_prop_males, n_infants_surv_1y, litter_surv_1y, infant_surv_cat,
+                  UMMPs, Fragment, IQH, IQHS) %>% 
+  dplyr::select(-n_infants)
+
+### Checks
+# Events without a season (April to August)
+dplyr::count(repro_month, no_season = is.na(Season))
+
+# Females with several events in the same season (to be aggregated later)
+repro_month %>%
+  dplyr::count(GLT, Group, Season) %>%
+  dplyr::filter(n > 1)
+
+
 
 #### Join patch data -----
 reprod = reprod %>%

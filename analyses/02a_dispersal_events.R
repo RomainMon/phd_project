@@ -68,9 +68,6 @@ bad = c("?","T0","IN","?-1","?-2","?-3","FT","?-4","?-5","?-6","MP489","MP490") 
 min_followups = 1 # group must be surveyed >= 3 more dates after last sighting to call "disappeared"
 min_gap_days = 1  # ...and over at least this many days
 
-# Dispersal variable
-unique(data.clean.final$Disp)
-
 # Correspondence list between the names in the long-term dataset
 # And the names of the UMMPs in the census file
 unique(real_census_data$FragName)
@@ -251,6 +248,22 @@ stays = obs %>%
   dplyr::ungroup() %>%
   dplyr::mutate(duration_days = as.numeric(end - start))
 
+#### Monitoring after the last sighting ----
+# For each GROUP stay: how many times, and over how many days, was the group monitored
+# after the last sighting of the individual?
+follow = stays %>%
+  # Keep stays inside groups
+  dplyr::filter(stay_type == "group") %>%
+  dplyr::select(GLT, stay, UMMPs, Group, end) %>%
+  # Join the monitoring dates of each group (UMMPs distinguishes groups with the same name)
+  dplyr::inner_join(grp_dates, by = c("UMMPs", "Group"), relationship = "many-to-many") %>%
+  # Keep monitoring dates after the last sighting of the individual
+  dplyr::filter(DateObs > end) %>%
+  dplyr::group_by(GLT, stay) %>%
+  dplyr::summarise(n_followups = dplyr::n(),                                        # nb of monitoring dates after the last sighting
+                   days_followed = as.numeric(max(DateObs) - dplyr::first(end)),    # nb of days covered
+                   .groups = "drop")
+
 #### Events ----
 events = stays %>%
   dplyr::group_by(GLT) %>%
@@ -302,7 +315,7 @@ events = stays %>%
       TRUE ~ "unknown"),
     # TRUE when the individual arrives in the SAME group it left (A -> satellite -> A)
     # Allows filtering these cases out of the immigrants if you do not want them
-    same_group = !is.na(to_Group) & to_Group %in% Group,
+    same_group = !is.na(to_Group) & !is.na(Group) & to_Group == Group,
     # Age when leaving the origin (last sighting in the group; 
     # for satellite-first rows: end of the satellite stay)
     age_at_departure_months = as.numeric(end - BirthOK) / 30.4375,       # (365.25 days / 12 months)
@@ -320,6 +333,7 @@ events = stays %>%
                 age_at_departure_months, age_at_arrival_months) %>%
   dplyr::arrange(GLT, from_last_date)
 
+
 #### Immigrants -----
 # Immigrants: first observed in ONE group at ONE date after having been in another group 
 # or after a satellite stay (including individuals whose first stay is a satellite stay)
@@ -336,6 +350,62 @@ emigrants = events %>%
                                      immigration = "immigrated",
                                      satellite_end = "satellite",
                                      satellite_dead = "satellite"))
+
+#### Natal group ------
+# Natal group = the group where the individual was first sighted, IF that first record is IN or JU and in a group
+# NA otherwise (first seen as SA/AD: natal group unknown)
+natal = data.clean.final %>%
+  dplyr::ungroup() %>%
+  dplyr::filter(!is.na(GLT), !GLT %in% bad) %>%
+  dplyr::mutate(DateObs = as.Date(DateObs)) %>%
+  dplyr::group_by(GLT) %>%
+  dplyr::arrange(DateObs, ObsOrder, .by_group = TRUE) %>%
+  dplyr::summarise(natal_group = dplyr::if_else(dplyr::first(IdadeOK) %in% c("IN", "JU"),
+                                                dplyr::first(Group), NA_character_),
+                   .groups = "drop")
+
+# Append the stays table to indicate whether the GLT is in a natal patch or not
+stays = stays %>%
+  dplyr::left_join(natal, by = "GLT") %>%
+  dplyr::mutate(
+    status_in_grp = dplyr::case_when(
+      stay_type == "satellite" ~ "satellite",
+      # In the natal group (also when coming back to it as an adult)
+      Group %in% natal_group ~ "natal",
+      # Any other group when the natal group is known, or any later stay
+      !is.na(natal_group) | stay > 1 ~ "immigrant",
+      # First stay, first seen as SA/AD: natal group unknown
+      TRUE ~ "unknown"
+    )
+  )
+
+dplyr::count(stays, status_in_grp)
+
+#### Group flux ------
+# Immigrants: counted in the group they ARRIVE in, in the month of the first sighting there
+# Emigrants: counted in the group they LEAVE, in the month of the last sighting there
+group_flux = dplyr::full_join(
+  immigrants %>%
+    dplyr::group_by(Group = to_Group, UMMPs = to_UMMPs,
+                    Month = lubridate::floor_date(to_first_date, "month")) %>%
+    dplyr::summarise(n_immigrants = dplyr::n(),
+                     n_immigrants_F = sum(SexOK %in% "F"),
+                     n_immigrants_M = sum(SexOK %in% "M"),
+                     n_immigrants_unknown = sum(is.na(SexOK)),
+                     n_immigrants_return = sum(same_group),   # A -> satellite -> A
+                     .groups = "drop"),
+  emigrants %>%
+    dplyr::group_by(Group = from_Group, UMMPs = from_UMMPs,
+                    Month = lubridate::floor_date(from_last_date, "month")) %>%
+    dplyr::summarise(n_emigrants = dplyr::n(),
+                     n_emigrants_F = sum(SexOK %in% "F"),
+                     n_emigrants_M = sum(SexOK %in% "M"),
+                     n_emigrants_unknown = sum(is.na(SexOK)),
+                     .groups = "drop"),
+  by = c("Group", "UMMPs", "Month")
+) %>%
+  # NA = no immigrant (or emigrant) recorded in that group-month -> 0
+  dplyr::mutate(dplyr::across(dplyr::starts_with("n_"), ~ tidyr::replace_na(.x, 0L)))
 
 #### Checks ------
 dplyr::count(events, event)
@@ -1212,13 +1282,19 @@ emigr_prob_stage = emigr_prob %>%
 #   dplyr::mutate(disp_id = paste0("disp", row_number()))
 
 ### Export ---------
-#### Emigration (table) -----
+#### Stays (table) -----
 write.xlsx(as.data.frame(emigr),
-           file=here::here("outputs","data","dispersal","All_dispersal_events.xlsx"),
+           file=here::here("outputs","data","dispersal","All_emigration_events.xlsx"),
            sheetName = "Sheet1",
            col.names=T,
            row.names=F)
 
+#### Emigration (table) -----
+write.xlsx(as.data.frame(emigr),
+           file=here::here("outputs","data","dispersal","All_emigration_events.xlsx"),
+           sheetName = "Sheet1",
+           col.names=T,
+           row.names=F)
 
 #### Immigration (table) -----
 # Export the table BEFORE spatial filter (all immigration events)
@@ -1227,7 +1303,6 @@ write.xlsx(as.data.frame(data.disp),
            sheetName = "Sheet1",
            col.names=T,
            row.names=F)
-
 
 #### Immigration (dispersal lines) -----
 sf::st_write(
