@@ -27,9 +27,11 @@ real_census_data %>%
 
 # Group locations
 regions = sf::st_read(here::here("data", "geo", "APonchon", "GLT", "RegionsName.shp"))
+path_regions = here::here("data", "geo", "APonchon", "GLT", "RegionsName.csv")
+readr::guess_encoding(path_regions) # to identify the encoding and preserve accents
 regions_csv = readr::read_csv2(
-  here::here("data", "geo", "APonchon", "GLT", "RegionsName.csv"),
-  locale = readr::locale(encoding = "ISO-8859-1"),
+  path_regions,
+  locale = readr::locale(encoding = "UTF-8"),
   na = ""
 )
 
@@ -59,6 +61,66 @@ names(patches) = vector_df$year # Name by year
 plot(raster_lulc_2024, col=c("#32a65e", "#ad975a", "#519799", "#FFFFB2", "#0000FF", "#d4271e"))
 plot(sf::st_geometry(patches[[36]]), col=NA, add=TRUE)
 plot(sf::st_geometry(regions), col="magenta", add=TRUE)
+
+### Fill missing UMMPs of data.clean.final -----
+# Accent-free, lower-case key, so "Rebio Uniao" and "Rebio União" match
+norm_key = function(x) {
+  x %>%
+    stringi::stri_trans_general("Latin-ASCII") %>%
+    tolower() %>%
+    stringr::str_replace_all("[._-]+", " ") %>%
+    stringr::str_squish()
+}
+
+# Farm -> UMMPs lookup. UMMPs names are made accent-free, as in data.clean.final ("Uniao I")
+farm_ummp = regions_csv %>%
+  dplyr::filter(!is.na(Farm2), !is.na(UMMPs)) %>%
+  dplyr::transmute(Region_key = norm_key(Farm2),
+                   UMMPs_region = stringi::stri_trans_general(UMMPs, "Latin-ASCII")) %>%
+  dplyr::distinct()
+
+# UMMPs missing before
+sum(is.na(data.clean.final$UMMPs))
+
+data.clean.final = data.clean.final %>%
+  dplyr::ungroup() %>%
+  dplyr::mutate(UMMPs = as.character(UMMPs),            # factor -> character
+                Region_key = norm_key(Region)) %>%
+  dplyr::left_join(farm_ummp, by = "Region_key", relationship = "many-to-one") %>%
+  dplyr::mutate(UMMPs_filled = is.na(UMMPs) & !is.na(UMMPs_region),   # TRUE = UMMPs taken from regions
+                UMMPs = dplyr::coalesce(UMMPs, UMMPs_region)) %>%
+  dplyr::select(-Region_key, -UMMPs_region)
+
+# Checks
+sum(is.na(data.clean.final$UMMPs))  # UMMPs still missing
+
+# Manual corrections
+region_ummp_manual = dplyr::tribble(
+  ~Region, ~UMMPs_manual,
+  "Afetiva",  "Imbau II",
+  "St. Professor", "Imbau I",
+  "Rio Vermelho", "Rio Vermelho",
+  "St. Joedi",  "Aldeia I",
+  "Sitio Tertulio", "Aldeia I",
+  "Sitio 15 de Marco", "Rio Vermelho"
+) %>%
+  dplyr::mutate(Region_key = norm_key(Region)) %>%
+  dplyr::select(Region_key, UMMPs_manual)
+
+data.clean.final = data.clean.final %>%
+  dplyr::ungroup() %>%
+  dplyr::mutate(UMMPs = as.character(UMMPs),
+                Region_key = norm_key(Region)) %>%
+  dplyr::left_join(region_ummp_manual, by = "Region_key", relationship = "many-to-one") %>%
+  dplyr::mutate(UMMPs_filled_manual = is.na(UMMPs) & !is.na(UMMPs_manual),  # TRUE = filled manually
+                UMMPs = dplyr::coalesce(UMMPs, UMMPs_manual)) %>%
+  dplyr::select(-Region_key, 
+                -UMMPs_manual, 
+                -UMMPs_filled,
+                -UMMPs_filled_manual)
+
+# Checks
+sum(is.na(data.clean.final$UMMPs))  # UMMPs still missing
 
 ### Parameters ------
 # Bad GLTs (e.g., unidentified individuals)
@@ -102,6 +164,7 @@ UMMP_crosswalk = data.frame(
 )
 
 ### HOW DISPERSAL IS CODED?
+# See Aurore Ponchon's code
 ex = data.clean.final %>%
   dplyr::filter(Disp %in% 1, !GLT %in% bad) %>%
   dplyr::distinct(GLT) %>%
@@ -171,8 +234,7 @@ d0 = data.clean.final %>%
   dplyr::ungroup() %>%
   dplyr::filter(!Death %in% "1") %>% # remove death records (death dates are stored in 'ind')
   dplyr::mutate(DateObs = as.Date(DateObs), UMMPs = as.character(UMMPs))
-# The dataset only lists the individuals that were recorded
-# on a given date
+# The dataset only lists the individuals that were recorded on a given date
 
 #### Observations: one row per individual x date ------
 obs = d0 %>%
@@ -190,12 +252,13 @@ obs = d0 %>%
     # floater record = no group
     any_floater = any(is.na(Group)),
     # Collapse the descriptors
-    # UMMPs preferably taken from a record with a group
+    # UMMPs and Region preferably taken from a record with a group
     UMMPs = dplyr::coalesce(first_ok(UMMPs[!is.na(Group)]), first_ok(UMMPs)),
+    Region = dplyr::coalesce(first_ok(Region[!is.na(Group)]), first_ok(Region)),
     Group = first_ok(Group),
     ObsOrder = min(ObsOrder),
     .groups = "drop"
-  ) %>% 
+  ) %>%
   dplyr::mutate(
     # satellite if: floater record OR seen in 2+ groups on the same date
     state = dplyr::case_when(any_floater | n_groups_same_day > 1 ~ "satellite",
@@ -204,7 +267,7 @@ obs = d0 %>%
   dplyr::group_by(GLT) %>%
   dplyr::arrange(DateObs, ObsOrder, .by_group = TRUE) %>%
   dplyr::mutate(
-    # Bridging: a date in ONE group, sandwiched between two satellite dates, 
+    # Bridging: a date in ONE group, sandwiched between two satellite dates,
     # is still part of the satellite period (e.g., MK10 in AR on 2004-07-27)
     state = dplyr::if_else(state == "group" &
                              dplyr::lag(state) %in% "satellite" &
@@ -230,6 +293,7 @@ stays = obs %>%
   dplyr::group_by(GLT, stay) %>%
   # Summarise information by stay
   dplyr::summarise(stay_type = dplyr::first(state),
+                   Region = mode_ok(Region), # most frequent Region during the stay
                    UMMPs = mode_ok(UMMPs), # most frequent UMMPs during the stay
                    Group = dplyr::first(Group),
                    start = min(DateObs),
@@ -260,6 +324,82 @@ follow = stays %>%
                    days_followed = as.numeric(max(DateObs) - dplyr::first(end)), # nb of days covered
                    .groups = "drop")
 
+#### Newly formed groups ------
+# A group is flagged as new if, at first observation:
+# i) The UMMP of the group was already monitored;
+# ii) The group contains "founders" (individuals that emigrated from another group or were satellites)
+# iii) The number of founders + newly observed individuals (not previously identified) = group size
+min_founders = 1 # minimum number of emigrants (from elsewhere) on the first date
+
+# First monitoring date of each group
+group_first = grp_dates %>%
+  dplyr::group_by(Group) %>%
+  dplyr::summarise(group_first_date = min(DateObs), .groups = "drop")
+
+# UMMPs of the group on its first date, and first date the UMMPs was monitored (all records)
+ummp_first = data.clean.final %>%
+  dplyr::ungroup() %>%
+  dplyr::mutate(DateObs = as.Date(DateObs), UMMPs = as.character(UMMPs)) %>%
+  dplyr::filter(!is.na(UMMPs)) %>%
+  dplyr::group_by(UMMPs) %>%
+  dplyr::summarise(ummp_first_date = min(DateObs), .groups = "drop")
+
+group_ummp_first = data.clean.final %>%
+  dplyr::ungroup() %>%
+  dplyr::mutate(DateObs = as.Date(DateObs), UMMPs = as.character(UMMPs)) %>%
+  dplyr::filter(!is.na(Group)) %>%
+  dplyr::inner_join(group_first, by = "Group") %>%
+  dplyr::filter(DateObs == group_first_date) %>%
+  dplyr::group_by(Group) %>%
+  dplyr::summarise(UMMPs_group = mode_ok(UMMPs),
+                   # TOTAL group size on the first date (all raw records; records without GLT count one each)
+                   n_total_first = dplyr::n_distinct(GLT, na.rm = TRUE) + sum(is.na(GLT)),
+                   .groups = "drop")
+
+# First record ever of each identified individual
+first_record = data.clean.final %>%
+  dplyr::ungroup() %>%
+  dplyr::filter(!is.na(GLT), !GLT %in% bad) %>%
+  dplyr::mutate(DateObs = as.Date(DateObs)) %>%
+  dplyr::group_by(GLT) %>%
+  dplyr::summarise(first_record = min(DateObs), .groups = "drop")
+
+# Everyone recorded in the group on its first date, whatever their state on that date
+# (satellite state, translocated, death records and unidentified records are all included)
+members_first = data.clean.final %>%
+  dplyr::ungroup() %>%
+  dplyr::mutate(DateObs = as.Date(DateObs)) %>%
+  dplyr::filter(!is.na(Group)) %>%
+  dplyr::inner_join(group_first, by = "Group") %>%
+  dplyr::filter(DateObs == group_first_date) %>%
+  dplyr::left_join(first_record, by = "GLT") %>%
+  dplyr::mutate(type = dplyr::case_when(is.na(GLT) | GLT %in% bad ~ "unidentified",
+                                        first_record < group_first_date ~ "from_elsewhere",
+                                        TRUE ~ "first_seen")) %>%
+  dplyr::group_by(Group, group_first_date) %>%
+  dplyr::summarise(n_emigrants_first = dplyr::n_distinct(GLT[type == "from_elsewhere"]),
+                   n_first_seen = dplyr::n_distinct(GLT[type == "first_seen"]),
+                   n_unidentified = sum(type == "unidentified"),
+                   .groups = "drop")
+
+# Flag newly created groups
+group_origin = group_first %>%
+  dplyr::left_join(group_ummp_first, by = "Group") %>%
+  dplyr::left_join(ummp_first, by = c("UMMPs_group" = "UMMPs")) %>%
+  dplyr::left_join(members_first, by = c("Group", "group_first_date")) %>%
+  dplyr::mutate(
+    dplyr::across(c(n_emigrants_first, n_first_seen, n_unidentified), ~ tidyr::replace_na(.x, 0L)),
+    # the UMMPs was already monitored before the first observation of the group
+    ummp_monitored_before = !is.na(ummp_first_date) & ummp_first_date < group_first_date,
+    # at least min_founders individuals from elsewhere (another group or floating)
+    has_emigrants = n_emigrants_first >= min_founders,
+    # emigrants + newly observed individuals (+ unidentified) = group size
+    sizes_match = n_emigrants_first + n_first_seen + n_unidentified == n_total_first,
+    group_founded = ummp_monitored_before & has_emigrants & sizes_match)
+
+dplyr::count(group_origin, group_founded)
+group_origin %>% dplyr::count(ummp_monitored_before, has_emigrants, sizes_match)
+
 #### Events ----
 events = stays %>%
   dplyr::group_by(GLT) %>%
@@ -269,8 +409,9 @@ events = stays %>%
     # Destination = next GROUP stay: directly after, or after one satellite stay
     # (consecutive satellite stays are merged, so a satellite stay is always followed
     # by a group stay or by nothing)
-    to_UMMPs = dplyr::if_else(sat_next, dplyr::lead(UMMPs, 2), dplyr::lead(UMMPs)),
     to_Group = dplyr::if_else(sat_next, dplyr::lead(Group, 2), dplyr::lead(Group)),
+    to_Region = dplyr::if_else(sat_next, dplyr::lead(Region, 2), dplyr::lead(Region)),
+    to_UMMPs = dplyr::if_else(sat_next, dplyr::lead(UMMPs, 2), dplyr::lead(UMMPs)),
     to_first_date = dplyr::if_else(sat_next, dplyr::lead(start, 2), dplyr::lead(start)),
     # Dates of the satellite stay between origin and destination
     # (for an individual sighted as a satelitte first, the origin IS the satellite stay)
@@ -290,12 +431,16 @@ events = stays %>%
   dplyr::filter(stay_type == "group" | (stay_type == "satellite" & stay == 1 & !is.na(to_Group))) %>%
   # Add the monitoring effort after the last sighting in the group
   dplyr::left_join(follow, by = c("GLT", "stay")) %>%
+  # Joining group origin (new vs old groups)
+  dplyr::left_join(dplyr::select(group_origin, to_Group = Group, group_first_date, group_founded),
+                   by = "to_Group", relationship = "many-to-one") %>%
   dplyr::mutate(
     n_followups = dplyr::coalesce(n_followups, 0L), # 0 if no monitoring after last sighting
     days_followed = dplyr::coalesce(days_followed, 0), # idem
     event = dplyr::case_when(
-      # ANY arrival in a group (directly from another group, or after a satellite stay, whichever group it is) = immigration. 
-      # A group stay directly followed by another group stay always means a different group, because consecutive records in the same group are merged into one stay
+      # Arrival in a group on its first monitoring date, when the group is flagged as founded = emigration followed by group formation, NOT an immigration
+      !is.na(to_Group) & group_founded %in% TRUE & to_first_date == group_first_date ~ "group_formation",
+      # ANY other arrival in a group (directly from another group or after floating) = immigration into an existing group
       !is.na(to_Group) ~ "immigration",
       # Last stay is a group stay followed by a satellite stay, then death -> dead satellite
       via_satellite & !is.na(death_date) ~ "satellite_dead",
@@ -318,14 +463,16 @@ events = stays %>%
     age_at_arrival_months = as.numeric(to_first_date - BirthOK) / 30.41667
   ) %>%
   dplyr::select(GLT, SexOK, BirthOK, event, stay,
-                from_UMMPs = UMMPs,
                 from_Group = Group,   # NA when the origin is a satellite stay (no former group)
+                from_Region = Region,
+                from_UMMPs = UMMPs,
                 from_first_date = start,
                 from_last_date = end,
                 via_satellite, sat_start, sat_end,
                 to_UMMPs, to_Group, to_first_date, same_group,
                 death_date, n_followups, days_followed,
-                age_at_departure_months, age_at_arrival_months) %>%
+                age_at_departure_months, age_at_arrival_months,
+                group_founded) %>%
   dplyr::arrange(GLT, from_last_date)
 
 
@@ -340,12 +487,21 @@ immigrants = events %>%
 emigrants = events %>%
   # Remove when individuals where satellites (had no group)
   dplyr::filter(!is.na(from_Group)) %>%
-  # Keep: individuals immigrating into a group, individuals becoming satellites, individuals disappearing
-  dplyr::filter(event %in% c("immigration", "satellite_end", "satellite_dead", "disappeared")) %>%
+  dplyr::filter(event %in% c("immigration", "group_formation", "satellite_end", "satellite_dead", "disappeared")) %>%
   dplyr::mutate(fate = dplyr::recode(event,
                                      immigration = "immigrated",
+                                     group_formation = "founded_group",
                                      satellite_end = "satellite",
                                      satellite_dead = "satellite"))
+
+#### Dispersal -----
+# Dispersal = immigration and group formation
+dispersal = events %>%
+  dplyr::filter(event %in% c("immigration", 
+                             "group_formation")) %>%
+  dplyr::mutate(dispersal_type = dplyr::if_else(event == "group_formation",
+                                                "group_formation", 
+                                                "immigration_existing_group"))
 
 #### Natal group ------
 # Natal group = the group where the individual was first sighted, IF that first record is IN or JU and in a group
@@ -363,15 +519,17 @@ natal = data.clean.final %>%
 # Append the stays table to indicate whether the GLT is in a natal patch or not
 stays2 = stays %>%
   dplyr::left_join(natal, by = "GLT") %>%
+  dplyr::left_join(dplyr::select(group_origin, Group, group_first_date, group_founded), by = "Group") %>%
   dplyr::mutate(
     status_in_grp = dplyr::case_when(
-      # keep satellite status
       stay_type == "satellite" ~ "satellite",
       # In the natal group (also when coming back to it as an adult)
-      Group == natal_group ~ "natal",
-      # Immigrant when the natal group is known and the current group differs from it
-      !is.na(natal_group) | Group != natal_group ~ "immigrant",
-      # Else = first seen as SA/AD: natal group unknown
+      Group %in% natal_group ~ "natal",
+      # Present on the first date of a group that was founded = founder
+      # (emigrants, floaters and newly observed individuals alike)
+      group_founded %in% TRUE & start == group_first_date ~ "founder",
+      # Natal group known and different from the current group
+      !is.na(natal_group) ~ "immigrant",
       TRUE ~ "unknown"
     )
   )
@@ -381,6 +539,16 @@ dplyr::count(stays2, status_in_grp)
 #### Group flux ------
 # Immigrants: counted in the group they ARRIVE in, on the date of the first sighting there
 # Emigrants: counted in the group they LEAVE, on the date of the last sighting there
+# Founders: counted in the group they FOUND, on the date of the first sighting of the group
+founders_flux = events %>%
+  dplyr::filter(event == "group_formation") %>%
+  dplyr::group_by(Group = to_Group, UMMPs = to_UMMPs, DateObs = to_first_date) %>%
+  dplyr::summarise(n_founders = dplyr::n(),
+                   n_founders_F = sum(SexOK %in% "F"),
+                   n_founders_M = sum(SexOK %in% "M"),
+                   n_founders_unknown = sum(is.na(SexOK)),
+                   .groups = "drop")
+
 flux_events = dplyr::full_join(
   immigrants %>%
     dplyr::group_by(Group = to_Group, UMMPs = to_UMMPs, DateObs = to_first_date) %>%
@@ -397,6 +565,7 @@ flux_events = dplyr::full_join(
                      n_emigrants_M = sum(SexOK %in% "M"),
                      n_emigrants_unknown = sum(is.na(SexOK)),
                      .groups = "drop"),
+  founders_flux,
   by = c("Group", "UMMPs", "DateObs")
 )
 
@@ -408,25 +577,6 @@ group_flux = grp_dates %>%
               # 0 when nothing is observed
                 dplyr::across(dplyr::starts_with("n_"), ~ tidyr::replace_na(.x, 0L)))
 
-#### Checks ------
-dplyr::count(events, event)
-
-# Should return 0 rows: no two consecutive stays in the same group
-stays %>%
-  dplyr::group_by(GLT) %>%
-  dplyr::filter(stay_type == "group", dplyr::lag(stay_type) %in% "group", Group == dplyr::lag(Group)) %>%
-  dplyr::ungroup()
-
-# Should return 0 rows: no group-stay date where the individual was in 2+ groups
-obs %>%
-  dplyr::filter(state == "group", n_groups_same_day > 1)
-
-# Check specific individuals
-stays %>% dplyr::filter(GLT %in% c("2317")) %>% dplyr::arrange(GLT, stay)
-events %>% dplyr::filter(GLT %in% c("2317"))
-
-# Checks
-dplyr::count(group_flux, monitored) # FALSE = events on dates where the group has no record in grp_dates
 
 ### STATISTICS ----
 #### Tables used by the summary statistics ------
@@ -446,6 +596,15 @@ data.disp = immigrants %>%
                 FromUMMP = from_UMMPs, ToUMMP = to_UMMPs) %>%
   dplyr::left_join(stage_lookup, by = c("GLT", "DateObs"))
 
+# ALL successful dispersal (immigration + group formation), used for the lines
+data.disp.all = dispersal %>%
+  dplyr::mutate(disp_id = dplyr::row_number(),
+                DateObs = to_first_date,
+                Year = lubridate::year(to_first_date)) %>%
+  dplyr::rename(FromGroup = from_Group, ToGroup = to_Group,
+                FromUMMP = from_UMMPs, ToUMMP = to_UMMPs) %>%
+  dplyr::left_join(stage_lookup, by = c("GLT", "DateObs"))
+
 # Emigrations: the event date is the LAST sighting in the group left
 # (for "disappeared", the true departure is somewhere after that date)
 emigr = emigrants %>%
@@ -457,7 +616,6 @@ emigr = emigrants %>%
 # Checks
 # Origin known or not (NA = satellite-first), route, and returns to the same group
 dplyr::count(data.disp, from_known = !is.na(FromGroup), via_satellite, same_group)
-dplyr::count(emigr, fate)   # immigrated / satellite / disappeared
 
 #### Summary statistics (immigrations) -----
 ##### 1. Number of distinct GLTs -----
@@ -675,22 +833,21 @@ dev.off()
 
 ##### 6. Number of groups GLTs departed from or immigrated to -----
 # NA origins = satellite-first individuals, which are not counted as an origin group
-data.disp %>%
-  dplyr::filter(!is.na(FromGroup)) %>%
-  dplyr::distinct(FromGroup) %>%
-  nrow()
-data.disp %>%
-  dplyr::distinct(ToGroup) %>%
-  nrow()
+data.disp %>% dplyr::filter(!is.na(FromGroup)) %>% dplyr::distinct(FromGroup) %>% nrow()
+data.disp %>% dplyr::distinct(ToGroup) %>% nrow()
 
 ##### 7. To-From associations (Groups, Regions, UMMPs) -----
 # Groups
 data.disp %>%
-  dplyr::count(FromGroup, ToGroup) %>% 
+  # Remove individuals returning to same group
+  dplyr::filter(!same_group) %>%
+  dplyr::count(FromGroup, ToGroup) %>%
   dplyr::arrange(dplyr::desc(n))
 
 transitions_group = data.disp %>%
-  dplyr::filter(!is.na(FromGroup), !is.na(ToGroup)) %>%
+  dplyr::filter(!same_group, # Remove individuals returning to same group
+                !is.na(FromGroup), 
+                !is.na(ToGroup)) %>%  
   dplyr::count(FromGroup, ToGroup, name = "Frequency") %>%
   dplyr::mutate(
     Association = paste(FromGroup, "→", ToGroup)
@@ -739,6 +896,7 @@ data.disp %>%
 
 transitions_UMMP = data.disp %>%
   dplyr::filter(
+    !same_group, # Remove return to the same group
     !is.na(FromUMMP),
     !is.na(ToUMMP)
   ) %>%
@@ -802,18 +960,21 @@ dev.off()
 #### Join spatial information ------
 # Keep only dispersal between known locations
 # Create a vector of all unique group names from FromGroup and ToGroup
-valid_groups = data.disp %>%
-  dplyr::select(FromGroup, ToGroup) %>%
-  unlist() %>%
-  unique()
+# DATASET = all dispersal events (immigrations and group formation)
+valid_groups = data.disp.all %>%
+  dplyr::select(FromGroup, ToGroup) %>% unlist() %>% unique()
 
 ## Based on group location (regions file)
 # Keep only dispersal between two DIFFERENT groups with known locations
-data.disp.filter.grp = data.disp %>%
-  dplyr::filter(
-    FromGroup %in% regions_csv$Abreviation,
-    ToGroup %in% regions_csv$Abreviation
-  )
+data.disp.filter.grp = data.disp.all %>%
+  dplyr::filter(!same_group, # Remove return to the same group
+                FromGroup %in% regions_csv$Abreviation,
+                ToGroup %in% regions_csv$Abreviation)
+
+# Dispersal lost here, and why (new groups may be missing from the regions file)
+dplyr::count(data.disp.all,
+             kept = disp_id %in% data.disp.filter.grp$disp_id,
+             dispersal_type, same_group, origin_known = !is.na(FromGroup))
 
 # Reformat regions
 grp.loc = regions_csv %>% 
@@ -821,7 +982,7 @@ grp.loc = regions_csv %>%
                 Lat=CENTROIDE_Y_UTM_SAD69_23S,
                 Group=Abreviation) %>% 
   dplyr::select(-Platform,-City) %>% 
-  dplyr::filter_all(any_vars(!is.na(.)))
+  dplyr::filter_all(dplyr::any_vars(!is.na(.)))
 
 # Join group location
 data.disp.from = data.disp.filter.grp %>% 
@@ -847,7 +1008,7 @@ join_patch_by_year = function(df, patches, patch_col = "patch_id") {
       patches_y = patches[[as.character(y)]]
       
       patches_y = patches_y %>%
-        dplyr::rename(patch_id = all_of(patch_col)) %>%
+        dplyr::rename(patch_id = dplyr::all_of(patch_col)) %>%
         dplyr::select(patch_id)
       
       # First: intersection join
@@ -919,9 +1080,8 @@ table(disp.final$intra_patch)
 # Join GLT information
 disp.final.glt = disp.final %>%
   dplyr::left_join(data.disp.filter.grp %>%
-                     dplyr::select(disp_id, Year, DateObs, GLT, SexOK, IdadeOK,
-                                   FromGroup, ToGroup, via_satellite,
-                                   age_at_arrival_months),
+                     dplyr::select(disp_id, dispersal_type, Year, DateObs, GLT, SexOK, IdadeOK,
+                                   FromGroup, ToGroup, via_satellite, age_at_arrival_months),
                    by = "disp_id")
 
 # Statistics
@@ -931,6 +1091,15 @@ disp.final.glt %>%
   dplyr::count() %>%
   dplyr::arrange(dplyr::desc(n)) %>% 
   print(n=80)
+
+# Plot dispersal movements
+lines_plot = disp.lines %>%
+  dplyr::left_join(dplyr::distinct(data.disp.filter.grp, disp_id, dispersal_type), by = "disp_id")
+plot(sf::st_geometry(lines_plot),
+     col = dplyr::if_else(lines_plot$dispersal_type == "group_formation", 
+                          "orange", 
+                          "deeppink"),
+     lwd = 1.5, add = TRUE)
 
 
 #### Summary statistics (emigrations) -----
@@ -1308,6 +1477,7 @@ write.xlsx(as.data.frame(emigr),
 
 #### Immigration (table) -----
 # Export the table BEFORE spatial filter (all immigration events)
+# INCLUDING GROUP FORMATION
 write.xlsx(as.data.frame(data.disp),
            file=here::here("outputs","data","dispersal","Successful_dispersal.xlsx"),
            sheetName = "Sheet1",

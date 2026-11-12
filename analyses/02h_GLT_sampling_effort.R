@@ -24,7 +24,7 @@ load(here::here("data", "glt", "APonchon", "data_clean_long_final.RData"))
 regions = sf::st_read(here::here("data", "geo", "APonchon", "GLT", "RegionsName.shp"))
 regions_csv = readr::read_csv2(
   here::here("data", "geo", "APonchon", "GLT", "RegionsName.csv"),
-  locale = readr::locale(encoding = "ISO-8859-1"),
+  locale = readr::locale(encoding = "UTF-8"),
   na = ""
 )
 
@@ -111,6 +111,66 @@ UMMP_crosswalk = data.frame(
   ),
   stringsAsFactors = FALSE
 )
+
+# Fill missing UMMPs of data.clean.final -----
+# Accent-free, lower-case key, so "Rebio Uniao" and "Rebio União" match
+norm_key = function(x) {
+  x %>%
+    stringi::stri_trans_general("Latin-ASCII") %>%
+    tolower() %>%
+    stringr::str_replace_all("[._-]+", " ") %>%
+    stringr::str_squish()
+}
+
+# Farm -> UMMPs lookup. UMMPs names are made accent-free, as in data.clean.final ("Uniao I")
+farm_ummp = regions_csv %>%
+  dplyr::filter(!is.na(Farm2), !is.na(UMMPs)) %>%
+  dplyr::transmute(Region_key = norm_key(Farm2),
+                   UMMPs_region = stringi::stri_trans_general(UMMPs, "Latin-ASCII")) %>%
+  dplyr::distinct()
+
+# UMMPs missing before
+sum(is.na(data.clean.final$UMMPs))
+
+data.clean.final = data.clean.final %>%
+  dplyr::ungroup() %>%
+  dplyr::mutate(UMMPs = as.character(UMMPs),            # factor -> character
+                Region_key = norm_key(Region)) %>%
+  dplyr::left_join(farm_ummp, by = "Region_key", relationship = "many-to-one") %>%
+  dplyr::mutate(UMMPs_filled = is.na(UMMPs) & !is.na(UMMPs_region),   # TRUE = UMMPs taken from regions
+                UMMPs = dplyr::coalesce(UMMPs, UMMPs_region)) %>%
+  dplyr::select(-Region_key, -UMMPs_region)
+
+# Checks
+sum(is.na(data.clean.final$UMMPs))  # UMMPs still missing
+
+# Manual corrections
+region_ummp_manual = dplyr::tribble(
+  ~Region, ~UMMPs_manual,
+  "Afetiva",  "Imbau II",
+  "St. Professor", "Imbau I",
+  "Rio Vermelho", "Rio Vermelho",
+  "St. Joedi",  "Aldeia I",
+  "Sitio Tertulio", "Aldeia I",
+  "Sitio 15 de Marco", "Rio Vermelho"
+) %>%
+  dplyr::mutate(Region_key = norm_key(Region)) %>%
+  dplyr::select(Region_key, UMMPs_manual)
+
+data.clean.final = data.clean.final %>%
+  dplyr::ungroup() %>%
+  dplyr::mutate(UMMPs = as.character(UMMPs),
+                Region_key = norm_key(Region)) %>%
+  dplyr::left_join(region_ummp_manual, by = "Region_key", relationship = "many-to-one") %>%
+  dplyr::mutate(UMMPs_filled_manual = is.na(UMMPs) & !is.na(UMMPs_manual),  # TRUE = filled manually
+                UMMPs = dplyr::coalesce(UMMPs, UMMPs_manual)) %>%
+  dplyr::select(-Region_key, 
+                -UMMPs_manual, 
+                -UMMPs_filled,
+                -UMMPs_filled_manual)
+
+# Checks
+sum(is.na(data.clean.final$UMMPs))  # UMMPs still missing
 
 # Correct UMMP
 # We reassign some groups to other UMMPs when relevant
@@ -1307,7 +1367,7 @@ criteria = "dry-wet"
 # Use 0 to ignore a condition. Examples (former criteria):
 min_obs_year = 0
 min_obs_dry = 1
-min_obs_wet = 2
+min_obs_wet = 1
 
 # Minimum number of consecutive years
 # i.e., nb of continuous monitoring required (e.g., 3 years means that a group monitored in 2005-2007 is excluded)

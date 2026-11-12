@@ -12,7 +12,7 @@ library(here)
 regions = sf::st_read(here("data", "geo", "APonchon", "GLT", "RegionsName.shp"))
 regions_csv = readr::read_csv2(
   here::here("data", "geo", "APonchon", "GLT", "RegionsName.csv"),
-  locale = readr::locale(encoding = "ISO-8859-1"),
+  locale = readr::locale(encoding = "UTF-8"),
   na = ""
 )
 
@@ -27,6 +27,7 @@ regions = regions %>%
     Farm == "Faz.Afetiva" | Farm == "Fazenda Afetiva" ~ "Faz. Afetiva",
     Farm == "Faz. Sao Francisco" & Abreviatio == "KS" ~ "Faz. Igarape",
     Farm == "Rebio Uniao" & Abreviatio == "LB" ~ "Rebio Uniao Sul",
+    Farm == "Faz. Afetiva" & Abreviatio == "PH" ~ "Andorinhas",
     TRUE ~ Farm
   ))
 
@@ -41,6 +42,7 @@ regions_csv = regions_csv %>%
     Farm == "Faz.Afetiva" | Farm == "Fazenda Afetiva" ~ "Faz. Afetiva",
     Farm == "Faz. Sao Francisco" & Abreviation == "KS" ~ "Faz. Igarape",
     Farm == "Rebio Uniao" & Abreviation == "LB" ~ "Rebio Uniao Sul",
+    Farm == "Faz. Afetiva" & Abreviation == "PH" ~ "Andorinhas",
     TRUE ~ Farm
   ))
 
