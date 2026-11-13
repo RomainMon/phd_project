@@ -17,7 +17,7 @@ library(patchwork)
 
 #### GLT DATA -----
 # GLT data
-load(here::here("data", "glt", "APonchon", "data_clean_long_final.RData"))
+load(here::here("outputs", "data", "glt", "data_clean_long_final2.RData"))
 
 #### Group locations -----
 # Group locations
@@ -86,11 +86,7 @@ UMMP_crosswalk = data.frame(
     "Imbau III",
     "Pirineus",
     "Faz. Boa Esperanza",
-    # UMMPs reassigned below (see "Correct UMMP")
-    # CHECK: patch_id must match the names used in the patch file
-    "4_Irmaos",
-    "Recanto_Preservar",
-    "Sao_Joao"
+    "4_Irmaos"
   ),
   # Equivalent in the patch file
   patch_id = c(
@@ -105,102 +101,10 @@ UMMP_crosswalk = data.frame(
     "Imbau.III",
     "Pirineus",
     "Boa_Esperanca",
-    "4_Irmaos",
-    "Recanto_Preservar",
-    "Sao_Joao"
+    "4_Irmaos"
   ),
   stringsAsFactors = FALSE
 )
-
-# Fill missing UMMPs of data.clean.final -----
-# Accent-free, lower-case key, so "Rebio Uniao" and "Rebio União" match
-norm_key = function(x) {
-  x %>%
-    stringi::stri_trans_general("Latin-ASCII") %>%
-    tolower() %>%
-    stringr::str_replace_all("[._-]+", " ") %>%
-    stringr::str_squish()
-}
-
-# Farm -> UMMPs lookup. UMMPs names are made accent-free, as in data.clean.final ("Uniao I")
-farm_ummp = regions_csv %>%
-  dplyr::filter(!is.na(Farm2), !is.na(UMMPs)) %>%
-  dplyr::transmute(Region_key = norm_key(Farm2),
-                   UMMPs_region = stringi::stri_trans_general(UMMPs, "Latin-ASCII")) %>%
-  dplyr::distinct()
-
-# UMMPs missing before
-sum(is.na(data.clean.final$UMMPs))
-
-data.clean.final = data.clean.final %>%
-  dplyr::ungroup() %>%
-  dplyr::mutate(UMMPs = as.character(UMMPs),            # factor -> character
-                Region_key = norm_key(Region)) %>%
-  dplyr::left_join(farm_ummp, by = "Region_key", relationship = "many-to-one") %>%
-  dplyr::mutate(UMMPs_filled = is.na(UMMPs) & !is.na(UMMPs_region),   # TRUE = UMMPs taken from regions
-                UMMPs = dplyr::coalesce(UMMPs, UMMPs_region)) %>%
-  dplyr::select(-Region_key, -UMMPs_region)
-
-# Checks
-sum(is.na(data.clean.final$UMMPs))  # UMMPs still missing
-
-# Manual corrections
-region_ummp_manual = dplyr::tribble(
-  ~Region, ~UMMPs_manual,
-  "Afetiva",  "Imbau II",
-  "St. Professor", "Imbau I",
-  "Rio Vermelho", "Rio Vermelho",
-  "St. Joedi",  "Aldeia I",
-  "Sitio Tertulio", "Aldeia I",
-  "Sitio 15 de Marco", "Rio Vermelho"
-) %>%
-  dplyr::mutate(Region_key = norm_key(Region)) %>%
-  dplyr::select(Region_key, UMMPs_manual)
-
-data.clean.final = data.clean.final %>%
-  dplyr::ungroup() %>%
-  dplyr::mutate(UMMPs = as.character(UMMPs),
-                Region_key = norm_key(Region)) %>%
-  dplyr::left_join(region_ummp_manual, by = "Region_key", relationship = "many-to-one") %>%
-  dplyr::mutate(UMMPs_filled_manual = is.na(UMMPs) & !is.na(UMMPs_manual),  # TRUE = filled manually
-                UMMPs = dplyr::coalesce(UMMPs, UMMPs_manual)) %>%
-  dplyr::select(-Region_key, 
-                -UMMPs_manual, 
-                -UMMPs_filled,
-                -UMMPs_filled_manual)
-
-# Checks
-sum(is.na(data.clean.final$UMMPs))  # UMMPs still missing
-
-# Correct UMMP
-# We reassign some groups to other UMMPs when relevant
-# For instance, we consider 4 Irmaos as a distinct patch (not as part of Aldeia I)
-# NB: this must be done BEFORE checking the correspondences
-data.clean.final = data.clean.final %>%
-  dplyr::mutate(
-    UMMPs = dplyr::case_when(
-      Region == "Sitio 4 Irmaos" ~ "4_Irmaos",
-      Region == "Sitio Recanto Preservar" ~ "Recanto_Preservar",
-      Region == "Faz. Sao Joao" ~ "Sao_Joao",
-      TRUE ~ as.character(UMMPs)
-    )
-  )
-
-# Any forgotten correspondence in the long-term dataset?
-data.clean.final %>%
-  dplyr::filter(!is.na(UMMPs)) %>%
-  dplyr::distinct(UMMPs) %>%
-  dplyr::mutate(UMMPs = as.character(UMMPs)) %>%
-  dplyr::anti_join(UMMP_crosswalk, by = "UMMPs")
-
-# Any forgotten correspondence in the patch file?
-patches_sf %>%
-  sf::st_drop_geometry() %>%
-  dplyr::distinct(patch_id) %>%
-  dplyr::anti_join(
-    UMMP_crosswalk %>% dplyr::distinct(patch_id),
-    by = "patch_id"
-  )
 
 ### Problematic individuals -----
 bad = c("?","T0","IN","?-1","?-2","?-3","FT","?-4","?-5","?-6","MP489","MP490") # Last list of problematic individuals (see Aurore Zenodo)
@@ -211,11 +115,10 @@ bad = c("?","T0","IN","?-1","?-2","?-3","FT","?-4","?-5","?-6","MP489","MP490") 
 # 1. Distinct individuals
 effort = data.clean.final %>%
   dplyr::filter(
-    !is.na(GLT),
-    !GLT %in% bad
+    !is.na(Tattoo),
   ) %>%
   dplyr::summarise(
-    n_individuals = dplyr::n_distinct(GLT)
+    n_individuals = dplyr::n_distinct(Tattoo)
   )
 
 cat(
@@ -228,11 +131,11 @@ cat(
 # 2. Sex ratio
 effort = data.clean.final %>%
   dplyr::filter(
-    !is.na(GLT),
+    !is.na(Tattoo),
     !GLT %in% bad,
     !is.na(SexOK)
   ) %>%
-  dplyr::distinct(GLT, SexOK) %>%
+  dplyr::distinct(Tattoo, SexOK) %>%
   dplyr::count(SexOK, name = "n_individuals")
 
 n_males = sum(
@@ -253,11 +156,11 @@ cat(
 # 3. Stage
 effort = data.clean.final %>%
   dplyr::filter(
-    !is.na(GLT),
+    !is.na(Tattoo),
     !GLT %in% bad,
     !is.na(IdadeOK)
   ) %>%
-  dplyr::distinct(GLT, IdadeOK) %>%
+  dplyr::distinct(Tattoo, IdadeOK) %>%
   dplyr::count(IdadeOK, name = "n_individuals") %>%
   dplyr::mutate(
     proportion = n_individuals / sum(n_individuals),
@@ -280,12 +183,12 @@ purrr::pwalk(
 # 4. Distinct individuals per year
 effort = data.clean.final %>%
   dplyr::filter(
-    !is.na(GLT),
+    !is.na(Tattoo),
     !GLT %in% bad
   ) %>%
   dplyr::group_by(Year) %>%
   dplyr::summarise(
-    n_individuals = dplyr::n_distinct(GLT),
+    n_individuals = dplyr::n_distinct(Tattoo),
     .groups = "drop"
   ) %>%
   dplyr::arrange(Year)
@@ -306,7 +209,7 @@ purrr::pwalk(
 # 5. Total distinct groups
 effort = data.clean.final %>%
   dplyr::filter(
-    !is.na(GLT),
+    !is.na(Tattoo),
     !GLT %in% bad,
     !is.na(Group)
   ) %>%
@@ -323,7 +226,7 @@ cat(
 # 6. Distinct groups per year
 effort = data.clean.final %>%
   dplyr::filter(
-    !is.na(GLT),
+    !is.na(Tattoo),
     !GLT %in% bad,
     !is.na(Group)
     ) %>%
@@ -350,7 +253,7 @@ purrr::pwalk(
 # 7. Distinct groups per UMMP
 effort = data.clean.final %>%
   dplyr::filter(
-    !is.na(GLT),
+    !is.na(Tattoo),
     !GLT %in% bad,
     !is.na(Group),
     !is.na(UMMPs)
@@ -378,7 +281,7 @@ purrr::pwalk(
 # Define the chronological order of seasons
 effort_plot = data.clean.final %>%
   dplyr::filter(
-    !is.na(GLT), # Remove NA GLTs
+    !is.na(Tattoo), # Remove NA GLTs
     !GLT %in% bad, # Remove problematic individuals
     !is.na(Group), # Remove NA groups
     !is.na(Year), # Remove NA years
@@ -555,7 +458,7 @@ patch_size = patches_sf %>%
 # Sampling effort per patch (1 visit = 1 group x 1 observation date)
 effort_patch = data.clean.final %>%
   dplyr::filter(
-    !is.na(GLT),
+    !is.na(Tattoo),
     !GLT %in% bad,
     !is.na(Group),
     !is.na(UMMPs),
@@ -580,6 +483,10 @@ effort_patch = data.clean.final %>%
 
 # Keep every patch (0 if never monitored) and add effort relative to patch size
 effort_patch = patch_size %>%
+  # Remove specific patches
+  dplyr::filter(!patch_id %in% c("Cabo.Frio", 
+                                 "Sao_Joao", 
+                                 "Recanto_Preservar")) %>% 
   dplyr::left_join(effort_patch, by = "patch_id") %>%
   dplyr::mutate(
     dplyr::across(c(n_visits, n_groups, n_years), ~ dplyr::coalesce(.x, 0L)),
@@ -705,7 +612,6 @@ norm_name = function(x) {
 
 # Unique patches ids in the spatial patches
 patch_ids = unique(as.character(patches_sf$patch_id))
-patch_ids
 
 # Match between all patches names found in several datasets
 match_patch = function(ummp) {
@@ -725,7 +631,7 @@ ummp_patch = dplyr::tibble(
 ### Visits table
 visits_tbl = data.clean.final %>%
   dplyr::filter(
-    !is.na(GLT), 
+    !is.na(Tattoo), 
     !GLT %in% bad,
     !is.na(Group), 
     !is.na(UMMPs), 
@@ -743,8 +649,8 @@ visits_tbl = data.clean.final %>%
   dplyr::filter(!is.na(patch_id)) %>%
   dplyr::group_by(patch_id, Group, DateObs, Year, season) %>%
   dplyr::summarise(
-    # Group size on that date (distinct GLT)
-    GS = dplyr::n_distinct(GLT),
+    # Group size on that date (distinct Tattoo)
+    GS = dplyr::n_distinct(Tattoo),
     .groups = "drop"
   )
 
@@ -1045,7 +951,7 @@ dev.off()
 # We plot the dynamic of groups over the course of the year to see what is the best window to analyze group dynamics
 group_data = data.clean.final %>%
   dplyr::filter(
-    !is.na(GLT),
+    !is.na(Tattoo),
     !GLT %in% bad,
     !is.na(Group),
     !is.na(UMMPs),
@@ -1092,7 +998,7 @@ data.groups = group_data %>%
 group_size_monthly = data.groups %>%
   dplyr::group_by(Region, Group, Year, Month) %>%
   dplyr::summarise(
-    Group_size = dplyr::n_distinct(GLT),
+    Group_size = dplyr::n_distinct(Tattoo),
     .groups = "drop"
   ) %>% 
   # Remove floaters
@@ -1274,7 +1180,7 @@ group_size = data.groups %>%
     panel_id, UMMPs, Region, Group, consecutive_run, Month, DateObs, season_2
   ) %>%
   dplyr::summarise(
-    GroupSize = dplyr::n_distinct(GLT),
+    GroupSize = dplyr::n_distinct(Tattoo),
     .groups = "drop"
   ) %>%
   # Moyenne mensuelle
@@ -1424,7 +1330,8 @@ stopifnot(threshold >= 1)
 # Individual-level table (kept to count distinct individuals later)
 monitoring_ind = data.clean.final %>%
   dplyr::filter(
-    !is.na(GLT),
+    # Remove individuals not marked
+    !is.na(Tattoo),
     # Remove bad individuals
     !GLT %in% bad,
     !is.na(Group),
@@ -1463,7 +1370,7 @@ if (criteria == "dry-wet") {
 
 monitoring_ind = monitoring_ind %>%
   dplyr::distinct(
-    UMMPs, Region, Group, GLT, Year, Cycle, Month, DateObs, season
+    UMMPs, Region, Group, Tattoo, Year, Cycle, Month, DateObs, season
   )
 
 # Date-level table (1 row = 1 group x 1 observation date)
@@ -1613,7 +1520,11 @@ qualifying_groups = qualifying_runs %>%
 # All patch IDs, including patches with no observations
 all_patches = patches_sf %>%
   sf::st_drop_geometry() %>%
-  dplyr::distinct(patch_id)
+  dplyr::distinct(patch_id) %>% 
+  # Remove some patches
+  dplyr::filter(!patch_id %in% c("Cabo.Frio", 
+                                 "Sao_Joao", 
+                                 "Recanto_Preservar"))
 
 # Count groups by matching observation UMMPs to patch IDs
 groups_per_patch = qualifying_groups %>%
@@ -1875,7 +1786,7 @@ info_stats = retained_ind %>%
     # Number of distinct groups 
     n_groups = dplyr::n_distinct(UMMPs, Group),
     # Number of distinct individuals
-    n_individuals = dplyr::n_distinct(GLT),
+    n_individuals = dplyr::n_distinct(Tattoo),
     # Number of distinct UMMPs
     n_UMMPs = dplyr::n_distinct(UMMPs),
     # Range
