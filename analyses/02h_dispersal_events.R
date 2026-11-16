@@ -153,6 +153,7 @@ ind = data.clean.final %>%
   dplyr::summarise(
     SexOK = first_ok(SexOK),
     BirthOK = first_ok(BirthOK),
+    GLT = first_ok(GLT),
     # date of the first death record, NA if never observed dead
     death_date = if (any(Death %in% "1")) min(as.Date(DateObs[Death %in% "1"])) else as.Date(NA),
     # TRUE if the individual has at least one translocation record (Disp == 2)
@@ -245,12 +246,13 @@ stays = obs %>%
                    n_obs = dplyr::n(),
                    .groups = "drop") %>%
   # Add individual attributes
-  dplyr::left_join(dplyr::select(ind, Tattoo, SexOK, BirthOK, death_date), by = "Tattoo") %>%
+  dplyr::left_join(dplyr::select(ind, Tattoo, SexOK, BirthOK, death_date, GLT), by = "Tattoo") %>%
   dplyr::group_by(Tattoo) %>%
   # death date only on the LAST stay of the individual (NA if never observed dead)
   dplyr::mutate(death_date = dplyr::if_else(dplyr::row_number() == dplyr::n(), death_date, as.Date(NA))) %>%
   dplyr::ungroup() %>%
-  dplyr::mutate(duration_days = as.numeric(end - start))
+  dplyr::mutate(duration_days = as.numeric(end - start)) %>% 
+  dplyr::relocate(Tattoo, GLT, SexOK, BirthOK, death_date)
 
 #### Monitoring after the last sighting ----
 # For each GROUP stay: how many times, and over how many days, was the group monitored
@@ -407,7 +409,8 @@ events = stays %>%
     # Age when first seen in the destination group
     age_at_arrival_months = as.numeric(to_first_date - BirthOK) / 30.41667
   ) %>%
-  dplyr::select(Tattoo, SexOK, BirthOK, event, stay,
+  dplyr::select(Tattoo, GLT, SexOK, BirthOK, death_date, 
+                event, stay,
                 from_Group = Group,   # NA when the origin is a satellite stay (no former group)
                 from_Region = Region,
                 from_UMMPs = UMMPs,
@@ -415,7 +418,7 @@ events = stays %>%
                 from_last_date = end,
                 via_satellite, sat_start, sat_end,
                 to_UMMPs, to_Group, to_first_date, same_group,
-                death_date, n_followups, days_followed,
+                n_followups, days_followed,
                 age_at_departure_months, age_at_arrival_months,
                 group_founded) %>%
   dplyr::arrange(Tattoo, from_last_date)
