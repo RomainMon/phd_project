@@ -17,7 +17,7 @@ library(patchwork)
 
 #### GLT DATA -----
 # GLT data
-load(here::here("outputs", "data", "glt", "data_clean_long_final2.RData"))
+load(here::here("outputs", "data", "glt", "data_clean_long_final4.RData"))
 
 #### Group locations -----
 # Group locations

@@ -9,7 +9,7 @@ library(here)
 
 ### Import dataset -----
 # GLT data
-load(here::here("data", "glt", "APonchon", "data_clean_long_final.RData"))
+load(here::here("outputs", "data", "glt", "data_clean_long_final.RData"))
 
 # Group locations
 regions = sf::st_read(here::here("data", "geo", "APonchon", "GLT", "RegionsName.shp"))

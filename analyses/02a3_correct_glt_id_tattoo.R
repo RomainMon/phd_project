@@ -70,4 +70,4 @@ no_tattoo = data.clean.final %>%
 
 
 ### Export ------
-save(data.clean.final, file = here::here("outputs", "data", "glt", "data_clean_long_final2.RData"))
+save(data.clean.final, file = here::here("outputs", "data", "glt", "data_clean_long_final3.RData"))
