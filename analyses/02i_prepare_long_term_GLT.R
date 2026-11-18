@@ -15,7 +15,7 @@ library(lubridate)
 
 #### Long-term GLT data -----
 # Long-term data corrected by Aurore Ponchon and me (UMMP correction)
-load(here::here("outputs", "data", "glt", "data_clean_long_final2.RData"))
+load(here::here("outputs", "data", "glt", "data_clean_long_final4.RData"))
 
 #### Mating system data -----
 # Data regarding GLT behavior in fragmented patches
@@ -593,13 +593,9 @@ demo_patch %>%
 #   - group-year with ONE season: litter taken from reprod (complete)
 #   - group-year with TWO seasons: litter taken from the status data (dated events), NA if the season has no status event, because reprod cannot split the litters between seasons
 #   - rows merged from two reprod rows: litters are summed
-#   -> 'litter_source' tells where the values come from
 #
 # FEMALES
-#   - ids come from reprod (master list). 
-#     A "?" in status is given to the named female of reprod when she is the only female of the group-year without dated status and reprod has no "?"
-#   - a female with dated events is attached to the season(s) of her events
-#   - a female without dated event is attached to all the seasons of her group-year (status unknown)
+#   - ids come from reprod 
 #
 # YEARLY VARIABLES OF REPROD (patch quality, supplementation, Andressa's counts) are taken from the
 # reprod row Year = Season_start (otherwise Year = Season_start + 1) and are YEARLY values
@@ -609,7 +605,6 @@ demo_patch %>%
 
 
 #### Parameters ------
-lambda_max = 6 # lambda above this value is flagged as extreme
 dry_months = 4:6  # Apr-Jun = dry season
 wet_months = c(7:12, 1:3)  # Jul-Mar = wet season
 season_last_month = 3  # Jan-Mar belong to the wet season that started the year before
@@ -647,24 +642,8 @@ season_label = function(type, start) {
 
 #### 0. Reproductive events (one row = one female giving birth) ------
 
-##### STATUS: precisely dated reproductive events ------
-# Each status row is treated as one female reproductive event. The recorded
-# date is the birth date; mating is estimated by subtracting gestation_days.
-status_ev = status %>%
-  dplyr::mutate(GLT = stringr::str_squish(GLT),
-                Date = as.Date(Date),
-                Year = as.numeric(lubridate::year(Date)),
-                season_type = season_type_of(lubridate::month(Date)),
-                Season_start = season_start_of(Year, lubridate::month(Date)),
-                dplyr::across(dplyr::all_of(litter_vars), as.numeric),
-                birth_date = Date, # date of birth(s) (1st of the month)
-                repro_date = Date - lubridate::days(gestation_days),  # approximate mating date
-                source = "status",
-                season_assumed = FALSE) %>%
-  dplyr::select(Group, Year, season_type, Season_start, GLT, Status, source, season_assumed,
-                birth_date, repro_date, dplyr::all_of(litter_vars))
-
-##### Observations: cleaned once, used by all the steps below ------
+##### INFANT BIRTHS in the long-term data ------
+# Observations from the long-term data
 obs = data.clean.final %>%
   dplyr::ungroup() %>%
   dplyr::mutate(GLT = stringr::str_squish(GLT),
@@ -672,24 +651,10 @@ obs = data.clean.final %>%
                 BirthOK = as.Date(BirthOK)) %>%
   dplyr::filter(!is.na(Group), !is.na(DateObs))
 
-##### REPROD: group-years not covered by status ------
-# What is left = years with one reproductive female (known or "?") + years with no reproduction
-reprod_rest = reprod %>%
-  dplyr::mutate(Year = as.numeric(Year),
-                dplyr::across(c(dplyr::all_of(litter_vars), n_reprod_females), as.numeric)) %>%
-  # Remove two-reproductive female groups
-  dplyr::anti_join(dplyr::distinct(status_ev, Group, Year), by = c("Group", "Year")) %>%
-  
-  # Mutate reproduction type depending on the number of reproductive females
-  dplyr::mutate(reprod_type = dplyr::case_when(
-    n_infants %in% 0 | n_reprod_females %in% 0 ~ "none",    # no reproduction that year
-    n_reprod_females %in% 1 ~ "single",   # one reproductive female
-    TRUE ~ NA))
-
-##### Long-term data ------
 # Here, we use the long term data to identify infants and their birth dates
 births_ind = obs %>%
-  dplyr::filter(!is.na(GLT), !GLT %in% bad) %>% # unidentified animals cannot be dated
+  dplyr::filter(!is.na(GLT), 
+                !GLT %in% bad) %>% # unidentified animals cannot be dated
   dplyr::arrange(GLT, DateObs) %>%
   dplyr::group_by(GLT) %>%
   dplyr::summarise(
@@ -730,8 +695,182 @@ fem_seen = obs %>%
                    female_seen = TRUE) %>%
   dplyr::distinct()
 
+# Every identified individual with its first record in a group
+# tier 1 = BirthOK recorded
+# tier 2 = no BirthOK, first recorded as immature (IN/JU)
+# tier 3 = no BirthOK and no age class at first record, never adult within 300 days (likely an unrecorded infant)
+ind_first = obs %>%
+  dplyr::filter(!is.na(GLT), !GLT %in% bad) %>%
+  dplyr::arrange(GLT, DateObs) %>%
+  dplyr::group_by(GLT) %>%
+  dplyr::summarise(first_date = dplyr::first(DateObs),
+                   first_group = dplyr::first(Group),
+                   n_groups_first = dplyr::n_distinct(Group[DateObs == dplyr::first(DateObs)]),
+                   first_age = dplyr::first(IdadeOK),
+                   adult_early = any(IdadeOK %in% "AD" & DateObs <= dplyr::first(DateObs) + 300),
+                   birth_ok = if (all(is.na(BirthOK))) as.Date(NA) else min(BirthOK, na.rm = TRUE),
+                   Sex= mode_ok(SexOK),
+                   .groups = "drop") %>%
+  dplyr::filter(n_groups_first == 1) %>%  # ONE group at the first record
+  dplyr::mutate(tier_rank = dplyr::case_when(!is.na(birth_ok) ~ 1L,
+                                             first_age %in% c("IN", "JU") ~ 2L,
+                                             is.na(first_age) & !adult_early ~ 3L),
+                ref_date = dplyr::coalesce(birth_ok, first_date),
+                Sex_c = dplyr::if_else(Sex %in% c("M", "F"), Sex, "U")) %>%
+  dplyr::filter(!is.na(tier_rank)) # adults are out
 
-##### Season of the reprod events ------
+
+
+##### STATUS: precisely dated reproductive events ------
+# Each status row = one female reproductive event. 
+# The recorded date is the birth date;
+# Mating is estimated by subtracting gestation_days.
+
+# Parameters of the search for the infants
+birth_tol_months = 1  # tier 1: BirthOK within +/- N months of the status date
+first_seen_window_months = 4 # tiers 2-3: infant first seen up to N months after the status date
+max_first_gap_months = 12   # tier 1: first record at most N months after the status date
+
+# Status events
+status_ev0 = status %>%
+  dplyr::mutate(GLT = stringr::str_squish(GLT),
+                Date = as.Date(Date),
+                Year = as.numeric(lubridate::year(Date)),
+                season_type = season_type_of(lubridate::month(Date)),
+                Season_start = season_start_of(Year, lubridate::month(Date)),
+                dplyr::across(dplyr::all_of(litter_vars), as.numeric),
+                birth_date = Date,
+                repro_date = Date - lubridate::days(gestation_days),
+                birth_month = lubridate::floor_date(Date, "month"),
+                season_assumed = FALSE)
+
+# Litter to find, per group x birth month (two females in the same month share the pool)
+gm = status_ev0 %>%
+  dplyr::group_by(Group, birth_month) %>%
+  dplyr::summarise(n_events = dplyr::n(),
+                   n_tot = sum(n_infants, na.rm = TRUE),
+                   n_m = sum(n_in_males, na.rm = TRUE),
+                   n_f = sum(n_in_females, na.rm = TRUE),
+                   .groups = "drop") %>%
+  dplyr::filter(n_tot > 0)
+
+# Candidates of each group x birth month
+cand = gm %>%
+  dplyr::inner_join(ind_first, by = c("Group" = "first_group"), relationship = "many-to-many") %>%
+  dplyr::filter(
+    dplyr::case_when(
+      tier_rank == 1 ~ birth_ok >= birth_month %m-% months(birth_tol_months) &
+        birth_ok <  birth_month %m+% months(birth_tol_months + 1) &
+        first_date < birth_month %m+% months(max_first_gap_months),
+      TRUE           ~ first_date >= birth_month %m-% months(1) &
+        first_date <  birth_month %m+% months(first_seen_window_months + 1))) %>%
+  dplyr::mutate(dist = abs(as.numeric(ref_date - birth_month))) %>%
+  dplyr::arrange(Group, birth_month, tier_rank, dist, GLT)    # best tier first, then closest to the status date
+
+# Selection: sexes of status first, then fill up to n_infants
+sel1 = cand %>%
+  dplyr::group_by(Group, birth_month, Sex_c) %>%
+  dplyr::mutate(rk = dplyr::row_number()) %>%
+  dplyr::ungroup() %>%
+  dplyr::filter((Sex_c == "M" & rk <= n_m) | (Sex_c == "F" & rk <= n_f))
+
+n_sel1 = dplyr::count(sel1, Group, birth_month, name = "n_sel1")
+
+sel2 = cand %>%
+  dplyr::anti_join(sel1, by = c("Group", "birth_month", "GLT")) %>%
+  dplyr::left_join(n_sel1, by = c("Group", "birth_month")) %>%
+  dplyr::mutate(n_sel1 = dplyr::coalesce(n_sel1, 0L)) %>%
+  dplyr::group_by(Group, birth_month) %>%
+  dplyr::mutate(rk = dplyr::row_number()) %>%
+  dplyr::ungroup() %>%
+  dplyr::filter(rk <= n_tot - n_sel1)
+
+ids_gm = dplyr::bind_rows(sel1, sel2) %>%
+  dplyr::arrange(Group, birth_month, ref_date, GLT) %>%
+  dplyr::group_by(Group, birth_month) %>%
+  dplyr::summarise(id_infants = paste(GLT, collapse = ", "),
+                   n_found = dplyr::n(),
+                   n_found_m = sum(Sex_c == "M"),
+                   n_found_f = sum(Sex_c == "F"),
+                   worst_tier = max(tier_rank),
+                   .groups = "drop")
+
+### Manual corrections
+manual_ids = tibble::tribble(
+  ~Group, ~Date,        ~GLT,   ~id_manual,
+  "AP", "2002-10-01", "ST6",  "AS15, AS16",
+  "AP", "2002-10-01", "?",    "AS17",
+  "AP", "2003-03-01", "ST6",  "AS18",
+  "AP", "2003-10-01", "ST6",  "AS19, AS20",
+  "AP", "2003-10-01", "?",    "AS21",
+  "EM", "2003-11-01", "E15",  "E28, E29",
+  "EM", "2003-11-01", "?",    "E30",
+  "EM", "2004-10-01", "?",    "E31?",
+  "EM", "2004-11-01", "E15",  "E32?, E33",
+  "EM", "2006-11-01", "E15",  "E34, E35",
+  "EM", "2006-11-01", "?",    "E36",
+  "MA", "2002-11-01", "MA19", "MA27, MA28",
+  "MA", "2002-11-01", "CM13", "MA25, MA26",
+  "MA", "2003-10-01", "MA19", "MA31, MA32",
+  "MA", "2003-10-01", "CM13", "MA29, MA30",
+  "OL", "1999-10-01", "OL3",  "OL11, OL12",
+  "OL", "1999-11-01", "OL1",  "OL13?, OL14",
+  "RV", "2004-03-01", "RV3",  "?", 
+  "RV", "2004-03-01", "MA9",  "?",
+  "SP", "2006-10-01", "SP2",  "?",
+  "SP", "2006-10-01", "OL15", "?",
+  "ST", "1999-10-01", "CM11", "ST27, ST28",
+  "ST", "1999-09-01", "ST13", "ST25?, ST26?",
+  "ST", "2001-09-01", "?",    "ST33?",
+  "ST", "2001-09-01", "CM11", "ST34, ST35",
+  "ST", "2003-09-01", "CM11", "?",
+  "ST", "2003-09-01", "?",    "?",
+  "ST", "2004-09-01", "CM11", "?", 
+  "ST", "2004-09-01", "?",    "?",
+  "RV", "2003-11-01", "RV3",  "?",
+  "MA", "2002-09-01", "?",    "?",
+  "FX", "2002-10-01", "OL9",  "FX7, FX8, ?, ?",
+  "FX", "2002-10-01", "OL5",  "FX7, FX8, ?, ?",
+  "TR", "2001-11-01", "TR10", "?",
+  "TR", "2001-11-01", "E6",   "?",
+  "TR", "2002-10-01", "TR10", "?",
+  "TR", "2002-10-01", "E6",   "?",
+  "TR", "2003-10-01", "E6", "TR25, TR26",
+  "TR", "2003-11-01", "?",   "TR27",
+  "ST", "2006-07-01", "ST18", "?",
+  "ST", "2006-07-01", "CM11", "?") %>%
+  dplyr::mutate(Date = as.Date(Date))
+
+# Back to the status events
+status_ev = status_ev0 %>%
+  dplyr::left_join(gm,  by = c("Group", "birth_month"), relationship = "many-to-one") %>%
+  dplyr::left_join(ids_gm, by = c("Group", "birth_month"), relationship = "many-to-one") %>%
+  # Manual corrections: the correction replaces the matched ids, otherwise the regular value is kept
+  dplyr::left_join(manual_ids, by = c("Group", "birth_date" = "Date", "GLT"),
+                   relationship = "many-to-one") %>%
+  dplyr::mutate(
+    id_infants = dplyr::case_when(
+      !is.na(id_manual) ~ id_manual,
+      TRUE ~ id_infants)) %>%
+  dplyr::select(Group, Year, season_type, Season_start, GLT, Status, birth_date, repro_date,
+                dplyr::all_of(litter_vars), id_infants, season_assumed)
+
+##### REPROD: group-years not covered by status ------
+# What is left = years with one reproductive female (known or "?") + years with no reproduction
+reprod_rest = reprod %>%
+  dplyr::mutate(Year = as.numeric(Year),
+                dplyr::across(c(dplyr::all_of(litter_vars), n_reprod_females), as.numeric)) %>%
+  # Remove two-reproductive female groups
+  dplyr::anti_join(dplyr::distinct(status_ev, Group, Year), by = c("Group", "Year")) %>%
+  
+  # Mutate reproduction type depending on the number of reproductive females
+  dplyr::mutate(reprod_type = dplyr::case_when(
+    n_infants %in% 0 | n_reprod_females %in% 0 ~ "none",    # no reproduction that year
+    n_reprod_females %in% 1 ~ "single",   # one reproductive female
+    TRUE ~ NA))
+
+
+##### REPROD: retrieve season ------
 # The dates of the reproductive events are lacking in the reprod data (aggregated by year)
 # We want to create a table with reproductive events aggregated by mating season (e.g., wet 1999-2000)
 # For each row in reprod, compare the litter of reprod (n infants, males, females) with the infants born in each candidate season of the same group and year.
@@ -756,7 +895,7 @@ manual_births = tibble::tribble(
 reprod_single = reprod_rest %>%
   # Remove rows without reproductionn
   dplyr::filter(reprod_type != "none") %>%
-  # the manual dates only apply to single-female rows
+  # join the manual dates (only apply to single-female rows)
   dplyr::left_join(manual_births, by = c("Group", "Year", "id_reprod_females" = "GLT"),
                    relationship = "many-to-one") %>%
   dplyr::mutate(birth_manual = dplyr::if_else(reprod_type == "single", birth_date, as.Date(NA))) %>%
@@ -900,12 +1039,9 @@ months_ev = months_ev %>%
   )
 
 ## MANUAL CORRECTIONS: Infants to add, events to remove, birth dates to change
-### MANUAL CORRECTIONS (2): events to delete, events to create, existing events to modify
-# Run AFTER the first manual block (NA rows)
 months_ev = months_ev %>%
   
   # 1. Delete events
-  # (the last two lines remove the events created below, so that rerunning the block does not duplicate them)
   dplyr::filter(
     !(Group == "RV" & Year == 2002 & season_type == "wet" & Season_start == 2002),  # RV16 moved to the Sept 2001 litter
     !(Group == "RV" & Year == 2000 & season_type == "wet" & Season_start == 1999),  # RV6, RV7 already counted in reprod 1999
@@ -989,7 +1125,12 @@ months_ev %>%
 
 
 ##### All other events
-# For the other reproductive events, we implement the season according to the number of infants and their sex + the presence of the female in the group
+# For the other reproductive events, we implement the season according to 
+# i) the number of infants
+# ii) their sex
+# iii) the presence of the female in the group
+
+# Create the table with the remaining reprod events
 reprod_match = reprod_single %>%
   dplyr::filter(is.na(birth_manual)) %>%
   dplyr::anti_join(dplyr::distinct(months_tbl, Group, Year, id_reprod_females),
@@ -1006,6 +1147,8 @@ match_ev = reprod_match %>%
                    relationship = "many-to-one") %>%
   # Rules
   dplyr::mutate(
+    id_before = id_infants,
+    n_infants_dead_1y = as.numeric(n_infants_dead_1y),
     # The number in the long term dataset should equal the number in reprod
     count_ok = dplyr::coalesce(n_data == n_infants, FALSE),
     # Number of infants, per sex
@@ -1017,118 +1160,414 @@ match_ev = reprod_match %>%
     # IF THE KEY = 7 -> all good (4 + 2 +1)
     key = 4 * count_ok + 2 * sex_ok + female_seen_ok,
     # Difference between the number of infants in the long-term dataset and the ones in reprod
-    gap = abs(n_data - n_infants)) %>% 
-  dplyr::arrange(Group, Year, id_reprod_females, dplyr::desc(key), gap, first_birth) %>%
+    gap = abs(n_data - n_infants))
+
+# keep one candidate season per female-year
+match_ev = match_ev %>%
+  dplyr::mutate(corrected = dplyr::coalesce(id_infants != id_before, FALSE)) %>%
+  dplyr::arrange(Group, Year, id_reprod_females, dplyr::desc(corrected), dplyr::desc(key), gap, first_birth) %>%
   dplyr::group_by(Group, Year, id_reprod_females) %>%
-  dplyr::mutate(n_best = sum(key == dplyr::first(key) & dplyr::coalesce(gap == dplyr::first(gap), TRUE))) %>%
   dplyr::slice_head(n = 1) %>%
-  dplyr::ungroup() %>%
+  dplyr::ungroup()
+
+# Corrections
+match_ev = match_ev %>% 
   dplyr::mutate(
-    season_assumed = is.na(n_data),
-    match_type = dplyr::case_when(season_assumed ~ "no_births_in_data",
-                                  count_ok & n_best > 1 ~ "ambiguous",
-                                  count_ok & sex_ok ~ "count+sex",
-                                  count_ok ~ "count_only",
-                                  TRUE ~ "closest"),
-    season_type  = dplyr::if_else(season_assumed, "wet", season_type),
-    Season_start = dplyr::if_else(season_assumed, Year, Season_start),
+    id_infants = dplyr::case_when(
+      Group == "AP" & Year == 1997 & Season_start == 1997 ~ "AS3, AS2 (?)",
+      Group == "MA" & Year == 1998 & Season_start == 1998 ~ "MA14, MA15",
+      Group == "MA" & Year == 1999 & Season_start == 1999 ~ "MA16, MA17",
+      Group == "AF" & Year == 2006 & Season_start == 2006 ~ "AF7, AF8",
+      Group == "SP" & Year == 2003 & Season_start == 2003 ~ "SP2",
+      Group == "OL" & Year == 2007 & Season_start == 2007 ~ "OL30, OL31",
+      # Rows with NAs
+      Group == "AT" & Year == 2000 & is.na(Season_start) ~ "AT6, AT7",
+      Group == "FX" & Year == 2000 & is.na(Season_start) ~ "FX1, FX2",
+      Group == "RV" & Year == 2001 & is.na(Season_start) ~ "RV13",
+      TRUE ~ id_infants
+    ),
+    first_birth = dplyr::case_when(
+      Group == "AP" & Year == 1997 & Season_start == 1997 ~ as.Date("1997-09-01"),
+      Group == "MA" & Year == 1998 & Season_start == 1998 ~ as.Date("1998-09-01"),
+      Group == "MA" & Year == 1999 & Season_start == 1999 ~ as.Date("1999-09-01"),
+      Group == "AF" & Year == 2006 & Season_start == 2006 ~ as.Date("2006-10-01"),
+      Group == "SP" & Year == 2003 & Season_start == 2003 ~ as.Date("2003-11-01"),
+      Group == "OL" & Year == 2007 & Season_start == 2007 ~ as.Date("2007-10-01"),
+      # Rows with NAs
+      Group == "AT" & Year == 2000 & is.na(Season_start) ~ as.Date("2000-10-01"),
+      Group == "FX" & Year == 2000 & is.na(Season_start) ~ as.Date("2000-10-01"),
+      Group == "RV" & Year == 2001 & is.na(Season_start) ~ as.Date("2001-09-01"),
+      TRUE ~ first_birth
+    ),
+    season_type = dplyr::case_when(
+      # Rows with NAs
+      Group == "AT" & Year == 2000 & is.na(Season_start) ~ "wet",
+      Group == "FX" & Year == 2000 & is.na(Season_start) ~ "wet",
+      Group == "RV" & Year == 2001 & is.na(Season_start) ~ "wet",
+      TRUE ~ season_type
+    ),
+    Season_start = dplyr::case_when(
+      # Rows with NAs
+      Group == "AT" & Year == 2000 & is.na(Season_start) ~ 2000,
+      Group == "FX" & Year == 2000 & is.na(Season_start) ~ 2000,
+      Group == "RV" & Year == 2001 & is.na(Season_start) ~ 2001,
+      TRUE ~ Season_start
+    ),
+    # Group SP (wrong number of infants)
+    n_infants = dplyr::case_when(
+      Group == "SP" & Year == 2003 & Season_start == 2003 ~ 1,
+      TRUE ~ n_infants
+    ),
+    n_in_males = dplyr::case_when(
+      Group == "SP" & Year == 2003 & Season_start == 2003 ~ 0,
+      TRUE ~ n_in_males
+    ),
+    n_in_females = dplyr::case_when(
+      Group == "SP" & Year == 2003 & Season_start == 2003 ~ 1,
+      TRUE ~ n_in_females
+    ),
+    n_in_sex_unknown = dplyr::case_when(
+      Group == "SP" & Year == 2003 & Season_start == 2003 ~ 0,
+      TRUE ~ n_in_sex_unknown
+    ),
+    n_infants_dead_1y = dplyr::case_when(
+      Group == "SP" & Year == 2003 & Season_start == 2003 ~ 0,
+      TRUE ~ n_infants_dead_1y
+    ),
+    n_infants_surv_1y = dplyr::case_when(
+      Group == "SP" & Year == 2003 & Season_start == 2003 ~ 1,
+      TRUE ~ n_infants_surv_1y
+    )
+  )
+
+# Remove the rows to drop
+match_ev = match_ev %>%
+  dplyr::filter(!(Group == "AF" & id_infants == "AF7, AF8" & season_type %in% "dry"))
+
+# Same format as the other tables
+match_ev = match_ev %>%
+  dplyr::mutate(
+    season_assumed = is.na(Season_start),   # no infant found in the data: late wet season
     birth_date = first_birth,
     repro_date = birth_date - lubridate::days(gestation_days)) %>%
-  dplyr::transmute(Group, Year, season_type, Season_start, GLT = id_reprod_females,
-                   Status = NA_character_, birth_date, repro_date,
+  dplyr::transmute(Group, Year, season_type, Season_start,
+                   GLT = id_reprod_females, 
+                   Status = NA_character_,
+                   birth_date, 
+                   repro_date,
                    dplyr::across(dplyr::all_of(litter_vars)),
-                   id_infants, season_assumed, match_type)
+                   id_infants, 
+                   season_assumed
+                   )
 
-reprod_events = dplyr::bind_rows(manual_ev, months_ev, match_ev)
+# COMBINE ALL
+reprod_events = dplyr::bind_rows(
+  dplyr::select(manual_ev, Group, Year, season_type, Season_start, GLT, Status, birth_date, repro_date,
+                dplyr::all_of(litter_vars), id_infants, season_assumed),
+  dplyr::select(months_ev, Group, Year, season_type, Season_start, GLT, Status, birth_date, repro_date,
+                dplyr::all_of(litter_vars), id_infants, season_assumed),
+  match_ev)
 
-##### Combine status and reprod ------
+##### MERGE ------
+## Combine status and reprod data
 status_ev = status_ev %>%
-  dplyr::mutate(id_infants = NA_character_, match_type = "status") %>%
   dplyr::select(Group, Year, season_type, Season_start, GLT, Status, birth_date, repro_date,
-                dplyr::all_of(litter_vars), id_infants, season_assumed, match_type)
+                dplyr::all_of(litter_vars), id_infants, season_assumed)
 
+# Bind rows
 repro_events = dplyr::bind_rows(status_ev, reprod_events) %>%
   dplyr::mutate(Season = season_label(season_type, Season_start)) %>%
   dplyr::relocate(Year, Season_start, Season, season_type, Group, GLT)
+
+##### CORRECT FEMALE ID -----
+##### Name the "?" females with the females named in reprod
+# Named females of reprod, by group x year
+named = reprod %>%
+  dplyr::transmute(Group, Year = as.numeric(Year), id = id_reprod_females) %>%
+  dplyr::filter(!is.na(id)) %>%
+  tidyr::separate_longer_delim(id, delim = ",") %>%
+  dplyr::transmute(Group, Year, GLT_named = stringr::str_squish(id)) %>%
+  dplyr::filter(GLT_named != "", !GLT_named %in% bad) %>%
+  dplyr::distinct()
+
+# Event id
+repro_events = repro_events %>% dplyr::mutate(ev_id = dplyr::row_number())
+
+# Females named in 'reprod' and not in the final table
+free = dplyr::anti_join(named, repro_events,
+                        by = c("Group", "Year", "GLT_named" = "GLT"))
+
+# Events with an unidentified female ("?")
+q = repro_events %>%
+  dplyr::filter(GLT == "?") %>%
+  dplyr::select(ev_id, Group, Year, season_type, Season_start)
+
+# Replace a "?" with a name given in the 'reprod' table
+fill = q %>%
+  dplyr::inner_join(free, by = c("Group", "Year"), relationship = "many-to-many") %>%
+  dplyr::group_by(ev_id) %>% dplyr::filter(dplyr::n() == 1) %>% dplyr::ungroup() %>%
+  dplyr::select(ev_id, GLT_fill = GLT_named)
+
+# Replace
+repro_events = repro_events %>%
+  dplyr::left_join(fill, by = "ev_id", relationship = "one-to-one") %>%
+  dplyr::mutate(GLT = dplyr::coalesce(GLT_fill, GLT)) %>%
+  dplyr::select(-GLT_fill, -ev_id)
+
+# Keep distinct reproductive events per female and season
+repro_events = repro_events %>%
+  dplyr::distinct(Season, Group, GLT, repro_date, .keep_all = TRUE) %>%
+  # Remove one problematic ro
+  dplyr::filter(!(Year == 1999 & Group %in% "AP" & GLT %in% "ST6"))
+
+##### FEMALE STATUS ----
+# Join the female status in the group
+stays_grp = stays %>%
+  dplyr::filter(stay_type == "group") %>%
+  dplyr::transmute(Group, GLT = stringr::str_squish(GLT), 
+                   stay_start = start, 
+                   stay_end = end, 
+                   status_in_grp)
+
+repro_events = repro_events %>% dplyr::mutate(ev_id = dplyr::row_number())
+
+grp_status = repro_events %>%
+  dplyr::select(ev_id, Group, GLT, repro_date, repro_date) %>%
+  dplyr::inner_join(stays_grp,
+                    by = dplyr::join_by(Group, GLT, repro_date >= stay_start, repro_date <= stay_end),
+                    relationship = "many-to-many") %>%
+  dplyr::group_by(ev_id) %>%
+  dplyr::summarise(status_in_grp = paste(sort(unique(status_in_grp)), collapse = "/"), .groups = "drop")
+
+repro_events = repro_events %>%
+  dplyr::left_join(grp_status, by = "ev_id", relationship = "one-to-one") %>%
+  dplyr::select(-ev_id)
+
+### CORRECT THE STATUS IN GRP
+# ...
+
+##### COMPLETE STATUS -----
+max_status_gap = 5 # a status is borrowed from another row of the same female only within N years
+repro_events = repro_events %>%
+  dplyr::mutate(row_id = dplyr::row_number())
+
+# 1. Same female, same group: status of her closest row (in time) with a recorded status
+known = repro_events %>%
+  dplyr::filter(!is.na(Status), 
+                !GLT %in% bad) %>%
+  dplyr::distinct(Group, GLT, Season_start_k = Season_start, Status_k = Status)
+
+fill_same = repro_events %>%
+  dplyr::filter(is.na(Status), !GLT %in% bad) %>%
+  dplyr::select(row_id, Group, GLT, Season_start) %>%
+  dplyr::inner_join(known, by = c("Group", "GLT"), relationship = "many-to-many") %>%
+  dplyr::mutate(gap = abs(Season_start - Season_start_k)) %>%
+  dplyr::filter(gap <= max_status_gap) %>%
+  dplyr::arrange(row_id, gap, Season_start_k) %>% # closest row, the earlier one in case of a tie
+  dplyr::group_by(row_id) %>%
+  dplyr::slice_head(n = 1) %>%
+  dplyr::ungroup() %>%
+  dplyr::select(row_id, Status_fill = Status_k)
+
+repro_events = repro_events %>%
+  dplyr::left_join(fill_same, by = "row_id", relationship = "one-to-one") %>%
+  dplyr::mutate(Status = dplyr::coalesce(Status, Status_fill)) %>%
+  dplyr::select(-Status_fill)
+
+# 2. Another female of the same group is ALF -> this female is SUB
+alf_other = repro_events %>%
+  dplyr::filter(Status == "ALF") %>%
+  dplyr::distinct(Group, season_type, Season_start, GLT_alf = GLT)
+
+sub_rows = repro_events %>%
+  dplyr::filter(is.na(Status)) %>%
+  dplyr::inner_join(alf_other, by = c("Group", "season_type", "Season_start"), relationship = "many-to-many") %>%
+  dplyr::filter(GLT != GLT_alf) %>%
+  dplyr::distinct(row_id) %>%
+  dplyr::mutate(sub_fill = "SUB")
+
+repro_events = repro_events %>%
+  dplyr::left_join(sub_rows, by = "row_id", relationship = "one-to-one") %>%
+  dplyr::mutate(Status = dplyr::coalesce(Status, sub_fill)) %>%
+  dplyr::select(-sub_fill, -row_id)
+
+dplyr::count(repro_events, Status)   # NA / NA = still unknown (e.g., "?" females)
+
+
+##### CHECKS -----
+##### CHECK 1: females reproducing twice (months_with_several_reprod_events) ------
+# Expected: one event per female x distinct season of the listed months
+# (JAN/DEZ 2002 -> wet 2001-2002 and wet 2002-2003; JUL/OUT 2004 -> same season = ONE event)
+# Events of the final table, with the season label recomputed from the birth date is not needed:
+# Season is already in repro_events
+re = repro_events
+
+# Females reproducing twice a year
+exp_twice = reprod %>%
+  dplyr::filter(!is.na(months_with_several_reprod_events)) %>%
+  dplyr::transmute(Group, Year = as.numeric(Year), n_reprod_females, id_reprod_females,
+                   token = months_with_several_reprod_events) %>%
+  tidyr::separate_longer_delim(token, delim = "/") %>%
+  dplyr::mutate(Month  = unname(pt_months[stringr::str_to_upper(stringr::str_squish(token))]),
+                Season = season_label(season_type_of(Month), season_start_of(Year, Month))) %>%
+  dplyr::distinct(Group, Year, n_reprod_females, id_reprod_females, Season) %>%
+  tidyr::separate_longer_delim(id_reprod_females, delim = ",") %>%
+  dplyr::mutate(GLT = stringr::str_squish(id_reprod_females)) %>%
+  dplyr::filter(GLT != "", GLT != "?")                       # "?" cannot be traced to a female
+
+# 1a. females reproducing in seasons missing in the final table
+check_twice_missing = exp_twice %>%
+  dplyr::anti_join(re, by = c("Group", "GLT", "Season")) %>%
+  dplyr::select(Group, Year, GLT, Season, n_reprod_females)
+
+# 1b. ... in number of seasons
+check_twice_count = exp_twice %>%
+  dplyr::group_by(Group, Year, GLT) %>%
+  dplyr::summarise(n_exp = dplyr::n_distinct(Season), .groups = "drop") %>%
+  dplyr::left_join(
+    re %>% dplyr::filter(!is.na(birth_date)) %>%
+      dplyr::inner_join(dplyr::distinct(exp_twice, Group, Year, GLT, Season),
+                        by = c("Group", "GLT", "Season"), suffix = c("", "_exp")) %>%
+      dplyr::group_by(Group, Year = Year_exp, GLT) %>%
+      dplyr::summarise(n_found = dplyr::n_distinct(Season), .groups = "drop"),
+    by = c("Group", "Year", "GLT"), relationship = "one-to-one") %>%
+  dplyr::mutate(n_found = dplyr::coalesce(n_found, 0L)) %>%
+  dplyr::filter(n_exp != n_found)
+
+##### CHECK 2: several females reproducing in the same month (months_where_several_females_reprod) ------
+# Expected: in that group and season, one row per reproductive female
+# (MA 2004 SET/OUT: CM13 and MA19 -> two rows in wet 2004-2005)
+exp_several = reprod %>%
+  dplyr::filter(!is.na(months_where_several_females_reprod)) %>%
+  dplyr::transmute(Group, Year = as.numeric(Year), n_reprod_females, id_reprod_females,
+                   token = months_where_several_females_reprod) %>%
+  tidyr::separate_longer_delim(token, delim = "/") %>%
+  dplyr::mutate(Month  = unname(pt_months[stringr::str_to_upper(stringr::str_squish(token))]),
+                Season = season_label(season_type_of(Month), season_start_of(Year, Month))) %>%
+  dplyr::distinct(Group, Year, n_reprod_females, id_reprod_females, Season)
+
+# 2a. fewer rows than reproductive females in that group x season
+check_several_n = exp_several %>%
+  dplyr::left_join(re %>% dplyr::count(Group, Season, name = "n_rows"),
+                   by = c("Group", "Season"), relationship = "many-to-one") %>%
+  dplyr::mutate(n_rows = dplyr::coalesce(n_rows, 0L)) %>%
+  dplyr::filter(n_rows < n_reprod_females)
+
+# 2b. named females of reprod without a row in that group x season
+check_several_ids = exp_several %>%
+  tidyr::separate_longer_delim(id_reprod_females, delim = ",") %>%
+  dplyr::mutate(GLT = stringr::str_squish(id_reprod_females)) %>%
+  dplyr::filter(GLT != "", GLT != "?") %>%
+  dplyr::anti_join(re, by = c("Group", "GLT", "Season")) %>%
+  dplyr::select(Group, Year, GLT, Season, n_reprod_females)
+
+##### Summary
+tibble::tibble(
+  check = c("1a twice: female x season missing",
+            "1b twice: number of seasons differs",
+            "2a several females: fewer rows than females",
+            "2b several females: named female missing"),
+  n_rows = c(nrow(check_twice_missing), nrow(check_twice_count),
+             nrow(check_several_n), nrow(check_several_ids)))
+# 2 reproductive events involving RV3 are missing but it's normal -> this females DOES NOT reproduce but the other one in the group does several times (confusion in the reprod dataset)
+# -> IGNORE 1a & 1b
+
+##### CORRECTIONS -----
+repro_events = repro_events %>%
+  dplyr::mutate(season_type = dplyr::if_else(Group == "MA" & Season == "dry 1999", "wet", season_type),
+                Season = season_label(season_type, Season_start))
 
 #### 1. Group x season table (reproduction) ------
 ##### 1a. Summarise reproductive events by group x season ------
 # A season can gather several events (2 females) and two reprod years (late t + early t+1)
 events_gs = repro_events %>%
-  dplyr::group_by(Group, season_type, Season_start) %>%
+  dplyr::group_by(Group, season_type, Season_start, Season) %>%
   dplyr::summarise(
     # reprod year that supplies the annual covariates (t for late events, t + 1 for Jan-Mar only)
     Year = if (any(Year == first(Season_start))) first(Season_start) else first(Season_start) + 1,
+    
+    #  Summary
     n_repro_females  = dplyr::n_distinct(GLT),
     id_repro_females = paste(sort(unique(GLT)), collapse = ", "),
     n_dom = dplyr::n_distinct(GLT[Status %in% "ALF"]),
     n_sub = dplyr::n_distinct(GLT[!is.na(Status) & Status != "ALF"]),
     n_status_unknown = dplyr::n_distinct(GLT[is.na(Status)]),
+    n_repro_natal = dplyr::n_distinct(GLT[status_in_grp %in% "natal"]),
+    status_in_grp = dplyr::na_if(paste(sort(unique(stats::na.omit(status_in_grp))), collapse = "/"), ""),
+    
+    # Litter size
     dplyr::across(dplyr::all_of(litter_vars), ~ if (all(is.na(.x))) NA_real_ else sum(.x, na.rm = TRUE)),
     id_infants = dplyr::na_if(paste(stats::na.omit(id_infants), collapse = ", "), ""),
-    first_birth      = min_date(birth_date),
-    repro_date_first = min_date(repro_date),            # earliest mating of the season
+    first_birth = min_date(birth_date),
+    repro_date_first = min_date(repro_date), # earliest mating of the season
     season_assumed = all(season_assumed),
-    match_type = paste(sort(unique(match_type)), collapse = " + "),
     .groups = "drop")
 
 ##### 1b. Add group-years with no reproduction ------
-# These rows are assigned to the late wet season because no event date exists.
+# In 'reprod', years without reproductive events are also recorded -> we join them back
+# These rows are assigned to the late wet season because no event date exists
 zero_gs_all = reprod_rest %>%
   dplyr::filter(reprod_type == "none") %>%
-  dplyr::transmute(Group, Year, season_type = "wet", Season_start = Year,
+  dplyr::transmute(Group, Year, 
+                   season_type = "wet", 
+                   Season_start = Year,
                    n_repro_females = 0L,
                    dplyr::across(dplyr::all_of(litter_vars), ~ dplyr::coalesce(.x, 0)),
-                   season_assumed = TRUE, match_type = "no_reproduction")
+                   season_assumed = TRUE)
 
 # If the same group x season already exists (e.g., Jan-Mar births of the next year), drop the zero row
-zero_gs = dplyr::anti_join(zero_gs_all, events_gs, by = c("Group", "season_type", "Season_start"))
+zero_gs = dplyr::anti_join(zero_gs_all, 
+                           events_gs, by = c("Group", "season_type", "Season_start"))
 
 ##### 1c. Annual covariates from the reprod dataset ------
 # These variables remain annual; they are joined using the selected reprod Year.
 reprod_yearly = reprod %>%
-  dplyr::transmute(Group, Year = as.numeric(Year), UMMPs, Fragment, Patch_size, IQH, IQHS, Group_isolation,
-                   n_days_supp_food, n_months_supp_food, mean_days.month_supp, mean_days.year_supp)
-
-group_ummp = data.clean.final %>%
-  dplyr::ungroup() %>%
-  dplyr::filter(!is.na(Group), !is.na(UMMPs)) %>%
-  dplyr::group_by(Group) %>%
-  dplyr::summarise(UMMPs_group = mode_ok(as.character(UMMPs)), .groups = "drop")
+  dplyr::transmute(Group, 
+                   Year = as.numeric(Year), 
+                   UMMPs, 
+                   Fragment, 
+                   IQH, 
+                   IQHS, 
+                   Group_isolation,
+                   n_days_supp_food, 
+                   n_months_supp_food, 
+                   mean_days.month_supp, 
+                   mean_days.year_supp)
 
 ##### 1d. Build the group-season table and define mating reference dates ------
 # If mating cannot be dated, use the assumed 1 October birth date minus gestation.
 gs = dplyr::bind_rows(events_gs, zero_gs) %>%
   dplyr::left_join(reprod_yearly, by = c("Group", "Year"), relationship = "many-to-one") %>%
-  dplyr::left_join(group_ummp, by = "Group", relationship = "many-to-one") %>%
   dplyr::mutate(
-    UMMPs  = dplyr::coalesce(as.character(UMMPs), UMMPs_group),
     Season = season_label(season_type, Season_start),
-    # Reference date = mating of the season (earliest event). No date: assumed birth (1 Oct) - gestation
+    # Reference date = mating of the season (earliest event). 
+    # No date: assumed birth (1 Oct) - gestation
     ref_date = dplyr::coalesce(repro_date_first,
                                lubridate::make_date(Season_start, assumed_birth_month, 1) -
                                  lubridate::days(gestation_days)),
     # Symmetric calendar-month window around the estimated mating date.
     # %m+% / %m-% handle month-end dates safely (e.g. 31 May + 3 months).
-    win_start = ref_date %m-% months(window_months),
-    win_end  = ref_date %m+% months(window_months),
+    window_start = ref_date %m-% months(window_months),
+    window_end  = ref_date %m+% months(window_months),
     Year_ref = lubridate::year(ref_date),
+    
     # Litter characteristics
     litter_prop_males = dplyr::if_else(n_in_males + n_in_females > 0,
                                        round(n_in_males / (n_in_males + n_in_females), 2), NA_real_),
     litter_surv_1y = dplyr::if_else(n_infants > 0, round(n_infants_surv_1y / n_infants, 2), NA_real_),
-    row_id = dplyr::row_number()) %>%
-  dplyr::select(-UMMPs_group)
+    row_id = dplyr::row_number()) %>% 
+  dplyr::relocate(row_id, 
+                  Group, Year, Season, season_type, Season_start,
+                  first_birth, repro_date_first,
+                  ref_date, window_start, window_end, Year_ref)
 
-# Common reference windows used to match observational datasets of different
-# temporal resolutions. Each row_id represents one group x reproductive season.
-win = gs %>% dplyr::select(row_id, Group, UMMPs, ref_date, win_start, win_end)
+# Common reference windows used to match observational datasets of different temporal resolutions. 
+# Each row_id represents one group x reproductive season.
+win = gs %>% dplyr::select(row_id, Group, UMMPs, ref_date, window_start, window_end)
 
 #### 2. Group composition: nearest group observation to mating date ------
 # First calculate group composition at each observed Group x DateObs.
-# The original code averaged all dates in the window. Here, to accommodate
-# datasets with different sampling resolutions, we select ONE date per
-# reproductive-season row: the date closest to ref_date, within +/- 3 months.
+# We select ONE date per reproductive-season row: the date closest to ref_date, within +/- 3 months.
 group_date = obs %>%
   dplyr::mutate(
     immature = IdadeOK %in% c("IN", "JU"),
@@ -1136,77 +1575,71 @@ group_date = obs %>%
   ) %>%
   dplyr::group_by(Group, DateObs) %>%
   dplyr::summarise(
-    n_immatures = dplyr::n_distinct(Tattoo[immature & !unidentified], na.rm = TRUE) +
+    n_immatures = dplyr::n_distinct(GLT[immature & !unidentified], na.rm = TRUE) +
       sum(immature & unidentified, na.rm = TRUE),
-    n_adults = dplyr::n_distinct(Tattoo[!immature & !unidentified], na.rm = TRUE) +
+    n_adults = dplyr::n_distinct(GLT[!immature & !unidentified], na.rm = TRUE) +
       sum(!immature & unidentified, na.rm = TRUE),
-    n_males = dplyr::n_distinct(Tattoo[!immature & !unidentified & SexOK %in% "M"], na.rm = TRUE),
-    n_females = dplyr::n_distinct(Tattoo[!immature & !unidentified & SexOK %in% "F"], na.rm = TRUE),
+    n_males = dplyr::n_distinct(GLT[!immature & !unidentified & SexOK %in% "M"], na.rm = TRUE),
+    n_females = dplyr::n_distinct(GLT[!immature & !unidentified & SexOK %in% "F"], na.rm = TRUE),
     .groups = "drop"
   ) %>%
   dplyr::mutate(
     GS_total = n_adults + n_immatures,
-    sex_ratio_date = dplyr::if_else(n_females > 0, n_males / n_females, NA_real_)
+    sex_ratio = dplyr::if_else(n_females > 0, n_males / n_females, NA_real_)
   )
 
 # Find candidate dates in the window, then keep the closest one per row_id.
 # Ties are resolved in favour of the earlier observation date for reproducibility.
-comp_date_match = group_date %>%
+compo_gs = group_date %>%
+  # Join all observations located within the temporal window authorized
   dplyr::inner_join(
-    dplyr::select(win, row_id, Group, ref_date, win_start, win_end),
-    by = dplyr::join_by(Group, dplyr::between(DateObs, win_start, win_end)),
+    dplyr::select(win, row_id, Group, ref_date, window_start, window_end),
+    by = dplyr::join_by(Group, dplyr::between(DateObs, window_start, window_end)),
     relationship = "many-to-many"
-  ) %>%
+  ) %>% 
+  # Compute the difference between the mating date and the observation date
   dplyr::mutate(diff_days = abs(as.integer(DateObs - ref_date))) %>%
   dplyr::arrange(row_id, diff_days, DateObs) %>%
   dplyr::group_by(row_id) %>%
+  # Select the earlier observation
   dplyr::slice_head(n = 1) %>%
-  dplyr::ungroup()
-
-# Keep the historical output column names for compatibility. Since only one
-# date is selected, the "mean_" values now describe that nearest observation.
-comp_gs = comp_date_match %>%
-  dplyr::transmute(
-    row_id,
-    comp_obs_date = DateObs,
-    comp_diff_days = diff_days,
-    n_dates = 1L,
-    mean_GS_adults = round(n_adults, 2),
-    mean_GS_total = round(GS_total, 2),
-    mean_immatures = round(n_immatures, 2),
-    mean_males = round(n_males, 2),
-    mean_females = round(n_females, 2),
-    mean_sex_ratio = round(sex_ratio_date, 2)
-  )
+  dplyr::ungroup() %>% 
+  dplyr::rename(
+    compo_obs_date = DateObs,
+    compo_diff_days = diff_days
+  ) %>% 
+  dplyr::select(-c(Group, ref_date, window_start, window_end))
 
 #### 3. Patch population: nearest patch observation to mating date ------
-# One row per individual x patch x group x observation date.
-# Individuals with missing Tattoo are excluded from individual counts below.
+# The population is counted from the long-term dataset
 obs_patch = obs %>%
-  dplyr::filter(!is.na(UMMPs), !is.na(DateObs)) %>%
+  dplyr::filter(!is.na(UMMPs), 
+                !is.na(DateObs)) %>%
   dplyr::transmute(
-    UMMPs = as.character(UMMPs), Group, Tattoo, DateObs
+    UMMPs = as.character(UMMPs), Group, GLT, Tattoo, DateObs
   ) %>%
   dplyr::distinct()
 
+# Temporal window for the patch
 win_patch = win %>%
   dplyr::filter(!is.na(UMMPs)) %>%
-  dplyr::select(row_id, UMMPs, ref_date, win_start, win_end)
+  dplyr::select(row_id, UMMPs, ref_date, window_start, window_end)
 
-# For each reproductive-season row, select the nearest date on which the patch
-# was observed anywhere in the patch. Then count all individuals/groups recorded
-# in that patch on that selected date. A missing match produces no count row.
+# For each reproductive-season row, select the nearest date on which the patch was monitored 
+# Then count all individuals/groups recorded in that patch on that selected date
 patch_counts = function(w) {
   nearest_patch_date = obs_patch %>%
     dplyr::distinct(UMMPs, DateObs) %>%
     dplyr::inner_join(
       w,
-      by = dplyr::join_by(UMMPs, dplyr::between(DateObs, win_start, win_end)),
+      by = dplyr::join_by(UMMPs, dplyr::between(DateObs, window_start, window_end)),
       relationship = "many-to-many"
     ) %>%
+    # Difference in days with the reference date
     dplyr::mutate(diff_days = abs(as.integer(DateObs - ref_date))) %>%
     dplyr::arrange(row_id, diff_days, DateObs) %>%
     dplyr::group_by(row_id) %>%
+    # Select the closer observation
     dplyr::slice_head(n = 1) %>%
     dplyr::ungroup() %>%
     dplyr::select(row_id, UMMPs, ref_date, DateObs, diff_days)
@@ -1215,93 +1648,96 @@ patch_counts = function(w) {
     dplyr::inner_join(nearest_patch_date, by = c("UMMPs", "DateObs")) %>%
     dplyr::group_by(row_id) %>%
     dplyr::summarise(
-      n_glt = dplyr::n_distinct(Tattoo, na.rm = TRUE),
+      n_glt = dplyr::n_distinct(GLT, na.rm = TRUE),
       n_groups = dplyr::n_distinct(Group, na.rm = TRUE),
-      n_dates = 1L,
       patch_obs_date = dplyr::first(DateObs),
       patch_diff_days = dplyr::first(diff_days),
       .groups = "drop"
     )
 }
 
-# Population size at the closest available patch observation date.
+# Apply the function
 pop_now = patch_counts(win_patch) %>%
   dplyr::rename(
     n_glt_patch = n_glt,
     n_groups_patch = n_groups,
-    n_dates_patch = n_dates
   )
 
-# Estimate annual population change by repeating the same nearest-date procedure
-# around the reference mating date shifted exactly one calendar year backwards.
+## Estimate annual population change
+# We create another temporal window ONE YEAR BEFORE
 win_patch_prev = win_patch %>%
   dplyr::mutate(
     ref_date = ref_date %m-% lubridate::years(1),
-    win_start = win_start %m-% lubridate::years(1),
-    win_end = win_end %m-% lubridate::years(1)
+    window_start = window_start %m-% lubridate::years(1),
+    window_end = window_end %m-% lubridate::years(1)
   )
 
+# ... And apply the patch count
 pop_prev = patch_counts(win_patch_prev) %>%
-  dplyr::select(row_id, n_glt_prev = n_glt)
+  dplyr::select(row_id, 
+                n_glt_prev = n_glt)
 
-# Lambda is only calculated when a previous-year patch count is available and > 0.
+# Lambda is only calculated when a previous-year patch count is available and > 0
 patch_gs = pop_now %>%
-  dplyr::left_join(pop_prev, by = "row_id", relationship = "one-to-one") %>%
+  dplyr::left_join(pop_prev, 
+                   by = "row_id", relationship = "one-to-one") %>%
   dplyr::mutate(
+    # Compute lambda
     lambda = dplyr::if_else(!is.na(n_glt_prev) & n_glt_prev > 0,
-                            round(n_glt_patch / n_glt_prev, 2), NA_real_),
-    lambda_extreme = lambda > lambda_max
+                            round(n_glt_patch / n_glt_prev, 2), NA_real_)
   ) %>%
   dplyr::select(-n_glt_prev)
 
-#### 4. Immigrants and emigrants (group flux) within the +/- 3-month window ------
-# Flux records are event counts, so retain/sum every event falling in the window
-# rather than selecting a single nearest record.
+#### 4. Immigrants and emigrants (group flux) within the window ------
+# Here we count the total number of immigrants/emigrants in the window
 flux_gs = group_flux %>%
   dplyr::mutate(DateObs = as.Date(DateObs)) %>%
-  dplyr::inner_join(dplyr::select(win, row_id, Group, win_start, win_end),
-                    by = dplyr::join_by(Group, dplyr::between(DateObs, win_start, win_end)),
+  # Observations comprised in the temporal window
+  dplyr::inner_join(dplyr::select(win, row_id, Group, window_start, window_end),
+                    by = dplyr::join_by(Group, dplyr::between(DateObs, window_start, window_end)),
                     relationship = "many-to-many") %>%
   dplyr::group_by(row_id) %>%
+  # Sum immigrants and emigrants
   dplyr::summarise(dplyr::across(dplyr::starts_with("n_"), ~ sum(.x, na.rm = TRUE)), .groups = "drop")
 
-#### 5. Floaters: satellite stays overlapping the +/- 3-month window ------
-# Stays are intervals, so count distinct satellite individuals whose stay overlaps
-# any part of the reference window.
-rec_loc = data.clean.final %>%
-  dplyr::ungroup() %>%
-  dplyr::mutate(DateObs = as.Date(DateObs), UMMPs = as.character(UMMPs)) %>%
-  dplyr::group_by(Tattoo, DateObs) %>%
-  dplyr::summarise(rec_Region = mode_ok(Region), rec_UMMPs = mode_ok(UMMPs), .groups = "drop")
-
+#### 5. Floaters: satellites present during the window ------
+# We count distinct satellite individuals whose stay overlaps any part of the reference window.
 floaters = stays %>%
+  # Keep satellites
   dplyr::filter(stay_type == "satellite") %>%
-  dplyr::left_join(rec_loc, by = c("Tattoo", "start" = "DateObs"), relationship = "many-to-one") %>%
-  dplyr::transmute(sat_GLT = Tattoo, sat_SexOK = SexOK,
-                   sat_UMMPs = dplyr::coalesce(as.character(UMMPs), rec_UMMPs),
+  dplyr::transmute(sat_GLT = GLT, 
+                   sat_SexOK = SexOK,
+                   sat_UMMPs = UMMPs,
                    sat_start = lubridate::floor_date(start, "month"),   # reference dates are 1st of a month
                    sat_end = end) %>%
   dplyr::filter(!is.na(sat_UMMPs))
 
 floaters_gs = win_patch %>%
+  # Keep floaters within the same UMMPs and whose period of "floating" overlaps the temporal window
   dplyr::inner_join(floaters,
-                    by = dplyr::join_by(UMMPs == sat_UMMPs, win_end >= sat_start, win_start <= sat_end),
+                    by = dplyr::join_by(UMMPs == sat_UMMPs, 
+                                        window_end >= sat_start, 
+                                        window_start <= sat_end),
                     relationship = "many-to-many") %>%
   dplyr::group_by(row_id) %>%
-  dplyr::summarise(n_floaters   = dplyr::n_distinct(sat_GLT),
+  dplyr::summarise(n_floaters = dplyr::n_distinct(sat_GLT),
                    n_floaters_F = dplyr::n_distinct(sat_GLT[sat_SexOK %in% "F"]),
                    n_floaters_M = dplyr::n_distinct(sat_GLT[sat_SexOK %in% "M"]),
                    n_floaters_unknown = dplyr::n_distinct(sat_GLT[is.na(sat_SexOK)]),
                    .groups = "drop")
 
 #### 6. Join all derived datasets and calculate patch densities ------
-# All joins below are keyed by row_id (one row per group-season), except the
-# patch crosswalk and annual patch metrics.
+# Most joins below are based on row_id (one row per group-season)
 gs = gs %>%
-  dplyr::left_join(comp_gs,     by = "row_id", relationship = "one-to-one") %>%
-  dplyr::left_join(patch_gs,    by = "row_id", relationship = "one-to-one") %>%
-  dplyr::left_join(flux_gs,     by = "row_id", relationship = "one-to-one") %>%
+  # GROUP COMPOSITION
+  dplyr::left_join(compo_gs, by = "row_id", relationship = "one-to-one") %>%
+  # PATCH POP SIZE
+  dplyr::left_join(patch_gs, by = "row_id", relationship = "one-to-one") %>%
+  # GROUP FLUX
+  dplyr::left_join(flux_gs, by = "row_id", relationship = "one-to-one") %>%
+  # FLOATERS
   dplyr::left_join(floaters_gs, by = "row_id", relationship = "one-to-one") %>%
+  
   # Patch metrics are yearly: matched on the year of mating (columns also in reprod get the suffix _pm)
   dplyr::left_join(UMMP_crosswalk, by = "UMMPs") %>%
   dplyr::left_join(patch_metrics, by = c("patch_id", "Year_ref" = "Year"), suffix = c("", "_pm")) %>%
@@ -1312,7 +1748,7 @@ gs = gs %>%
     # No satellite stay found = 0 floaters (only when the patch is known)
     dplyr::across(dplyr::starts_with("n_floaters"),
                   ~ dplyr::if_else(is.na(UMMPs), NA_integer_, tidyr::replace_na(.x, 0L))),
-    dens_floaters   = round(n_floaters / area_km2, 2),
+    dens_floaters = round(n_floaters / area_km2, 2),
     dens_floaters_F = round(n_floaters_F / area_km2, 2),
     dens_floaters_M = round(n_floaters_M / area_km2, 2))
 
@@ -1321,30 +1757,25 @@ repro_final = gs %>%
   dplyr::mutate(mating_date = ref_date) %>%
   dplyr::select(
     dplyr::any_of(c("Group", "UMMPs", "Fragment", "Group_isolation")),
-    dplyr::any_of(c("Season", "season_type", "Season_start", "season_assumed", "match_type", "mating_date")),
+    dplyr::any_of(c("Season", "season_type", "Season_start", "season_assumed", "mating_date")),
     # reproduction
     dplyr::any_of(c("n_infants", "n_in_males", "n_in_females", "n_in_sex_unknown", "n_infants_surv_1y",
                     "litter_prop_males", "litter_surv_1y", "first_birth", "id_infants")),
     dplyr::any_of(c("n_repro_females", "id_repro_females", "n_dom", "n_sub", "n_status_unknown")),
+    dplyr::any_of(c("n_repro_natal", "status_in_grp")),
     # group composition and distance (days) between the observation and mating
-    dplyr::any_of(c("mean_GS_adults", "mean_GS_total", "mean_immatures", "mean_males", "mean_females",
-                    "mean_sex_ratio", "comp_diff_days", "patch_diff_days")),
+    dplyr::any_of(c("GS_total", "n_immatures", "n_adults", "n_males", "n_females", "sex_ratio")),
     # dispersal and floaters
     dplyr::starts_with("n_immigrants"), dplyr::starts_with("n_emigrants"), dplyr::starts_with("n_founders"),
     dplyr::starts_with("n_floaters"), dplyr::starts_with("dens_floaters"),
     # patch
-    dplyr::any_of(c("area_km2", "shape", "enn_m", "dPC", "IQH", "IQHS", "n_glt_patch", "n_groups_patch",
-                    "dens_glt", "dens_groups", "lambda", "lambda_extreme")),
+    dplyr::any_of(c("area_km2", "shape", "enn_m", "dPC", "IQH", "IQHS", 
+                    "n_glt_patch", "n_groups_patch",
+                    "dens_glt", "dens_groups", 
+                    "lambda")),
     dplyr::any_of(c("n_days_supp_food", "n_months_supp_food", "mean_days.month_supp", "mean_days.year_supp"))) %>%
   dplyr::arrange(Group, Season_start, season_type)
 
-
-#### 8. Diagnostics and consistency checks ------
-reprod %>% dplyr::count(Group, Year) %>% dplyr::filter(n > 1)  # reprod: 1 row per group x year?
-dplyr::count(repro_events, match_type)   # ambiguous / closest / count_only = rows to inspect
-dplyr::count(repro_final, season_type, season_assumed)
-sum(is.na(repro_final$n_dates)) # group-composition rows with no observation within +/- N months
-sum(is.na(repro_final$patch_obs_date)) # patch rows with no observation within +/- N months
 
 ### Patches ------ 
 #### Biplot area ~ connectivity across time -------
