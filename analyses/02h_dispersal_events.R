@@ -18,7 +18,7 @@ source(here::here("R","APonchon","progress_bar.R"))
 ### Import datasets -----
 
 # GLT data
-load(here::here("outputs", "data", "glt", "data_clean_long_final2.RData"))
+load(here::here("outputs", "data", "glt", "data_clean_long_final4.RData"))
 
 # Population data
 real_census_data = read_excel(here::here("data", "glt", "JDietz", "GLT_POP_2005_2023.xlsx"), na="NA")
@@ -67,8 +67,8 @@ plot(sf::st_geometry(regions), col="magenta", add=TRUE)
 bad = c("?","T0","IN","?-1","?-2","?-3","FT","?-4","?-5","?-6","MP489","MP490") # Last list of problematic individuals (see Aurore Zenodo)
 
 # Parameters for disappearance
-min_followups = 1 # group must be surveyed >= 3 more dates after last sighting to call "disappeared"
-min_gap_days = 1  # ...and over at least this many days
+min_followups = 2 # group must be surveyed >= N more dates after last sighting to call "disappeared"
+min_gap_days = 15  # ...and over at least this many days
 
 # Correspondence list between the names in the long-term dataset
 unique(data.clean.final$UMMPs)
@@ -110,14 +110,14 @@ UMMP_crosswalk = data.frame(
 # See Aurore Ponchon's code
 ex = data.clean.final %>%
   dplyr::filter(Disp %in% 1, !GLT %in% bad) %>%
-  dplyr::distinct(Tattoo) %>%
+  dplyr::distinct(GLT) %>%
   dplyr::slice_head(n = 3) %>%
-  dplyr::pull(Tattoo)
+  dplyr::pull(GLT)
 
 data.clean.final %>%
-  dplyr::filter(Tattoo %in% ex) %>%
-  dplyr::arrange(Tattoo, DateObs) %>%
-  dplyr::select(Tattoo, Group, Region, DateObs, Disp, Death, ObsOrder)
+  dplyr::filter(GLT %in% ex) %>%
+  dplyr::arrange(GLT, DateObs) %>%
+  dplyr::select(GLT, Group, Region, DateObs, Disp, Death, ObsOrder)
 # Disp 1 means an individual is observed alone or dispersing in another fragment
 # WARNING: It does not mean that the individual has left their group THAT DAY
 # WARNING: DISP was computed from ONE YEAR TO ANOTHER by Aurore (Ponchon et al. 2026)
@@ -148,12 +148,13 @@ mode_ok = function(x) {
 # One row per individual, built from ALL records, including death records
 ind = data.clean.final %>%
   dplyr::ungroup() %>%
-  dplyr::filter(!is.na(Tattoo), !GLT %in% bad) %>%
-  dplyr::group_by(Tattoo) %>%
+  dplyr::filter(!is.na(Tattoo), 
+                !GLT %in% bad) %>%
+  dplyr::group_by(GLT) %>%
   dplyr::summarise(
     SexOK = first_ok(SexOK),
     BirthOK = first_ok(BirthOK),
-    GLT = first_ok(GLT),
+    Tattoo = first_ok(Tattoo),
     # date of the first death record, NA if never observed dead
     death_date = if (any(Death %in% "1")) min(as.Date(DateObs[Death %in% "1"])) else as.Date(NA),
     # TRUE if the individual has at least one translocation record (Disp == 2)
@@ -187,10 +188,10 @@ obs = d0 %>%
                 !GLT %in% bad) %>%
   # Remove translocated individuals entirely
   dplyr::inner_join(dplyr::filter(ind, !translocated) %>%
-                      dplyr::select(Tattoo, death_date), by = "Tattoo") %>%
+                      dplyr::select(GLT, death_date), by = "GLT") %>%
   # Remove any record at/after the first death record
   dplyr::filter(is.na(death_date) | DateObs < death_date) %>%
-  dplyr::group_by(Tattoo, DateObs) %>%
+  dplyr::group_by(GLT, DateObs) %>%
   dplyr::summarise(
     # Number of different groups in which the individual was recorded that day
     n_groups_same_day = dplyr::n_distinct(Group, na.rm = TRUE),
@@ -209,7 +210,7 @@ obs = d0 %>%
     state = dplyr::case_when(any_floater | n_groups_same_day > 1 ~ "satellite",
                              TRUE ~ "group")
   ) %>%
-  dplyr::group_by(Tattoo) %>%
+  dplyr::group_by(GLT) %>%
   dplyr::arrange(DateObs, ObsOrder, .by_group = TRUE) %>%
   dplyr::mutate(
     # Bridging: a date in ONE group, sandwiched between two satellite dates,
@@ -229,13 +230,13 @@ obs = d0 %>%
 # Satellite stays are recorded as stays too, so a trajectory looks like: 
 # AX -> XT2 -> satellite -> AX -> XT2 ...
 stays = obs %>%
-  dplyr::group_by(Tattoo) %>%
+  dplyr::group_by(GLT) %>%
   dplyr::arrange(DateObs, ObsOrder, .by_group = TRUE) %>%
   # Stay identifier: increments each time the state or the group changes 
   # Group identity = Group name only
   # Consecutive satellite records (Group = NA) are merged into one satellite stay
   dplyr::mutate(stay = dplyr::consecutive_id(state, Group)) %>%
-  dplyr::group_by(Tattoo, stay) %>%
+  dplyr::group_by(GLT, stay) %>%
   # Summarise information by stay
   dplyr::summarise(stay_type = dplyr::first(state),
                    Region = mode_ok(Region), # most frequent Region during the stay
@@ -246,13 +247,13 @@ stays = obs %>%
                    n_obs = dplyr::n(),
                    .groups = "drop") %>%
   # Add individual attributes
-  dplyr::left_join(dplyr::select(ind, Tattoo, SexOK, BirthOK, death_date, GLT), by = "Tattoo") %>%
-  dplyr::group_by(Tattoo) %>%
+  dplyr::left_join(dplyr::select(ind, Tattoo, SexOK, BirthOK, death_date, GLT), by = "GLT") %>%
+  dplyr::group_by(GLT) %>%
   # death date only on the LAST stay of the individual (NA if never observed dead)
   dplyr::mutate(death_date = dplyr::if_else(dplyr::row_number() == dplyr::n(), death_date, as.Date(NA))) %>%
   dplyr::ungroup() %>%
   dplyr::mutate(duration_days = as.numeric(end - start)) %>% 
-  dplyr::relocate(Tattoo, GLT, SexOK, BirthOK, death_date)
+  dplyr::relocate(GLT, Tattoo, SexOK, BirthOK, death_date)
 
 #### Monitoring after the last sighting ----
 # For each GROUP stay: how many times, and over how many days, was the group monitored
@@ -260,12 +261,12 @@ stays = obs %>%
 follow = stays %>%
   # Keep individuals in groups
   dplyr::filter(stay_type == "group") %>%
-  dplyr::select(Tattoo, stay, UMMPs, Group, end) %>%
+  dplyr::select(GLT, stay, UMMPs, Group, end) %>%
   # Join the monitoring dates of each group (UMMPs distinguishes groups with the same name)
   dplyr::inner_join(grp_dates, by = c("UMMPs", "Group"), relationship = "many-to-many") %>%
   # Keep monitoring dates after the last sighting of the individual
   dplyr::filter(DateObs > end) %>%
-  dplyr::group_by(Tattoo, stay) %>%
+  dplyr::group_by(GLT, stay) %>%
   dplyr::summarise(n_followups = dplyr::n(), # nb of monitoring dates after the last sighting
                    days_followed = as.numeric(max(DateObs) - dplyr::first(end)), # nb of days covered
                    .groups = "drop")
@@ -299,7 +300,8 @@ group_ummp_first = data.clean.final %>%
   dplyr::group_by(Group) %>%
   dplyr::summarise(UMMPs_group = mode_ok(UMMPs),
                    # TOTAL group size on the first date (all raw records; records without GLT count one each)
-                   n_total_first = dplyr::n_distinct(Tattoo, na.rm = TRUE) + sum(is.na(Tattoo)),
+                   n_total_first = dplyr::n_distinct(GLT, na.rm = TRUE) + 
+                     sum(is.na(GLT)),
                    .groups = "drop")
 
 # First record ever of each identified individual
@@ -308,7 +310,7 @@ first_record = data.clean.final %>%
   dplyr::filter(!is.na(Tattoo), 
                 !GLT %in% bad) %>%
   dplyr::mutate(DateObs = as.Date(DateObs)) %>%
-  dplyr::group_by(Tattoo) %>%
+  dplyr::group_by(GLT) %>%
   dplyr::summarise(first_record = min(DateObs), .groups = "drop")
 
 # Everyone recorded in the group on its first date, whatever their state on that date
@@ -319,13 +321,13 @@ members_first = data.clean.final %>%
   dplyr::filter(!is.na(Group)) %>%
   dplyr::inner_join(group_first, by = "Group") %>%
   dplyr::filter(DateObs == group_first_date) %>%
-  dplyr::left_join(first_record, by = "Tattoo") %>%
-  dplyr::mutate(type = dplyr::case_when(is.na(Tattoo) | GLT %in% bad ~ "unidentified",
+  dplyr::left_join(first_record, by = "GLT") %>%
+  dplyr::mutate(type = dplyr::case_when(is.na(GLT) | GLT %in% bad ~ "unidentified",
                                         first_record < group_first_date ~ "from_elsewhere",
                                         TRUE ~ "first_seen")) %>%
   dplyr::group_by(Group, group_first_date) %>%
-  dplyr::summarise(n_emigrants_first = dplyr::n_distinct(Tattoo[type == "from_elsewhere"]),
-                   n_first_seen = dplyr::n_distinct(Tattoo[type == "first_seen"]),
+  dplyr::summarise(n_emigrants_first = dplyr::n_distinct(GLT[type == "from_elsewhere"]),
+                   n_first_seen = dplyr::n_distinct(GLT[type == "first_seen"]),
                    n_unidentified = sum(type == "unidentified"),
                    .groups = "drop")
 
@@ -349,7 +351,7 @@ group_origin %>% dplyr::count(ummp_monitored_before, has_emigrants, sizes_match)
 
 #### Events ----
 events = stays %>%
-  dplyr::group_by(Tattoo) %>%
+  dplyr::group_by(GLT) %>%
   dplyr::mutate(
     # Is the next stay a satellite stay?
     sat_next = dplyr::lead(stay_type) %in% "satellite",
@@ -377,7 +379,7 @@ events = stays %>%
   # i.e., this removes the satellite periods
   dplyr::filter(stay_type == "group" | (stay_type == "satellite" & stay == 1 & !is.na(to_Group))) %>%
   # Add the monitoring effort after the last sighting in the group
-  dplyr::left_join(follow, by = c("Tattoo", "stay")) %>%
+  dplyr::left_join(follow, by = c("GLT", "stay")) %>%
   # Joining group origin (new vs old groups)
   dplyr::left_join(dplyr::select(group_origin, to_Group = Group, group_first_date, group_founded),
                    by = "to_Group", relationship = "many-to-one") %>%
@@ -409,7 +411,7 @@ events = stays %>%
     # Age when first seen in the destination group
     age_at_arrival_months = as.numeric(to_first_date - BirthOK) / 30.41667
   ) %>%
-  dplyr::select(Tattoo, GLT, SexOK, BirthOK, death_date, 
+  dplyr::select(GLT, Tattoo, SexOK, BirthOK, death_date, 
                 event, stay,
                 from_Group = Group,   # NA when the origin is a satellite stay (no former group)
                 from_Region = Region,
@@ -421,7 +423,7 @@ events = stays %>%
                 n_followups, days_followed,
                 age_at_departure_months, age_at_arrival_months,
                 group_founded) %>%
-  dplyr::arrange(Tattoo, from_last_date)
+  dplyr::arrange(GLT, from_last_date)
 
 
 #### Immigrants -----
@@ -459,7 +461,7 @@ natal = data.clean.final %>%
   dplyr::filter(!is.na(Tattoo), 
                 !GLT %in% bad) %>%
   dplyr::mutate(DateObs = as.Date(DateObs)) %>%
-  dplyr::group_by(Tattoo) %>%
+  dplyr::group_by(GLT) %>%
   dplyr::arrange(DateObs, ObsOrder, .by_group = TRUE) %>%
   dplyr::summarise(natal_group = dplyr::if_else(dplyr::first(IdadeOK) %in% c("IN", "JU"),
                                                 dplyr::first(Group), NA_character_),
@@ -467,20 +469,18 @@ natal = data.clean.final %>%
 
 # Append the stays table to indicate whether the GLT is in a natal patch or not
 stays2 = stays %>%
-  dplyr::left_join(natal, by = "Tattoo") %>%
+  dplyr::left_join(natal, by = "GLT") %>%
   dplyr::left_join(dplyr::select(group_origin, Group, group_first_date, group_founded), by = "Group") %>%
   dplyr::mutate(
     status_in_grp = dplyr::case_when(
       stay_type == "satellite" ~ "satellite",
-      # In the natal group (also when coming back to it as an adult)
-      Group %in% natal_group ~ "natal",
-      # Present on the first date of a group that was founded = founder
-      # (emigrants, floaters and newly observed individuals alike)
+      # natal group known and equal to the current group (also when coming back to it)
+      !is.na(natal_group) & Group == natal_group ~ "natal",
+      # present on the first date of a founded group
       group_founded %in% TRUE & start == group_first_date ~ "founder",
-      # Natal group known and different from the current group
+      # natal group known and different from the current group
       !is.na(natal_group) ~ "immigrant",
-      TRUE ~ "unknown"
-    )
+      TRUE ~ "unknown")
   )
 
 dplyr::count(stays2, status_in_grp)
@@ -521,9 +521,7 @@ flux_events = dplyr::full_join(
 # Start from ALL monitoring dates, then attach the events; no event on a monitored date = 0
 group_flux = grp_dates %>%
   dplyr::full_join(flux_events, by = c("Group", "UMMPs", "DateObs")) %>%
-  dplyr::mutate(monitored = !is.na(Group) & paste(Group, UMMPs, DateObs) %in%
-                  paste(grp_dates$Group, grp_dates$UMMPs, grp_dates$DateObs),
-              # 0 when nothing is observed
+  dplyr::mutate(# 0 when nothing is observed
                 dplyr::across(dplyr::starts_with("n_"), ~ tidyr::replace_na(.x, 0L)))
 
 
@@ -533,7 +531,7 @@ stage_lookup = data.clean.final %>%
   dplyr::ungroup() %>%
   dplyr::filter(!is.na(IdadeOK)) %>%
   dplyr::mutate(DateObs = as.Date(DateObs)) %>%
-  dplyr::group_by(Tattoo, DateObs) %>%
+  dplyr::group_by(GLT, DateObs) %>%
   dplyr::summarise(IdadeOK = dplyr::first(IdadeOK), .groups = "drop")
 
 # Immigrations: the event date is the FIRST sighting in the new group
@@ -543,7 +541,7 @@ data.disp = immigrants %>%
                 Year = lubridate::year(to_first_date)) %>%
   dplyr::rename(FromGroup = from_Group, ToGroup = to_Group,
                 FromUMMP = from_UMMPs, ToUMMP = to_UMMPs) %>%
-  dplyr::left_join(stage_lookup, by = c("Tattoo", "DateObs"))
+  dplyr::left_join(stage_lookup, by = c("GLT", "DateObs"))
 
 # ALL successful dispersal (immigration + group formation), used for the lines
 data.disp.all = dispersal %>%
@@ -552,7 +550,7 @@ data.disp.all = dispersal %>%
                 Year = lubridate::year(to_first_date)) %>%
   dplyr::rename(FromGroup = from_Group, ToGroup = to_Group,
                 FromUMMP = from_UMMPs, ToUMMP = to_UMMPs) %>%
-  dplyr::left_join(stage_lookup, by = c("Tattoo", "DateObs"))
+  dplyr::left_join(stage_lookup, by = c("GLT", "DateObs"))
 
 # Emigrations: the event date is the LAST sighting in the group left
 # (for "disappeared", the true departure is somewhere after that date)
@@ -560,7 +558,7 @@ emigr = emigrants %>%
   dplyr::mutate(DateObs = from_last_date,
                 Year = lubridate::year(from_last_date)) %>%
   dplyr::rename(UMMPs = from_UMMPs, Group = from_Group) %>%
-  dplyr::left_join(stage_lookup, by = c("Tattoo", "DateObs"))
+  dplyr::left_join(stage_lookup, by = c("GLT", "DateObs"))
 
 # Checks
 # Origin known or not (NA = satellite-first), route, and returns to the same group
@@ -569,7 +567,7 @@ dplyr::count(data.disp, from_known = !is.na(FromGroup), via_satellite, same_grou
 #### Summary statistics (immigrations) -----
 ##### 1. Number of distinct GLTs -----
 data.disp %>%
-  dplyr::distinct(Tattoo) %>%
+  dplyr::distinct(GLT) %>%
   nrow()
 
 ##### 2. Monthly observations ----
@@ -1029,8 +1027,10 @@ table(disp.final$intra_patch)
 # Join GLT information
 disp.final.glt = disp.final %>%
   dplyr::left_join(data.disp.filter.grp %>%
-                     dplyr::select(disp_id, dispersal_type, Year, DateObs, Tattoo, SexOK, IdadeOK,
-                                   FromGroup, ToGroup, via_satellite, age_at_arrival_months),
+                     dplyr::select(disp_id, dispersal_type, Year, DateObs, 
+                                   GLT, SexOK, IdadeOK,
+                                   FromGroup, ToGroup, 
+                                   via_satellite, age_at_arrival_months),
                    by = "disp_id")
 
 # Statistics
@@ -1054,7 +1054,7 @@ plot(sf::st_geometry(lines_plot),
 #### Summary statistics (emigrations) -----
 ##### 1. Number of distinct GLTs -----
 emigr %>%
-  dplyr::distinct(Tattoo) %>%
+  dplyr::distinct(GLT) %>%
   nrow()
 
 ##### 1b. By fate -----

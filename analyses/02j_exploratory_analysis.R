@@ -35,7 +35,7 @@ plot_correlation(data, cor_args = list("use" = "pairwise.complete.obs"), type="d
 plot_correlation(data, cor_args = list("use" = "pairwise.complete.obs"), type="c") 
 # PCA
 plot_prcomp(na.omit(data), nrow = 2L, ncol = 2L) 
-# Relationship between quantiative and one qualitative variable
+# Relationship between quantitative and one qualitative variable
 plot_boxplot(data, by="UMMPs") 
 # Relationship between qualitative and one quantitative variable
 plot_scatterplot(split_columns(data)$continuous, by = "n_repro_females") 

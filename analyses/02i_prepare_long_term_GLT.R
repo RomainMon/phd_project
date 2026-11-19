@@ -36,6 +36,17 @@ status = xlsx::read.xlsx(
   here::here("data", "glt", "ACoelho", "data_clean", "duasfemeas_andressa_V2.xls"),
   sheetName = "Sheet1"
 )
+# Reference dates for checking the group composition of each group
+# This was done manually by seeing which dates correspond to the approximated mating dates in each group
+# Mating dates = birth dates - gestation length (~132 days)
+ref_tbl = readr::read_delim(here::here("data", "glt", "ACoelho", "data_clean", "ref_dates.csv"),
+                          delim = ";",
+                          col_types = readr::cols(.default = "c")) %>%
+  dplyr::transmute(Group, 
+                   Season,
+                   ref_date_list = lubridate::mdy(ref_date),   # only used for the check below
+                   ref_compo   = as.Date(lubridate::parse_date_time(ref_compo,   c("dmy", "ymd"))),
+                   ref_jaccard = as.Date(lubridate::parse_date_time(ref_jaccard, c("dmy", "ymd"))))
 
 #### Dispersal events -----
 stays = group_flux = xlsx::read.xlsx(
@@ -600,8 +611,9 @@ demo_patch %>%
 # YEARLY VARIABLES OF REPROD (patch quality, supplementation, Andressa's counts) are taken from the
 # reprod row Year = Season_start (otherwise Year = Season_start + 1) and are YEARLY values
 #
-# LONG-TERM DATA are matched to the mating reference date. 
-# The same date window is used for group composition, patch population, group flux, and floater overlap.
+# LONG-TERM DATA are matched to a mating reference date (birth - gestation length)
+# A table with reference dates for each group and season was created manually and is imported to assess group composition, immigration and emigration
+# Patch population and floater density are assessed in a temporal window around the mating reference date
 
 
 #### Parameters ------
@@ -1320,7 +1332,7 @@ repro_events = repro_events %>%
   # Remove one problematic ro
   dplyr::filter(!(Year == 1999 & Group %in% "AP" & GLT %in% "ST6"))
 
-##### FEMALE STATUS ----
+##### FEMALE STATUS IN THE GROUP ----
 # Join the female status in the group
 stays_grp = stays %>%
   dplyr::filter(stay_type == "group") %>%
@@ -1344,7 +1356,28 @@ repro_events = repro_events %>%
   dplyr::select(-ev_id)
 
 ### CORRECT THE STATUS IN GRP
-# ...
+repro_events = repro_events %>% 
+  dplyr::mutate(
+    status_in_grp = dplyr::case_when(
+      GLT == "JG3" & Group == "AX2" ~ "founder",
+      GLT == "MA9" & Group == "RV"  ~ "unknown",
+      GLT == "PT4" & Group == "AT" ~ "immigrant",
+      is.na(status_in_grp)  ~ "unknown",
+      TRUE ~ status_in_grp))
+
+
+##### BIRTH DATE AND AGE AT MATING OF THE FEMALES -----
+# Birth date of each individual
+glt_birth = data.clean.final %>%
+  dplyr::ungroup() %>%
+  dplyr::mutate(GLT = stringr::str_squish(GLT), BirthOK = as.Date(BirthOK)) %>%
+  dplyr::filter(!is.na(GLT), !GLT %in% bad, !is.na(BirthOK)) %>%
+  dplyr::group_by(GLT) %>%
+  dplyr::summarise(female_birth_date = min(BirthOK), .groups = "drop")
+
+repro_events = repro_events %>%
+  dplyr::left_join(glt_birth, by = "GLT", relationship = "many-to-one") %>%
+  dplyr::mutate(age_mating_months = round(as.numeric(repro_date - female_birth_date) / 30.4375, 1))
 
 ##### COMPLETE STATUS -----
 max_status_gap = 5 # a status is borrowed from another row of the same female only within N years
@@ -1494,6 +1527,7 @@ events_gs = repro_events %>%
     n_status_unknown = dplyr::n_distinct(GLT[is.na(Status)]),
     n_repro_natal = dplyr::n_distinct(GLT[status_in_grp %in% "natal"]),
     status_in_grp = dplyr::na_if(paste(sort(unique(stats::na.omit(status_in_grp))), collapse = "/"), ""),
+    mean_age_repro_females = if (all(is.na(age_mating_months))) NA_real_ else round(mean(age_mating_months, na.rm = TRUE), 1),
     
     # Litter size
     dplyr::across(dplyr::all_of(litter_vars), ~ if (all(is.na(.x))) NA_real_ else sum(.x, na.rm = TRUE)),
@@ -1561,54 +1595,204 @@ gs = dplyr::bind_rows(events_gs, zero_gs) %>%
                   first_birth, repro_date_first,
                   ref_date, window_start, window_end, Year_ref)
 
+# JOIN REFERENCE DATES FOR MEASURING GROUP COMPOSITION
+gs = gs %>% 
+  dplyr::left_join(ref_tbl, by = c("Group", "Season"), relationship = "many-to-one")
+
+# Checks
+dplyr::filter(gs, is.na(ref_compo)) %>% dplyr::select(Group, Season)   # rows without a reference date
+# mating date differs from the list
+gs %>% dplyr::filter(!is.na(ref_date_list), ref_date_list != as.Date(ref_date)) %>%
+  dplyr::select(Group, Season, ref_date, ref_date_list)   
+
+# REMOVE NAs
+gs = gs %>% 
+  dplyr::filter(!is.na(ref_compo))
+
 # Common reference windows used to match observational datasets of different temporal resolutions. 
 # Each row_id represents one group x reproductive season.
 win = gs %>% dplyr::select(row_id, Group, UMMPs, ref_date, window_start, window_end)
 
-#### 2. Group composition: nearest group observation to mating date ------
-# First calculate group composition at each observed Group x DateObs.
-# We select ONE date per reproductive-season row: the date closest to ref_date, within +/- 3 months.
-group_date = obs %>%
-  dplyr::mutate(
-    immature = IdadeOK %in% c("IN", "JU"),
-    unidentified = GLT %in% bad
-  ) %>%
-  dplyr::group_by(Group, DateObs) %>%
-  dplyr::summarise(
-    n_immatures = dplyr::n_distinct(GLT[immature & !unidentified], na.rm = TRUE) +
-      sum(immature & unidentified, na.rm = TRUE),
-    n_adults = dplyr::n_distinct(GLT[!immature & !unidentified], na.rm = TRUE) +
-      sum(!immature & unidentified, na.rm = TRUE),
-    n_males = dplyr::n_distinct(GLT[!immature & !unidentified & SexOK %in% "M"], na.rm = TRUE),
-    n_females = dplyr::n_distinct(GLT[!immature & !unidentified & SexOK %in% "F"], na.rm = TRUE),
-    .groups = "drop"
-  ) %>%
-  dplyr::mutate(
-    GS_total = n_adults + n_immatures,
-    sex_ratio = dplyr::if_else(n_females > 0, n_males / n_females, NA_real_)
-  )
+#### 2. Group composition at the reference dates ------
+# For each group x season, the composition is the one recorded on ref_compo (see ref_tbl).
+# The reproductive females (? excluded) are added to the adults if they were not recorded that day.
+# For the Jaccard index: we compare the adults at t with the “reference set” at t-1, which is the adults at t-1 plus the immatures at t-1 who are adults at t
+# Immigrants and emigrants follow the same logic. An immigrant is an adult at t who was absent at t-1, as adult or immature. An emigrant is an adult at t-1 who is absent at t.
 
-# Find candidate dates in the window, then keep the closest one per row_id.
-# Ties are resolved in favour of the earlier observation date for reproducibility.
-compo_gs = group_date %>%
-  # Join all observations located within the temporal window authorized
-  dplyr::inner_join(
-    dplyr::select(win, row_id, Group, ref_date, window_start, window_end),
-    by = dplyr::join_by(Group, dplyr::between(DateObs, window_start, window_end)),
-    relationship = "many-to-many"
-  ) %>% 
-  # Compute the difference between the mating date and the observation date
-  dplyr::mutate(diff_days = abs(as.integer(DateObs - ref_date))) %>%
-  dplyr::arrange(row_id, diff_days, DateObs) %>%
+# Sex of each identified individual
+sex_tbl = obs %>%
+  dplyr::filter(!is.na(GLT), !GLT %in% bad) %>%
+  dplyr::group_by(GLT) %>%
+  dplyr::summarise(Sex = mode_ok(SexOK), .groups = "drop")
+
+# 2a. Observation dates of each group
+obs_dates = obs %>% dplyr::distinct(Group, DateObs) %>% dplyr::mutate(found = TRUE)
+
+# Identified individuals present on each date (one row = group x date x individual)
+ids_date = obs %>%
+  dplyr::mutate(immature = IdadeOK %in% c("IN", "JU"),
+                unidentified = is.na(GLT) | GLT %in% bad | is.na(Tattoo),
+                dead = Death %in% "1") %>%
+  dplyr::filter(!unidentified, !dead) %>%
+  dplyr::group_by(Group, DateObs, GLT) %>%
+  dplyr::summarise(stage = dplyr::if_else(any(!immature), "adult", "immature"), .groups = "drop")
+
+# Unidentified individuals: counted in the group size, but cannot be tracked throughout time
+unid_date = obs %>%
+  dplyr::mutate(immature = IdadeOK %in% c("IN", "JU"),
+                unidentified = is.na(GLT) | GLT %in% bad | is.na(Tattoo),
+                dead = Death %in% "1") %>%
+  dplyr::group_by(Group, DateObs) %>%
+  dplyr::summarise(n_adults_unid = sum(!immature & unidentified & !dead),
+                   n_immatures_unid = sum(immature & unidentified & !dead),
+                   .groups = "drop")
+
+# 2b. Reference dates of each row, with the previous row of the group
+rowmap = gs %>%
+  dplyr::select(row_id, Group, Season, Season_start, season_type, ref_compo, ref_jaccard) %>%
+  # Join the observation dates (for t)
+  dplyr::left_join(dplyr::rename(obs_dates, compo_found = found),
+                   by = c("Group", "ref_compo" = "DateObs"), relationship = "many-to-one") %>%
+  # Join the observation dates (for t-1, i.e., jaccard)
+  dplyr::left_join(dplyr::rename(obs_dates, jaccard_found = found),
+                   by = c("Group", "ref_jaccard" = "DateObs"), relationship = "many-to-one") %>%
+  dplyr::mutate(compo_found = dplyr::coalesce(compo_found, FALSE)) %>% 
+  dplyr::arrange(Group, Season_start, season_type) %>%   # dry season (Apr-Jun) comes before wet
+  dplyr::group_by(Group) %>%
+  dplyr::mutate(prev_row_id = dplyr::lag(row_id),
+                prev_row_found = dplyr::lag(compo_found)) %>% 
+  dplyr::ungroup() %>%
+  dplyr::mutate(
+    # t-1 = date given in ref_jaccard if any, otherwise the snapshot of the previous row
+    prev_source = dplyr::if_else(!is.na(ref_jaccard), "ref_jaccard", "previous row"),
+    prev_found = dplyr::if_else(!is.na(ref_jaccard),
+                                dplyr::coalesce(jaccard_found, FALSE),
+                                dplyr::coalesce(prev_row_found, FALSE)),
+    both_found = compo_found & prev_found)
+
+# 2c. Snapshot at t: identified individuals present + reproductive females (as adults)
+repro_add = repro_events %>%
+  # Remove bad individuals
+  dplyr::filter(!is.na(GLT), 
+                !GLT %in% bad) %>%
+  dplyr::distinct(Group, Season, GLT) %>%
+  # Join by the ref. date for COMPOSITION
+  dplyr::inner_join(dplyr::select(rowmap, row_id, Group, Season, compo_found),
+                    by = c("Group", "Season"), relationship = "many-to-one") %>%
+  dplyr::filter(compo_found) %>%
+  dplyr::transmute(row_id, GLT, stage = "adult")
+
+# Group members at t
+now_members = rowmap %>%
+  dplyr::filter(compo_found) %>%
+  dplyr::select(row_id, Group, ref_compo) %>%
+  # Corresspondence between date of obs and reference date
+  dplyr::inner_join(ids_date, by = c("Group", "ref_compo" = "DateObs"), relationship = "one-to-many") %>%
+  dplyr::select(row_id, GLT, stage) %>%
+  # Add reproductive females
+  dplyr::bind_rows(repro_add) %>%
+  dplyr::group_by(row_id, GLT) %>%
+  dplyr::summarise(stage = dplyr::if_else(any(stage == "adult"), "adult", "immature"), .groups = "drop")
+
+# 2d. Snapshot at t-1 (attached to the row at t)
+prev_exc = rowmap %>%  # exceptions: date of ref_jaccard
+  dplyr::filter(!is.na(ref_jaccard), jaccard_found %in% TRUE) %>%
+  dplyr::select(row_id, Group, ref_jaccard) %>%
+  dplyr::inner_join(ids_date, by = c("Group", "ref_jaccard" = "DateObs"), relationship = "one-to-many") %>%
+  dplyr::select(row_id, GLT, stage_prev = stage)
+
+prev_row = rowmap %>% # general case: snapshot of the previous row
+  dplyr::filter(is.na(ref_jaccard), !is.na(prev_row_id)) %>%
+  dplyr::select(row_id, prev_row_id) %>%
+  dplyr::inner_join(now_members, by = c("prev_row_id" = "row_id"), relationship = "one-to-many") %>%
+  dplyr::select(row_id, GLT, stage_prev = stage)
+
+prev_members = dplyr::bind_rows(prev_exc, prev_row)
+
+# 2e. Compare t-1 and t, individual by individual
+pair = now_members %>%
+  dplyr::rename(stage_now = stage) %>%
+  dplyr::full_join(prev_members, by = c("row_id", "GLT")) %>%
+  dplyr::left_join(sex_tbl, by = "GLT", relationship = "many-to-one") %>%
+  dplyr::mutate(
+    is_adult_now = stage_now %in% "adult",
+    # reference set at t-1 = adults at t-1 + immatures at t-1 that are adults at t
+    in_ref_prev = stage_prev %in% "adult" | (stage_prev %in% "immature" & is_adult_now),
+    # immigrant = adult at t, absent at t-1 (neither adult nor immature)
+    is_immigrant = is_adult_now & is.na(stage_prev),
+    # emigrant = adult at t-1, absent at t (neither adult nor immature)
+    is_emigrant = stage_prev %in% "adult" & is.na(stage_now))
+
+# Change between both dates
+change = pair %>%
   dplyr::group_by(row_id) %>%
-  # Select the earlier observation
-  dplyr::slice_head(n = 1) %>%
-  dplyr::ungroup() %>% 
-  dplyr::rename(
-    compo_obs_date = DateObs,
-    compo_diff_days = diff_days
-  ) %>% 
-  dplyr::select(-c(Group, ref_date, window_start, window_end))
+  dplyr::summarise(
+    n_shared = sum(is_adult_now & in_ref_prev),
+    n_union = sum(is_adult_now | in_ref_prev),
+    n_immigrants = sum(is_immigrant),
+    n_immigrants_F = sum(is_immigrant & Sex %in% "F"),
+    n_immigrants_M = sum(is_immigrant & Sex %in% "M"),
+    n_emigrants = sum(is_emigrant),
+    n_emigrants_F = sum(is_emigrant & Sex %in% "F"),
+    n_emigrants_M = sum(is_emigrant & Sex %in% "M"),
+    immigrants_ids = paste(sort(GLT[is_immigrant]), collapse = ", "),
+    emigrants_ids = paste(sort(GLT[is_emigrant]), collapse = ", "),
+    .groups = "drop")
+
+# 2f. Composition at t
+comp_n = now_members %>%
+  dplyr::left_join(sex_tbl, by = "GLT", relationship = "many-to-one") %>%
+  dplyr::group_by(row_id) %>%
+  dplyr::summarise(
+    n_adults_id = sum(stage == "adult"),
+    n_immatures_id = sum(stage == "immature"),
+    n_males = sum(stage == "adult" & Sex %in% "M"),
+    n_females = sum(stage == "adult" & Sex %in% "F"),
+    adults_present = paste(sort(GLT[stage == "adult"]), collapse = ", "),
+    immatures_present = paste(sort(GLT[stage == "immature"]), collapse = ", "),
+    .groups = "drop")
+
+# 2g. Final composition table (one row per row_id of gs)
+compo_gs = rowmap %>%
+  dplyr::left_join(comp_n, by = "row_id", relationship = "one-to-one") %>%
+  dplyr::left_join(unid_date, by = c("Group", "ref_compo" = "DateObs"), relationship = "many-to-one") %>%
+  dplyr::left_join(change, by = "row_id", relationship = "one-to-one") %>%
+  dplyr::mutate(
+    # Composition: NA if the group was not observed on ref_compo, 0 if observed with nobody
+    dplyr::across(c(n_adults_id, n_immatures_id, n_males, n_females, n_adults_unid, n_immatures_unid),
+                  ~ dplyr::if_else(compo_found, dplyr::coalesce(.x, 0L), NA_integer_)),
+    # Changes: NA if one of the two snapshots is missing
+    dplyr::across(c(n_shared, n_union, n_immigrants, n_immigrants_F, n_immigrants_M,
+                    n_emigrants, n_emigrants_F, n_emigrants_M),
+                  ~ dplyr::if_else(both_found, dplyr::coalesce(.x, 0L), NA_integer_)),
+    dplyr::across(c(adults_present, immatures_present),
+                  ~ dplyr::if_else(compo_found, dplyr::na_if(dplyr::coalesce(.x, ""), ""), NA_character_)),
+    dplyr::across(c(immigrants_ids, emigrants_ids),
+                  ~ dplyr::if_else(both_found, dplyr::na_if(dplyr::coalesce(.x, ""), ""), NA_character_)),
+    n_adults = n_adults_id + n_adults_unid,
+    n_immatures = n_immatures_id + n_immatures_unid,
+    GS_total = n_adults + n_immatures,
+    sex_ratio = dplyr::if_else(n_females > 0, round(n_males / n_females, 2), NA_real_),
+    # Jaccard on adults: adults at t vs (adults at t-1 + immatures at t-1 who became adults)
+    adult_jaccard = dplyr::if_else(n_union > 0, round(n_shared / n_union, 2), NA_real_),
+    adult_turnover = 1 - adult_jaccard) %>%
+  dplyr::select(row_id, compo_date = ref_compo, compo_found, prev_source,
+                GS_total, n_adults, n_immatures, n_males, n_females, sex_ratio,
+                adult_jaccard, adult_turnover,
+                n_immigrants, n_immigrants_F, n_immigrants_M,
+                n_emigrants, n_emigrants_F, n_emigrants_M,
+                adults_present, immatures_present, immigrants_ids, emigrants_ids)
+
+# Checks
+dplyr::count(compo_gs, compo_found) # FALSE = no observation of the group on ref_compo
+dplyr::count(compo_gs, prev_source)
+# Example EM, ref_compo 2001-09-01 (expected: 4 shared, 9 in the union, jaccard 0.44)
+ex = gs %>% dplyr::filter(Group == "EM") %>% dplyr::select(row_id, Season) %>%
+  dplyr::inner_join(compo_gs, by = "row_id") %>%
+  dplyr::select(Season, compo_date, adults_present, adult_jaccard, adult_turnover, immigrants_ids, emigrants_ids)
+
+# Remove not useful columns
+compo_gs = compo_gs %>% dplyr::select(-c(compo_found, prev_source))
 
 #### 3. Patch population: nearest patch observation to mating date ------
 # The population is counted from the long-term dataset
@@ -1688,19 +1872,7 @@ patch_gs = pop_now %>%
   ) %>%
   dplyr::select(-n_glt_prev)
 
-#### 4. Immigrants and emigrants (group flux) within the window ------
-# Here we count the total number of immigrants/emigrants in the window
-flux_gs = group_flux %>%
-  dplyr::mutate(DateObs = as.Date(DateObs)) %>%
-  # Observations comprised in the temporal window
-  dplyr::inner_join(dplyr::select(win, row_id, Group, window_start, window_end),
-                    by = dplyr::join_by(Group, dplyr::between(DateObs, window_start, window_end)),
-                    relationship = "many-to-many") %>%
-  dplyr::group_by(row_id) %>%
-  # Sum immigrants and emigrants
-  dplyr::summarise(dplyr::across(dplyr::starts_with("n_"), ~ sum(.x, na.rm = TRUE)), .groups = "drop")
-
-#### 5. Floaters: satellites present during the window ------
+#### 4. Floaters: satellites present during the window ------
 # We count distinct satellite individuals whose stay overlaps any part of the reference window.
 floaters = stays %>%
   # Keep satellites
@@ -1726,15 +1898,13 @@ floaters_gs = win_patch %>%
                    n_floaters_unknown = dplyr::n_distinct(sat_GLT[is.na(sat_SexOK)]),
                    .groups = "drop")
 
-#### 6. Join all derived datasets and calculate patch densities ------
+#### 5. Join all derived datasets and calculate patch densities ------
 # Most joins below are based on row_id (one row per group-season)
 gs = gs %>%
   # GROUP COMPOSITION
   dplyr::left_join(compo_gs, by = "row_id", relationship = "one-to-one") %>%
   # PATCH POP SIZE
   dplyr::left_join(patch_gs, by = "row_id", relationship = "one-to-one") %>%
-  # GROUP FLUX
-  dplyr::left_join(flux_gs, by = "row_id", relationship = "one-to-one") %>%
   # FLOATERS
   dplyr::left_join(floaters_gs, by = "row_id", relationship = "one-to-one") %>%
   
@@ -1752,7 +1922,7 @@ gs = gs %>%
     dens_floaters_F = round(n_floaters_F / area_km2, 2),
     dens_floaters_M = round(n_floaters_M / area_km2, 2))
 
-#### 7. Assemble and order the final analytical table ------
+#### 6. Assemble and order the final analytical table ------
 repro_final = gs %>%
   dplyr::mutate(mating_date = ref_date) %>%
   dplyr::select(
@@ -1763,10 +1933,12 @@ repro_final = gs %>%
                     "litter_prop_males", "litter_surv_1y", "first_birth", "id_infants")),
     dplyr::any_of(c("n_repro_females", "id_repro_females", "n_dom", "n_sub", "n_status_unknown")),
     dplyr::any_of(c("n_repro_natal", "status_in_grp")),
-    # group composition and distance (days) between the observation and mating
-    dplyr::any_of(c("GS_total", "n_immatures", "n_adults", "n_males", "n_females", "sex_ratio")),
-    # dispersal and floaters
-    dplyr::starts_with("n_immigrants"), dplyr::starts_with("n_emigrants"), dplyr::starts_with("n_founders"),
+    # composition, immigrants, emigrants, floaters
+    dplyr::any_of(c("compo_date",
+                    "GS_total", "n_adults", "n_immatures", "n_males", "n_females", "sex_ratio",
+                    "adult_jaccard", "adult_turnover")),
+    dplyr::starts_with("n_immigrants"), dplyr::starts_with("n_emigrants"),
+    dplyr::any_of(c("adults_present", "immatures_present", "immigrants_ids", "emigrants_ids")),
     dplyr::starts_with("n_floaters"), dplyr::starts_with("dens_floaters"),
     # patch
     dplyr::any_of(c("area_km2", "shape", "enn_m", "dPC", "IQH", "IQHS", 
@@ -1776,6 +1948,20 @@ repro_final = gs %>%
     dplyr::any_of(c("n_days_supp_food", "n_months_supp_food", "mean_days.month_supp", "mean_days.year_supp"))) %>%
   dplyr::arrange(Group, Season_start, season_type)
 
+
+#### 7. Export ------
+# Female-level: one row = one reproductive event of a female
+repro_females_export = repro_events %>%
+  dplyr::select(Group, Season, season_type, Season_start, Year, GLT, Status, status_in_grp,
+                female_birth_date, age_mating_months, birth_date, repro_date,
+                dplyr::all_of(litter_vars), id_infants, season_assumed) %>%
+  dplyr::arrange(Group, Season_start, season_type, GLT)
+
+# Group-level: one row = one group x season (including seasons without reproduction)
+repro_groups_export = repro_final
+
+readr::write_csv(repro_females_export, here::here("outputs", "data", "glt", "repro_females.csv"))
+readr::write_csv(repro_groups_export,  here::here("outputs", "data", "glt", "repro_groups.csv"))
 
 ### Patches ------ 
 #### Biplot area ~ connectivity across time -------
