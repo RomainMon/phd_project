@@ -1375,9 +1375,70 @@ glt_birth = data.clean.final %>%
   dplyr::group_by(GLT) %>%
   dplyr::summarise(female_birth_date = min(BirthOK), .groups = "drop")
 
+# Age at birth recorded in 'status' (age of the female at the litter's birth date)
+status_age = status %>%
+  dplyr::transmute(Group,
+                   GLT = stringr::str_squish(GLT),
+                   birth_date = as.Date(Date),
+                   age_birth_status = as.numeric(Age_months)) %>%
+  dplyr::filter(!GLT %in% bad, !is.na(age_birth_status)) %>%
+  dplyr::group_by(Group, GLT, birth_date) %>%
+  dplyr::summarise(age_birth_status = mean(age_birth_status), .groups = "drop")
+
 repro_events = repro_events %>%
   dplyr::left_join(glt_birth, by = "GLT", relationship = "many-to-one") %>%
-  dplyr::mutate(age_mating_months = round(as.numeric(repro_date - female_birth_date) / 30.4375, 1))
+  dplyr::left_join(status_age, by = c("Group", "GLT", "birth_date"), relationship = "many-to-one") %>%
+  dplyr::mutate(
+    # age at mating from the BirthOK of the long-term data
+    age_mating_months = round(as.numeric(repro_date - female_birth_date) / 30.4, 1),
+    # age at mating from status = age at birth - gestation
+    age_mating_status = round(age_birth_status - gestation_days / 30.4, 1),
+    # difference between both estimates (positive = status gives an older female)
+    age_diff = age_mating_status - age_mating_months)
+
+# Comparison of the two estimates (events with both ages)
+age_cmp = repro_events %>%
+  dplyr::filter(!is.na(age_mating_months), !is.na(age_mating_status))
+cor(age_cmp$age_mating_months, age_cmp$age_mating_status)  # Pearson
+# Visual check (the line is y = x)
+ggplot2::ggplot(age_cmp, ggplot2::aes(age_mating_months, age_mating_status)) +
+  ggplot2::geom_abline(slope = 1, intercept = 0, linetype = 2) +
+  ggplot2::geom_point(alpha = 0.6)
+
+# COALESCE
+# long-term data (BirthOK) first, then status (age at birth - gestation)
+repro_events = repro_events %>%
+  dplyr::mutate(age_mating_months = dplyr::coalesce(age_mating_months, age_mating_status))
+
+# Birth date for females with a known age at mating but no BirthOK
+# birth = mating date - age at mating (estimated once per female, median over her events)
+birth_fill = repro_events %>%
+  dplyr::filter(!GLT %in% bad, 
+                is.na(female_birth_date),
+                !is.na(age_mating_months), 
+                !is.na(repro_date)) %>%
+  dplyr::mutate(birth_est = as.numeric(repro_date) - age_mating_months * 30.4) %>%
+  dplyr::group_by(GLT) %>%
+  dplyr::summarise(n_est = dplyr::n(),
+                   spread_days = round(max(birth_est) - min(birth_est)),
+                   birth_est = as.Date(round(median(birth_est)), origin = "1970-01-01"),
+                   .groups = "drop")
+
+# Join the estimated births and recompute
+repro_events = repro_events %>%
+  dplyr::left_join(dplyr::select(birth_fill, GLT, birth_est), 
+                   by = "GLT", relationship = "many-to-one") %>%
+  dplyr::mutate(
+    female_birth_date = dplyr::coalesce(female_birth_date, birth_est),
+    # Age at mating for the other events of these females (still NA)
+    age_mating_months = dplyr::coalesce(
+      age_mating_months,
+      round(as.numeric(repro_date - female_birth_date) / 30.4, 1))) %>%
+  # Remove the intermediate columns: only the birth date and the age at mating remain
+  dplyr::select(-c(birth_est, age_birth_status, age_mating_status, age_diff))
+
+# Checks
+sum(is.na(repro_events$age_mating_months[!repro_events$GLT %in% bad])) # identified females still without age
 
 ##### COMPLETE STATUS -----
 max_status_gap = 5 # a status is borrowed from another row of the same female only within N years
@@ -1527,15 +1588,26 @@ events_gs = repro_events %>%
     n_status_unknown = dplyr::n_distinct(GLT[is.na(Status)]),
     n_repro_natal = dplyr::n_distinct(GLT[status_in_grp %in% "natal"]),
     status_in_grp = dplyr::na_if(paste(sort(unique(stats::na.omit(status_in_grp))), collapse = "/"), ""),
-    mean_age_repro_females = if (all(is.na(age_mating_months))) NA_real_ else round(mean(age_mating_months, na.rm = TRUE), 1),
     
+    # Dominant: the ALF female(s); if there is no ALF and ONE female with unknown status, she is considered the dominant
+    dom_assumed = n_dom == 0 & n_status_unknown == 1,
+    age_mating_dom = {
+      a = if (dom_assumed) age_mating_months[is.na(Status)] else age_mating_months[Status %in% "ALF"]
+      if (all(is.na(a))) NA_real_ else round(mean(a, na.rm = TRUE), 1)},
+    age_mating_sub = {
+      a = age_mating_months[!is.na(Status) & Status != "ALF"]
+      if (all(is.na(a))) NA_real_ else round(mean(a, na.rm = TRUE), 1)},
+    # Age difference between the subordinate and the dominant at mating (positive = subordinate is older)
+    age_diff_sub_dom = round(abs(age_mating_sub - age_mating_dom), 1),
+      
     # Litter size
     dplyr::across(dplyr::all_of(litter_vars), ~ if (all(is.na(.x))) NA_real_ else sum(.x, na.rm = TRUE)),
     id_infants = dplyr::na_if(paste(stats::na.omit(id_infants), collapse = ", "), ""),
     first_birth = min_date(birth_date),
     repro_date_first = min_date(repro_date), # earliest mating of the season
     season_assumed = all(season_assumed),
-    .groups = "drop")
+    .groups = "drop") %>% 
+  dplyr::select(-dom_assumed)
 
 ##### 1b. Add group-years with no reproduction ------
 # In 'reprod', years without reproductive events are also recorded -> we join them back
@@ -1931,7 +2003,8 @@ repro_final = gs %>%
     # reproduction
     dplyr::any_of(c("n_infants", "n_in_males", "n_in_females", "n_in_sex_unknown", "n_infants_surv_1y",
                     "litter_prop_males", "litter_surv_1y", "first_birth", "id_infants")),
-    dplyr::any_of(c("n_repro_females", "id_repro_females", "n_dom", "n_sub", "n_status_unknown")),
+    dplyr::any_of(c("n_repro_females", "id_repro_females", "n_dom", "n_sub", "n_status_unknown",
+                    "age_mating_dom", "age_mating_sub", "age_diff_sub_dom")),
     dplyr::any_of(c("n_repro_natal", "status_in_grp")),
     # composition, immigrants, emigrants, floaters
     dplyr::any_of(c("compo_date",

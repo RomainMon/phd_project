@@ -6,9 +6,12 @@
 ### Packages -----
 library(dplyr)
 library(DataExplorer)
+library(readr)
 
 ### Dataset ----
-data = repro_final
+data = readr::read_delim(
+  here::here("outputs", "data", "glt", "repro_groups.csv"),
+  delim=",")
 
 # DataExplorer contains ~20 functions to explore a dataset
 
