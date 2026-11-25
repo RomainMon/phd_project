@@ -1655,8 +1655,7 @@ gs = dplyr::bind_rows(events_gs, zero_gs) %>%
     # %m+% / %m-% handle month-end dates safely (e.g. 31 May + 3 months).
     window_start = ref_date %m-% months(window_months),
     window_end  = ref_date %m+% months(window_months),
-    Year_ref = lubridate::year(ref_date),
-    
+
     # Litter characteristics
     litter_prop_males = dplyr::if_else(n_in_males + n_in_females > 0,
                                        round(n_in_males / (n_in_males + n_in_females), 2), NA_real_),
@@ -1665,7 +1664,7 @@ gs = dplyr::bind_rows(events_gs, zero_gs) %>%
   dplyr::relocate(row_id, 
                   Group, Year, Season, season_type, Season_start,
                   first_birth, repro_date_first,
-                  ref_date, window_start, window_end, Year_ref)
+                  ref_date, window_start, window_end)
 
 # JOIN REFERENCE DATES FOR MEASURING GROUP COMPOSITION
 gs = gs %>% 
@@ -1866,101 +1865,66 @@ ex = gs %>% dplyr::filter(Group == "EM") %>% dplyr::select(row_id, Season) %>%
 # Remove not useful columns
 compo_gs = compo_gs %>% dplyr::select(-c(compo_found, prev_source))
 
-#### 3. Patch population: nearest patch observation to mating date ------
-# The population is counted from the long-term dataset
+#### 3. Patch population: yearly counts per UMMP ------
+# One value per UMMPs
+# Counts = distinct identified individuals / groups recorded in the patch during that year.
 obs_patch = obs %>%
-  dplyr::filter(!is.na(UMMPs), 
-                !is.na(DateObs)) %>%
+  dplyr::filter(!is.na(UMMPs), !is.na(DateObs)) %>%
   dplyr::transmute(
-    UMMPs = as.character(UMMPs), Group, GLT, Tattoo, DateObs
-  ) %>%
+    UMMPs = as.character(UMMPs), Group, GLT, DateObs,
+    Season_start = season_start_of(lubridate::year(DateObs), lubridate::month(DateObs))) %>%
   dplyr::distinct()
 
-# Temporal window for the patch
-win_patch = win %>%
-  dplyr::filter(!is.na(UMMPs)) %>%
-  dplyr::select(row_id, UMMPs, ref_date, window_start, window_end)
+patch_year = obs_patch %>%
+  dplyr::group_by(UMMPs, Season_start) %>%
+  dplyr::summarise(
+    n_glt_patch = dplyr::n_distinct(GLT[!is.na(GLT) & !GLT %in% bad]),  # identified animals only
+    n_groups_patch = dplyr::n_distinct(Group),
+    n_obs_dates = dplyr::n_distinct(DateObs),      # monitoring effort, to check the counts
+    .groups = "drop")
 
-# For each reproductive-season row, select the nearest date on which the patch was monitored 
-# Then count all individuals/groups recorded in that patch on that selected date
-patch_counts = function(w) {
-  nearest_patch_date = obs_patch %>%
-    dplyr::distinct(UMMPs, DateObs) %>%
-    dplyr::inner_join(
-      w,
-      by = dplyr::join_by(UMMPs, dplyr::between(DateObs, window_start, window_end)),
-      relationship = "many-to-many"
-    ) %>%
-    # Difference in days with the reference date
-    dplyr::mutate(diff_days = abs(as.integer(DateObs - ref_date))) %>%
-    dplyr::arrange(row_id, diff_days, DateObs) %>%
-    dplyr::group_by(row_id) %>%
-    # Select the closer observation
-    dplyr::slice_head(n = 1) %>%
-    dplyr::ungroup() %>%
-    dplyr::select(row_id, UMMPs, ref_date, DateObs, diff_days)
-  
-  obs_patch %>%
-    dplyr::inner_join(nearest_patch_date, by = c("UMMPs", "DateObs")) %>%
-    dplyr::group_by(row_id) %>%
-    dplyr::summarise(
-      n_glt = dplyr::n_distinct(GLT, na.rm = TRUE),
-      n_groups = dplyr::n_distinct(Group, na.rm = TRUE),
-      patch_obs_date = dplyr::first(DateObs),
-      patch_diff_days = dplyr::first(diff_days),
-      .groups = "drop"
-    )
-}
+# Previous year (t-1) for lambda; only valid if the patch was monitored in t-1
+patch_prev = patch_year %>%
+  dplyr::transmute(UMMPs, 
+                   Season_start = Season_start + 1, 
+                   n_glt_prev = n_glt_patch)
 
-# Apply the function
-pop_now = patch_counts(win_patch) %>%
-  dplyr::rename(
-    n_glt_patch = n_glt,
-    n_groups_patch = n_groups,
-  )
-
-## Estimate annual population change
-# We create another temporal window ONE YEAR BEFORE
-win_patch_prev = win_patch %>%
+patch_gs = patch_year %>%
+  dplyr::left_join(patch_prev, by = c("UMMPs", "Season_start"), relationship = "one-to-one") %>%
   dplyr::mutate(
-    ref_date = ref_date %m-% lubridate::years(1),
-    window_start = window_start %m-% lubridate::years(1),
-    window_end = window_end %m-% lubridate::years(1)
-  )
-
-# ... And apply the patch count
-pop_prev = patch_counts(win_patch_prev) %>%
-  dplyr::select(row_id, 
-                n_glt_prev = n_glt)
-
-# Lambda is only calculated when a previous-year patch count is available and > 0
-patch_gs = pop_now %>%
-  dplyr::left_join(pop_prev, 
-                   by = "row_id", relationship = "one-to-one") %>%
-  dplyr::mutate(
-    # Compute lambda
     lambda = dplyr::if_else(!is.na(n_glt_prev) & n_glt_prev > 0,
-                            round(n_glt_patch / n_glt_prev, 2), NA_real_)
-  ) %>%
+                            round(n_glt_patch / n_glt_prev, 2), NA_real_)) %>%
   dplyr::select(-n_glt_prev)
 
-#### 4. Floaters: satellites present during the window ------
-# We count distinct satellite individuals whose stay overlaps any part of the reference window.
-floaters = stays %>%
-  # Keep satellites
-  dplyr::filter(stay_type == "satellite") %>%
-  dplyr::transmute(sat_GLT = GLT, 
-                   sat_SexOK = SexOK,
-                   sat_UMMPs = UMMPs,
-                   sat_start = lubridate::floor_date(start, "month"),   # reference dates are 1st of a month
-                   sat_end = end) %>%
-  dplyr::filter(!is.na(sat_UMMPs))
 
+#### 4. Floaters: satellites present during the temporal window ------
+# Count distinct satellite individuals whose stay overlaps any part of the window [window_start, window_end] around the mating reference date
+# WARNING: floaters and patch population are on different time scales, which matters for computing, e.g., floaters per patch individual
+
+# Reference windows per row (UMMPs as character, to match the key used elsewhere)
+win_patch = gs %>%
+  dplyr::filter(!is.na(UMMPs)) %>%
+  dplyr::transmute(row_id, UMMPs = as.character(UMMPs),
+                   ref_date, window_start, window_end)
+
+floaters = stays %>%
+  # Keep all individuals being in a satellite state
+  dplyr::filter(stay_type == "satellite") %>%
+  dplyr::transmute(sat_GLT = GLT,
+                   sat_SexOK = SexOK,
+                   sat_UMMPs = as.character(UMMPs),
+                   # The start of floating period
+                   sat_start = lubridate::floor_date(as.Date(start), "month"),  # reference dates are 1st of a month
+                   # The end of floating period
+                   # a stay with no end date is treated as ongoing, not dropped
+                   sat_end = dplyr::coalesce(as.Date(end), max(win_patch$window_end))) %>%
+  dplyr::filter(!is.na(sat_UMMPs), !is.na(sat_start))
+
+# Number of floaters per patch
 floaters_gs = win_patch %>%
-  # Keep floaters within the same UMMPs and whose period of "floating" overlaps the temporal window
   dplyr::inner_join(floaters,
-                    by = dplyr::join_by(UMMPs == sat_UMMPs, 
-                                        window_end >= sat_start, 
+                    by = dplyr::join_by(UMMPs == sat_UMMPs,
+                                        window_end >= sat_start,
                                         window_start <= sat_end),
                     relationship = "many-to-many") %>%
   dplyr::group_by(row_id) %>%
@@ -1975,14 +1939,14 @@ floaters_gs = win_patch %>%
 gs = gs %>%
   # GROUP COMPOSITION
   dplyr::left_join(compo_gs, by = "row_id", relationship = "one-to-one") %>%
-  # PATCH POP SIZE
-  dplyr::left_join(patch_gs, by = "row_id", relationship = "one-to-one") %>%
+  # PATCH POP SIZE (yearly, by patch and season start)
+  dplyr::left_join(patch_gs, by = c("UMMPs", "Season_start"), relationship = "many-to-one") %>%
   # FLOATERS
   dplyr::left_join(floaters_gs, by = "row_id", relationship = "one-to-one") %>%
   
   # Patch metrics are yearly: matched on the year of mating (columns also in reprod get the suffix _pm)
   dplyr::left_join(UMMP_crosswalk, by = "UMMPs") %>%
-  dplyr::left_join(patch_metrics, by = c("patch_id", "Year_ref" = "Year"), suffix = c("", "_pm")) %>%
+  dplyr::left_join(patch_metrics, by = c("patch_id", "Season_start" = "Year"), suffix = c("", "_pm")) %>%
   dplyr::mutate(
     area_km2 = area_ha / 100,
     dens_glt = round(n_glt_patch / area_km2, 2),
