@@ -49,12 +49,16 @@ ref_tbl = readr::read_delim(here::here("data", "glt", "ACoelho", "data_clean", "
                    ref_jaccard = as.Date(lubridate::parse_date_time(ref_jaccard, c("dmy", "ymd"))))
 
 #### Dispersal events -----
-stays = group_flux = xlsx::read.xlsx(
+stays = xlsx::read.xlsx(
   here::here("outputs", "data", "dispersal", "All_GLT_stays.xlsx"),
   sheetName = "Sheet1"
 )
 group_flux = xlsx::read.xlsx(
   here::here("outputs", "data", "dispersal", "Group_flux.xlsx"),
+  sheetName = "Sheet1"
+)
+sat_periods = xlsx::read.xlsx(
+  here::here("outputs", "data", "dispersal", "sat_periods.xlsx"),
   sheetName = "Sheet1"
 )
 
@@ -613,15 +617,14 @@ demo_patch %>%
 #
 # LONG-TERM DATA are matched to a mating reference date (birth - gestation length)
 # A table with reference dates for each group and season was created manually and is imported to assess group composition, immigration and emigration
-# Patch population and floater density are assessed in a temporal window around the mating reference date
-
+# Floaters are counted as satellite individuals during a +/- N month window around the mating reference date
 
 #### Parameters ------
 dry_months = 4:6  # Apr-Jun = dry season
 wet_months = c(7:12, 1:3)  # Jul-Mar = wet season
 season_last_month = 3  # Jan-Mar belong to the wet season that started the year before
 gestation_days = 132  # GLT gestation ~125-132 days -> mating = birth - 132 days
-window_months = 4  # symmetric matching window: N calendar months before/after mating
+floater_window_months = 1  # floaters: satellite periods overlapping mating date +/- N months
 assumed_birth_month = 10 # births with no date are assumed on 1 October (late wet season)
 bad = c("?","T0","IN","?-1","?-2","?-3","FT","?-4","?-5","?-6","MP489","MP490")
 litter_vars = c("n_infants", "n_in_males", "n_in_females", "n_in_sex_unknown", "n_infants_surv_1y")
@@ -1638,7 +1641,10 @@ reprod_yearly = reprod %>%
                    n_days_supp_food, 
                    n_months_supp_food, 
                    mean_days.month_supp, 
-                   mean_days.year_supp)
+                   mean_days.year_supp,
+                   n_immigrants_reprod = n_immigrants,
+                   n_immigrants_M_reprod = n_immig_males,
+                   n_immigrants_F_reprod = n_immig_females)
 
 ##### 1d. Build the group-season table and define mating reference dates ------
 # If mating cannot be dated, use the assumed 1 October birth date minus gestation.
@@ -1651,10 +1657,6 @@ gs = dplyr::bind_rows(events_gs, zero_gs) %>%
     ref_date = dplyr::coalesce(repro_date_first,
                                lubridate::make_date(Season_start, assumed_birth_month, 1) -
                                  lubridate::days(gestation_days)),
-    # Symmetric calendar-month window around the estimated mating date.
-    # %m+% / %m-% handle month-end dates safely (e.g. 31 May + 3 months).
-    window_start = ref_date %m-% months(window_months),
-    window_end  = ref_date %m+% months(window_months),
 
     # Litter characteristics
     litter_prop_males = dplyr::if_else(n_in_males + n_in_females > 0,
@@ -1664,7 +1666,7 @@ gs = dplyr::bind_rows(events_gs, zero_gs) %>%
   dplyr::relocate(row_id, 
                   Group, Year, Season, season_type, Season_start,
                   first_birth, repro_date_first,
-                  ref_date, window_start, window_end)
+                  ref_date)
 
 # JOIN REFERENCE DATES FOR MEASURING GROUP COMPOSITION
 gs = gs %>% 
@@ -1679,10 +1681,6 @@ gs %>% dplyr::filter(!is.na(ref_date_list), ref_date_list != as.Date(ref_date)) 
 # REMOVE NAs
 gs = gs %>% 
   dplyr::filter(!is.na(ref_compo))
-
-# Common reference windows used to match observational datasets of different temporal resolutions. 
-# Each row_id represents one group x reproductive season.
-win = gs %>% dplyr::select(row_id, Group, UMMPs, ref_date, window_start, window_end)
 
 #### 2. Group composition at the reference dates ------
 # For each group x season, the composition is the one recorded on ref_compo (see ref_tbl).
@@ -1808,6 +1806,10 @@ change = pair %>%
     n_emigrants_M = sum(is_emigrant & Sex %in% "M"),
     immigrants_ids = paste(sort(GLT[is_immigrant]), collapse = ", "),
     emigrants_ids = paste(sort(GLT[is_emigrant]), collapse = ", "),
+    # Adult males: reference set at t-1 = adult males at t-1 + immature males at t-1 now adult
+    n_males_prev = sum(stage_prev %in% "adult" & Sex %in% "M"),
+    n_males_shared = sum(is_adult_now & in_ref_prev & Sex %in% "M"),
+    n_males_union  = sum((is_adult_now | in_ref_prev) & Sex %in% "M"),
     .groups = "drop")
 
 # 2f. Composition at t
@@ -1834,7 +1836,8 @@ compo_gs = rowmap %>%
                   ~ dplyr::if_else(compo_found, dplyr::coalesce(.x, 0L), NA_integer_)),
     # Changes: NA if one of the two snapshots is missing
     dplyr::across(c(n_shared, n_union, n_immigrants, n_immigrants_F, n_immigrants_M,
-                    n_emigrants, n_emigrants_F, n_emigrants_M),
+                    n_emigrants, n_emigrants_F, n_emigrants_M,
+                    n_males_prev, n_males_shared, n_males_union),
                   ~ dplyr::if_else(both_found, dplyr::coalesce(.x, 0L), NA_integer_)),
     dplyr::across(c(adults_present, immatures_present),
                   ~ dplyr::if_else(compo_found, dplyr::na_if(dplyr::coalesce(.x, ""), ""), NA_character_)),
@@ -1846,13 +1849,17 @@ compo_gs = rowmap %>%
     sex_ratio = dplyr::if_else(n_females > 0, round(n_males / n_females, 2), NA_real_),
     # Jaccard on adults: adults at t vs (adults at t-1 + immatures at t-1 who became adults)
     adult_jaccard = dplyr::if_else(n_union > 0, round(n_shared / n_union, 2), NA_real_),
-    adult_turnover = 1 - adult_jaccard) %>%
+    adult_turnover = 1 - adult_jaccard,
+    n_males_replaced = pmin(n_emigrants_M, n_immigrants_M), # males lost AND replaced by immigrants
+    male_replacement_prop = dplyr::if_else(n_males_prev > 0, round(n_males_replaced / n_males_prev, 2), NA_real_),
+    male_turnover = dplyr::if_else(n_males_union > 0, round(1 - n_males_shared / n_males_union, 2), NA_real_)) %>%
   dplyr::select(row_id, compo_date = ref_compo, compo_found, prev_source,
                 GS_total, n_adults, n_immatures, n_males, n_females, sex_ratio,
                 adult_jaccard, adult_turnover,
                 n_immigrants, n_immigrants_F, n_immigrants_M,
                 n_emigrants, n_emigrants_F, n_emigrants_M,
-                adults_present, immatures_present, immigrants_ids, emigrants_ids)
+                adults_present, immatures_present, immigrants_ids, emigrants_ids,
+                n_males_replaced, male_replacement_prop, male_turnover)
 
 # Checks
 dplyr::count(compo_gs, compo_found) # FALSE = no observation of the group on ref_compo
@@ -1897,41 +1904,29 @@ patch_gs = patch_year %>%
   dplyr::select(-n_glt_prev)
 
 
-#### 4. Floaters: satellites present during the temporal window ------
-# Count distinct satellite individuals whose stay overlaps any part of the window [window_start, window_end] around the mating reference date
-# WARNING: floaters and patch population are on different time scales, which matters for computing, e.g., floaters per patch individual
+#### 4. Floaters: satellites at mating +/- 1 month ------
+# Count distinct individuals in a satellite period (sat_periods, from the dispersal script)
+# overlapping [ref_date - N months, ref_date + N months], within the same UMMP
+# WARNING: floaters (short window) and patch population (yearly) are on different time scales,
+# which matters when computing, e.g., floaters per patch individual
 
-# Reference windows per row (UMMPs as character, to match the key used elsewhere)
 win_patch = gs %>%
   dplyr::filter(!is.na(UMMPs)) %>%
-  dplyr::transmute(row_id, UMMPs = as.character(UMMPs),
-                   ref_date, window_start, window_end)
+  dplyr::transmute(row_id, 
+                   UMMPs = as.character(UMMPs),
+                   ref_date,
+                   window_start = ref_date %m-% months(floater_window_months),
+                   window_end = ref_date %m+% months(floater_window_months))
 
-floaters = stays %>%
-  # Keep all individuals being in a satellite state
-  dplyr::filter(stay_type == "satellite") %>%
-  dplyr::transmute(sat_GLT = GLT,
-                   sat_SexOK = SexOK,
-                   sat_UMMPs = as.character(UMMPs),
-                   # The start of floating period
-                   sat_start = lubridate::floor_date(as.Date(start), "month"),  # reference dates are 1st of a month
-                   # The end of floating period
-                   # a stay with no end date is treated as ongoing, not dropped
-                   sat_end = dplyr::coalesce(as.Date(end), max(win_patch$window_end))) %>%
-  dplyr::filter(!is.na(sat_UMMPs), !is.na(sat_start))
-
-# Number of floaters per patch
 floaters_gs = win_patch %>%
-  dplyr::inner_join(floaters,
-                    by = dplyr::join_by(UMMPs == sat_UMMPs,
-                                        window_end >= sat_start,
-                                        window_start <= sat_end),
-                    relationship = "many-to-many") %>%
+  dplyr::inner_join(
+    dplyr::mutate(sat_periods, f_start = lubridate::floor_date(f_start, "month")),
+    by = dplyr::join_by(UMMPs, window_end >= f_start, window_start <= f_end),
+    relationship = "many-to-many") %>%
   dplyr::group_by(row_id) %>%
-  dplyr::summarise(n_floaters = dplyr::n_distinct(sat_GLT),
-                   n_floaters_F = dplyr::n_distinct(sat_GLT[sat_SexOK %in% "F"]),
-                   n_floaters_M = dplyr::n_distinct(sat_GLT[sat_SexOK %in% "M"]),
-                   n_floaters_unknown = dplyr::n_distinct(sat_GLT[is.na(sat_SexOK)]),
+  dplyr::summarise(n_floaters   = dplyr::n_distinct(GLT),
+                   n_floaters_F = dplyr::n_distinct(GLT[SexOK %in% "F"]),
+                   n_floaters_M = dplyr::n_distinct(GLT[SexOK %in% "M"]),
                    .groups = "drop")
 
 #### 5. Join all derived datasets and calculate patch densities ------
@@ -1956,7 +1951,14 @@ gs = gs %>%
                   ~ dplyr::if_else(is.na(UMMPs), NA_integer_, tidyr::replace_na(.x, 0L))),
     dens_floaters = round(n_floaters / area_km2, 2),
     dens_floaters_F = round(n_floaters_F / area_km2, 2),
-    dens_floaters_M = round(n_floaters_M / area_km2, 2))
+    dens_floaters_M = round(n_floaters_M / area_km2, 2)) %>% 
+  # Fill immigrants from reprod ONLY where the two-date method gave NA
+  dplyr::mutate(
+    fill_imm = is.na(n_immigrants) & !is.na(n_immigrants_reprod),
+    n_immigrants = dplyr::if_else(fill_imm, as.integer(n_immigrants_reprod), n_immigrants),
+    n_immigrants_M = dplyr::if_else(fill_imm, as.integer(n_immigrants_M_reprod), n_immigrants_M),
+    n_immigrants_F = dplyr::if_else(fill_imm, as.integer(n_immigrants_F_reprod), n_immigrants_F)) %>%
+  dplyr::select(-fill_imm)
 
 #### 6. Assemble and order the final analytical table ------
 repro_final = gs %>%
@@ -1973,7 +1975,8 @@ repro_final = gs %>%
     # composition, immigrants, emigrants, floaters
     dplyr::any_of(c("compo_date",
                     "GS_total", "n_adults", "n_immatures", "n_males", "n_females", "sex_ratio",
-                    "adult_jaccard", "adult_turnover")),
+                    "adult_jaccard", "adult_turnover",
+                    "n_males_replaced", "male_replacement_prop", "male_turnover")),
     dplyr::starts_with("n_immigrants"), dplyr::starts_with("n_emigrants"),
     dplyr::any_of(c("adults_present", "immatures_present", "immigrants_ids", "emigrants_ids")),
     dplyr::starts_with("n_floaters"), dplyr::starts_with("dens_floaters"),

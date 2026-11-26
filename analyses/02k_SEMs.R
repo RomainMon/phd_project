@@ -20,6 +20,8 @@ library(performance)
 library(glmmTMB)
 library(nlme)
 library(glmm.hp)
+library(lubridate)
+library(tidychangepoint)
 
 # GSL
 # install.packages(
@@ -73,8 +75,13 @@ poly %>% dplyr::count(UMMPs, name = "n_polygamy") %>% # polygamy by UMMPs, vs to
   dplyr::mutate(prop_polygamy = round(n_polygamy / n_total, 2))
 
 #### 2. Monogamy vs polygamy ------
-vars = c("age_mating_dom", "GS_total", "n_adults", "sex_ratio", "adult_turnover",
-         "n_immigrants", "n_emigrants", "n_floaters", "n_glt_patch", "n_groups_patch", "lambda",
+vars = c("age_mating_dom",
+         "GS_total", "n_adults", 
+         "n_immigrants", "n_immigrants_M", "n_immigrants_F", "n_emigrants", 
+         "adult_turnover", "male_turnover",
+         "sex_ratio", 
+         "n_floaters", "n_floaters_M", "n_floaters_F",
+         "n_glt_patch", "n_groups_patch", "lambda",
          "enn_m", "area_km2", "dPC", "shape")
 
 data %>%
@@ -154,9 +161,9 @@ X_vif = data %>%
                 GS_total, 
                 sex_ratio,
                 adult_turnover, 
-                n_immigrants,
-                n_emigrants, 
-                n_floaters,
+                male_turnover,
+                n_immigrants_M,
+                n_floaters_M,
                 area_km2, 
                 enn_m,
                 n_glt_patch,
@@ -171,6 +178,148 @@ vif.result = HH::vif(X_vif, y.name="n_repro_females")
 # Thus, the higher the VIF, the stronger the collinearity of i is with other variables (ie the information of i is already contained by others)
 # Check VIF > 2.5
 vif.result[vif.result > 2.5]
+
+#### 5. Change-point analysis ----
+
+# Check the number of observations per UMMPs and season
+data %>%
+  dplyr::mutate(
+    mating_date_MMYY = lubridate::floor_date(
+      mating_date, unit = "month"
+    )
+  ) %>%
+  dplyr::group_by(UMMPs, mating_date_MMYY) %>%
+  dplyr::summarise(
+    n_distinct_floaters = dplyr::n_distinct(n_floaters_M, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  dplyr::arrange(UMMPs, mating_date_MMYY) %>% 
+  print(n=60)
+
+# Check there aren't >1 measures of floaters per month-year
+data %>%
+  dplyr::mutate(
+    mating_date_MMYY = lubridate::floor_date(mating_date, "month")
+  ) %>%
+  dplyr::group_by(UMMPs, mating_date_MMYY) %>%
+  dplyr::summarise(
+    n_records = n(),
+    n_floaters_values = dplyr::n_distinct(n_floaters_M, na.rm = TRUE),
+    n_density_values = dplyr::n_distinct(dens_floaters_M, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  dplyr::filter(n_floaters_values > 1 | n_density_values > 1)
+
+# Build the temporal dataset
+temporal_data = data %>%
+  dplyr::mutate(
+    mating_date_MMYY = lubridate::floor_date(mating_date, unit = "month")
+  ) %>%
+  dplyr::group_by(UMMPs, mating_date_MMYY) %>%
+  dplyr::summarise(
+    
+    # Number of polygamous observations
+    n_polygamy = sum(ms == "Polygamy", na.rm = TRUE),
+    
+    # Number of observations with known mating system
+    n_observations = sum(!is.na(ms)),
+    
+    # Retain the floater count, without summing
+    n_floaters_M = dplyr::first(n_floaters_M),
+    
+    # Retain the corresponding density
+    dens_floaters_M = dplyr::first(dens_floaters_M),
+    
+    .groups = "drop"
+  ) %>%
+  dplyr::arrange(UMMPs, mating_date_MMYY)
+
+# PLOT
+# Scaling factor for the secondary axis
+scale_factor <- max(temporal_data$n_polygamy, na.rm = TRUE) /
+  max(temporal_data$n_floaters_M, na.rm = TRUE)
+
+if (!is.finite(scale_factor) || scale_factor == 0) {
+  scale_factor <- 1
+}
+
+p_temporal <- ggplot(
+  temporal_data,
+  aes(x = mating_date_MMYY)
+) +
+  
+  # Polygamy occurrences
+  geom_col(
+    aes(y = n_polygamy),
+    fill = "darkorange2",
+    alpha = 0.65,
+    width = 25
+  ) +
+  
+  # Male floaters
+  geom_line(
+    aes(y = n_floaters_M * scale_factor),
+    color = "steelblue4",
+    linewidth = 0.9,
+    na.rm = TRUE
+  ) +
+  
+  geom_point(
+    aes(y = n_floaters_M * scale_factor),
+    color = "steelblue4",
+    size = 2,
+    na.rm = TRUE
+  ) +
+  
+  facet_wrap(
+    ~ UMMPs,
+    scales = "free_y",
+    ncol = 2
+  ) +
+  
+  scale_x_date(
+    date_labels = "%b-%Y",
+    date_breaks = "1 year",
+    expand = expansion(mult = c(0.02, 0.02))
+  ) +
+  
+  scale_y_continuous(
+    name = "Number of polygamous observations",
+    sec.axis = sec_axis(
+      ~ . / scale_factor,
+      name = "Number of male floaters"
+    )
+  ) +
+  
+  labs(
+    x = "Reference mating date",
+    title = "Temporal dynamics of male floaters and polygamy",
+    subtitle = "Polygamy occurrences (bars) and male floater abundance (line)"
+  ) +
+  
+  theme_classic() +
+  
+  theme(
+    axis.text.x = element_text(
+      angle = 45,
+      hjust = 1
+    ),
+    strip.background = element_rect(
+      fill = "grey90",
+      color = NA
+    ),
+    strip.text = element_text(face = "bold"),
+    axis.title.y = element_text(color = "darkorange3"),
+    axis.title.y.right = element_text(color = "steelblue4")
+  )
+
+p_temporal
+
+# Change-point analysis
+# Floaters
+# TO COMPLETE with tidychangepoint package
+
+
 
 ### SEMs ----
 # Documentation:
@@ -193,6 +342,8 @@ hist(subset$enn_m)
 hist(subset$enn_log)
 hist(subset$enn_scale)
 hist(subset$n_floaters)
+glmm.hp::detect_glm_family(subset$n_floaters)
+glmm.hp::detect_glm_family(subset$ms_binary)
 
 # Correlations
 cor_mat = cor(subset, use = "pairwise.complete.obs", method = "pearson")
@@ -397,7 +548,7 @@ subset = data %>%
   dplyr::mutate(enn_scale = scale(enn_m))
 
 # Response variable
-glmm.hp::detect_glm_family(subset$n_floaters)
+glmm.hp::detect_glm_family(subset$n_floaters_M)
 glmm.hp::detect_glm_family(subset$dens_floaters)
 glmm.hp::detect_glm_family(subset$dens_floaters_M)
 
@@ -426,7 +577,6 @@ fits_z = setNames(lapply(paste0(cands, "_z"), fit_one), cands)
 
 # AICc, delta and Akaike weights
 MuMIn::model.sel(fits, rank = "AICc")
-# All models are equivalent
 
 # Spearman correlations
 round(cor(d[cands], method = "spearman"), 2)
@@ -456,6 +606,7 @@ piecewiseSEM:::plot.psem(
 # Data
 subset = data %>%
   dplyr::select(ms_binary, 
+                n_floaters_M,
                 dens_floaters_M, 
                 enn_m, 
                 Group, 
@@ -481,7 +632,7 @@ subset = data %>%
 # NB: With 4 UMMPs, a (1 | UMMPs) term is a poor fix (the variance of 4 levels is poorly estimated, and a singular fit is likely)
 # If each Group sits in one UMMP, (1 | Group) already captures most of the UMMP effect
 
-### Test for random effects on GLT density
+### Test for random effects
 y = "dens_floaters_M" 
 g0 = gls(as.formula(paste(y, "~ enn_scale")), data = subset, method = "REML")
 g1 = lme(as.formula(paste(y, "~ enn_scale")), random = ~ 1 | Group,
@@ -507,8 +658,8 @@ anova(g0,g4) # investigate the relevance of the random effect
 
 # one or more random-effect variances were estimated at (or very near) zero, on the boundary of the possible values
 VarCorr(g5) # check variance: Group variance is near 0 once season is included
-VarCorr(g4) # check variance: Year variance is 0.018 and residual variance is 0.015
-performance::icc(g4) # year variance explains ~55% of the unexplained variance of floater density that is shared by all groups in a given year
+VarCorr(g4) # check variance: Year variance is 0.03 and residual variance is 0.12
+performance::icc(g4) # year variance explains ~18% of the unexplained variance of floater density that is shared by all groups in a given year
 performance::icc(glmmTMB(enn_m ~ 1 + (1 | Season_start), data = subset)) # year captures 0 variation in ENN
 performance::icc(glmmTMB(enn_m ~ 1 + (1 | UMMPs), data = subset)) # UMMPs capture ~99% of variation in ENN
 
@@ -550,6 +701,7 @@ DHARMa::simulateResiduals(b0) %>%  plot()
 # Data
 subset = data %>%
   dplyr::select(ms_binary, 
+                n_floaters_M,
                 dens_floaters_M, 
                 enn_m, 
                 Group, 
@@ -562,7 +714,7 @@ subset = data %>%
 ##### SEM
 mod3 = psem(
   glmmTMB(dens_floaters_M ~ enn_scale + (1 | Season_start), data = subset, family = gaussian),
-  glm(ms_binary  ~ dens_floaters_M, data = subset, family = binomial),
+  glm(ms_binary ~ dens_floaters_M, data = subset, family = binomial),
   data = subset
 )
 
@@ -672,9 +824,9 @@ op = par(mfrow = c(1, 2)); for (v in cands) hist(d[[v]], main = v, xlab = ""); p
 
 ##### SEM
 mod5 = psem(
-  glmmTMB(n_glt_patch ~ enn_scale + area_km2 + (1 | Season_start), data = subset, family = poisson),
-  glmmTMB(dens_floaters_M ~ n_glt_patch + enn_scale + area_km2 + (1 | Season_start), data = subset, family = gaussian),
-  glm(ms_binary ~ dens_floaters_M, data = subset, family = binomial),
+  glmmTMB(dens_glt ~ enn_scale + area_km2 + (1 | Season_start), data = subset, family = gaussian),
+  glmmTMB(dens_floaters_M ~ dens_glt + enn_scale + area_km2 + (1 | Season_start), data = subset, family = gaussian),
+  glm(ms_binary ~ dens_floaters_M + dens_glt, data = subset, family = binomial),
   data = subset
 )
 
@@ -750,7 +902,7 @@ op = par(mfrow = c(1, 2)); for (v in cands) hist(d[[v]], main = v, xlab = ""); p
 mod6 = psem(
   glmmTMB(n_groups_patch ~ enn_scale + area_km2 + (1 | Season_start), data = subset, family = poisson),
   glmmTMB(dens_floaters_M ~ n_groups_patch + enn_scale + area_km2 + (1 | Season_start), data = subset, family = gaussian),
-  glm(ms_binary ~ dens_floaters_M, data = subset, family = binomial),
+  glm(ms_binary ~ dens_floaters_M + n_groups_patch, data = subset, family = binomial),
   data = subset
 )
 
@@ -932,6 +1084,7 @@ piecewiseSEM:::plot.psem(
 # Data
 subset = data %>%
   dplyr::select(ms_binary,
+                n_floaters_M,
                 dens_floaters_M, 
                 age_mating_dom,
                 enn_m,
@@ -1084,7 +1237,7 @@ table(subset$ms_binary)
 ##### SEM
 mod12 = psem(
   glmmTMB(dens_floaters_M ~ enn_scale + area_km2 + (1 | Season_start), data = subset, family = gaussian),
-  glmmTMB(n_immigrants_M ~ dens_floaters_M + (1 | Season_start), data = subset, family = poisson),
+  glmmTMB(n_immigrants_M ~ dens_floaters_M + enn_scale + (1 | Season_start), data = subset, family = poisson),
   glm(ms_binary ~ n_immigrants_M + age_log, data = subset, family = binomial),
   data = subset
 )
@@ -1477,6 +1630,269 @@ piecewiseSEM:::plot.psem(
   layout = "tree"
 )
 
+
+#### Male turnover ----
+# Data
+subset = data %>%
+  dplyr::select(ms_binary,
+                dens_floaters_M,
+                age_mating_dom,
+                male_turnover,
+                enn_m,
+                area_km2,
+                Group, 
+                Season_start) %>%
+  na.omit() %>%  # same rows in every submodel
+  dplyr::mutate(Group = factor(Group),
+                enn_scale = scale(enn_m),
+                age_log = log(age_mating_dom),
+                Season_start = factor(Season_start))
+
+# Polygamy events
+table(subset$ms_binary)
+
+# Response variable
+glmm.hp::detect_glm_family(subset$dens_floaters_M)
+glmm.hp::detect_glm_family(subset$male_turnover)
+
+##### Path diagram
+# Path diagram tested here:
+#                                       ------------------>
+# Patch isolation (X1) -> floaters (Y1) -> male turnover (Y2) -> mating system (Y3)
+# Patch area (X2)      ->
+#                                       Age dom. females (X3) -> 
+
+##### SEM
+mod20 = psem(
+  glmmTMB(dens_floaters_M ~ enn_scale + area_km2 + (1 | Season_start), data = subset, family = gaussian),
+  glmmTMB(male_turnover ~ dens_floaters_M + age_log + (1 | Season_start), data = subset, family = gaussian),
+  glm(ms_binary ~ male_turnover + age_log + dens_floaters_M, data = subset, family = binomial),
+  data = subset
+)
+
+##### Summary
+summary(mod20)
+
+##### Plot
+piecewiseSEM:::plot.psem(
+  piecewiseSEM::as.psem(mod20),
+  node_attrs = data.frame(shape = "rectangle", color = "black", fillcolor = "grey"),
+  layout = "tree"
+)
+
+
+#### dPC ----
+# Data
+subset = data %>%
+  dplyr::select(ms_binary,
+                dens_floaters_M,
+                age_mating_dom,
+                enn_m,
+                dPC,
+                area_km2,
+                Group, 
+                Season_start) %>%
+  na.omit() %>%  # same rows in every submodel
+  dplyr::mutate(Group = factor(Group),
+                enn_scale = scale(enn_m),
+                dPC_scale = scale(dPC),
+                age_log = log(age_mating_dom),
+                Season_start = factor(Season_start))
+
+# Polygamy events
+table(subset$ms_binary)
+
+# Response variable
+glmm.hp::detect_glm_family(subset$dPC)
+glmm.hp::detect_glm_family(subset$dPC_scale)
+
+##### Path diagram
+# Path diagram tested here:
+# Patch isolation (X1) -> floaters (Y1) -> mating system (Y2)
+# Patch area (X2)      ->
+#                 Age dom. females (X3) -> 
+
+##### SEM
+mod21 = psem(
+  glmmTMB(dens_floaters_M ~ dPC + area_km2 + (1 | Season_start), data = subset, family = gaussian),
+  glm(ms_binary ~ age_log + dens_floaters_M, data = subset, family = binomial),
+  data = subset
+)
+
+##### Summary
+summary(mod21)
+
+##### Plot
+piecewiseSEM:::plot.psem(
+  piecewiseSEM::as.psem(mod21),
+  node_attrs = data.frame(shape = "rectangle", color = "black", fillcolor = "grey"),
+  layout = "tree"
+)
+
+#### Floaters & age ----
+# Data
+subset = data %>%
+  dplyr::select(ms_binary,
+                dens_floaters_M,
+                age_mating_dom,
+                enn_m,
+                dPC,
+                area_km2,
+                Group, 
+                Season_start) %>%
+  na.omit() %>%  # same rows in every submodel
+  dplyr::mutate(Group = factor(Group),
+                enn_scale = scale(enn_m),
+                age_log = log(age_mating_dom),
+                Season_start = factor(Season_start))
+
+# Polygamy events
+table(subset$ms_binary)
+
+##### Path diagram
+# Path diagram tested here:
+# Patch isolation (X1) -> floaters (Y1) -> mating system (Y2)
+#                 Age dom. females (X3) -> 
+
+##### SEM
+mod22 = psem(
+  glm(ms_binary ~ age_log + dens_floaters_M, data = subset, family = binomial),
+  data = subset
+)
+
+##### Summary
+summary(mod22)
+
+##### Plot
+piecewiseSEM:::plot.psem(
+  piecewiseSEM::as.psem(mod22),
+  node_attrs = data.frame(shape = "rectangle", color = "black", fillcolor = "grey"),
+  layout = "tree"
+)
+
+#### Age only ----
+# Data
+subset = data %>%
+  dplyr::select(ms_binary,
+                age_mating_dom,
+                Group, 
+                Season_start) %>%
+  na.omit() %>%  # same rows in every submodel
+  dplyr::mutate(Group = factor(Group),
+                age_log = log(age_mating_dom),
+                Season_start = factor(Season_start))
+
+# Polygamy events
+table(subset$ms_binary)
+
+##### Path diagram
+# Path diagram tested here:
+# Age dom. females (X1) -> mating system (Y2)
+
+##### SEM
+mod23 = psem(
+  glm(ms_binary ~ age_log, data = subset, family = binomial),
+  data = subset
+)
+
+##### Summary
+summary(mod23)
+
+##### Plot
+piecewiseSEM:::plot.psem(
+  piecewiseSEM::as.psem(mod23),
+  node_attrs = data.frame(shape = "rectangle", color = "black", fillcolor = "grey"),
+  layout = "tree"
+)
+
+
+#### Age & sex-ratio ----
+# Data
+subset = data %>%
+  dplyr::select(ms_binary,
+                age_mating_dom,
+                sex_ratio,
+                Group, 
+                Season_start) %>%
+  na.omit() %>%  # same rows in every submodel
+  dplyr::mutate(Group = factor(Group),
+                age_log = log(age_mating_dom),
+                Season_start = factor(Season_start))
+
+# Polygamy events
+table(subset$ms_binary)
+
+# Response variable
+glmm.hp::detect_glm_family(subset$sex_ratio)
+
+##### Path diagram
+# Path diagram tested here:
+# Age dom. females (X1) -> mating system (Y2)
+#        Sex ratio (X2) ->
+
+##### SEM
+mod24 = psem(
+  glm(ms_binary ~ age_log + sex_ratio, data = subset, family = binomial),
+  data = subset
+)
+
+##### Summary
+summary(mod24)
+
+##### Plot
+piecewiseSEM:::plot.psem(
+  piecewiseSEM::as.psem(mod24),
+  node_attrs = data.frame(shape = "rectangle", color = "black", fillcolor = "grey"),
+  layout = "tree"
+)
+
+
+#### Age, sex-ratio, floaters ----
+# Data
+subset = data %>%
+  dplyr::select(ms_binary,
+                age_mating_dom,
+                sex_ratio,
+                dPC,
+                area_km2,
+                dens_floaters_M,
+                Group, 
+                Season_start) %>%
+  na.omit() %>%  # same rows in every submodel
+  dplyr::mutate(Group = factor(Group),
+                age_log = log(age_mating_dom),
+                Season_start = factor(Season_start))
+
+# Polygamy events
+table(subset$ms_binary)
+
+# Response variable
+glmm.hp::detect_glm_family(subset$sex_ratio)
+
+##### Path diagram
+# Path diagram tested here:
+#                                    Age dom. females (X1) -> 
+#        Isolation (X2) -> Floaters (Y1) -> Sex ratio (Y2) -> Mating system (Y3)
+#             Area (X3) ->
+
+##### SEM
+mod25 = psem(
+  glmmTMB(dens_floaters_M ~ dPC + area_km2 + (1 | Season_start), data = subset, family = gaussian),
+  glm(sex_ratio ~ dens_floaters_M, data = subset, family = gaussian),
+  glm(ms_binary ~ age_log + sex_ratio, data = subset, family = binomial),
+  data = subset
+)
+
+##### Summary
+summary(mod25)
+
+##### Plot
+piecewiseSEM:::plot.psem(
+  piecewiseSEM::as.psem(mod25),
+  node_attrs = data.frame(shape = "rectangle", color = "black", fillcolor = "grey"),
+  layout = "tree"
+)
+
 ### Model comparison -----
 mods = list(
   "isolation + n floaters" = mod1,
@@ -1497,7 +1913,13 @@ mods = list(
   "isolation + area + turnover + dens floaters M + age dom. females + n females + RE" = mod16,
   "isolation + area + turnover + dens floaters M + age dom. females + GS total + RE" = mod17,
   "isolation + area + turnover + dens floaters M + age dom. females + n adults (-> turnover) + RE" = mod18,
-  "isolation + area + turnover + dens floaters M (-> MS) + age dom. females + RE" = mod19
+  "isolation + area + turnover + dens floaters M (-> MS) + age dom. females + RE" = mod19,
+  "isolation + area + male turnover + dens floaters M (-> MS) + age dom. females + RE" = mod20,
+  "isolation (dPC) + area + dens floaters M + age dom. females + RE" = mod21,
+  "dens floaters M + age dom. females" = mod22,
+  "age dom. females" = mod23,
+  "age dom.females + sex ratio" = mod24,
+  "isolation + area + dens floaters M + age dom.females + sex ratio" = mod25
   )
 
 aic_tab = do.call(rbind, lapply(mods, function(m) AIC_psem(m)))
@@ -1509,6 +1931,5 @@ aic_tab$weight = exp(-aic_tab$delta / 2) / sum(exp(-aic_tab$delta / 2))
 
 aic_tab = aic_tab[order(aic_tab$delta), ]
 aic_tab$cum_weight = cumsum(aic_tab$weight)
-aic_tab[, c("K", "n", "AICc", "delta", "weight", "cum_weight")] |>
+aic_tab[, c("K", "n", "AICc", "delta", "weight", "cum_weight")] %>% 
   round(3)
-

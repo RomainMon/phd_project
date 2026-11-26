@@ -25,6 +25,10 @@ real_census_data = read_excel(here::here("data", "glt", "JDietz", "GLT_POP_2005_
 real_census_data %>%
   dplyr::summarise(dplyr::across(where(is.numeric), \(x) sum(x, na.rm = TRUE)))
 
+# Data from Andressa Coelho
+disp_andressa = readxl::read_excel(here::here("data", "glt", "ACoelho", "data_clean", "dispersao_andressa_V2.xls"), sheet = "Sheet1") %>%
+  dplyr::mutate(Disp_date = as.Date(Disp_date))
+
 # Group locations
 regions = sf::st_read(here::here("data", "geo", "APonchon", "GLT", "RegionsName.shp"))
 path_regions = here::here("data", "geo", "APonchon", "GLT", "RegionsName.csv")
@@ -206,7 +210,8 @@ obs = d0 %>%
     .groups = "drop"
   ) %>%
   dplyr::mutate(
-    # satellite if: floater record OR seen in 2+ groups on the same date
+    # satellite if: no group (is.na(Group))
+    # OR seen in 2+ groups on the same date
     state = dplyr::case_when(any_floater | n_groups_same_day > 1 ~ "satellite",
                              TRUE ~ "group")
   ) %>%
@@ -270,6 +275,171 @@ follow = stays %>%
   dplyr::summarise(n_followups = dplyr::n(), # nb of monitoring dates after the last sighting
                    days_followed = as.numeric(max(DateObs) - dplyr::first(end)), # nb of days covered
                    .groups = "drop")
+
+#### Satellite periods ------
+# One row = one period during which an individual is treated as a floater (satellite).
+# Rules:
+#  1. Satellite stay in `stays`: floater record (no group), OR seen in 2+ groups the same day
+#  2. Parallel dispersal in a small unit: 
+#     (i)   before its first record in the small unit, the individual was recorded in ANOTHER group
+#           (earlier group stay with a different Group) -> it arrived from elsewhere, it is not natal
+#           or a resident of a group that shrank;
+#     (ii)  on its last record in that group the individual was alone or with one other individual
+#           (group size <= small_group_max);
+#     (iii) that group is NEVER monitored again after that date (it did not become an established group);
+#     (iv)  the individual is recorded alive in yet ANOTHER group afterwards (it immigrated later on).
+#     Period = first date of the final small-group run -> first record in the next group.
+#  3. Absent and back: two consecutive records of the individual are in the SAME group, separated by
+#     >= min_gap_days and < return_max_days, with no record elsewhere in between, while the group was
+#     monitored >= min_followups times in between (otherwise it is just missing effort).
+#     Period = last record before the absence -> first record after.
+#  4. disp_andressa, Disp_result == "SAT": counted ONLY if the individual is recorded alive after
+#     Disp_date (otherwise it may be dead or disappeared). Period = Disp_date -> first alive record
+#     after, bounded at max_sat_days.
+# Overlaps between rules are handled when counting DISTINCT individuals per window.
+
+require_small_from_start = TRUE # TRUE: the individual's first record in the group is already in a small group (parallel dispersal)
+small_group_max = 2
+return_max_days = 360
+max_sat_days = 365
+
+# Age class on each date
+age_lookup = data.clean.final %>%
+  dplyr::ungroup() %>%
+  dplyr::filter(!is.na(IdadeOK)) %>%
+  dplyr::mutate(DateObs = as.Date(DateObs)) %>%
+  dplyr::group_by(GLT, DateObs) %>%
+  dplyr::summarise(IdadeOK = dplyr::first(IdadeOK), .groups = "drop")
+
+# Group size per date (alive records; unidentified records count one each)
+grp_size = data.clean.final %>%
+  dplyr::ungroup() %>%
+  dplyr::filter(!is.na(Group), !Death %in% "1") %>%
+  dplyr::mutate(DateObs = as.Date(DateObs)) %>%
+  dplyr::group_by(Group, DateObs) %>%
+  dplyr::summarise(size = dplyr::n_distinct(GLT[!is.na(GLT) & !GLT %in% bad]) +
+                     sum(is.na(GLT) | GLT %in% bad),
+                   .groups = "drop")
+
+# Last obs of a group
+group_last = grp_dates %>%
+  dplyr::group_by(Group) %>%
+  dplyr::summarise(group_last_date = max(DateObs), .groups = "drop")
+
+# Group UMMPs
+grp_ummp = grp_dates %>%
+  dplyr::group_by(Group) %>%
+  dplyr::summarise(UMMPs = mode_ok(UMMPs), .groups = "drop")
+
+# Rule 1: satellite stays
+# i.e., NO GROUP or +2 groups at the same date
+sat_1 = stays %>%
+  dplyr::filter(stay_type == "satellite") %>%
+  dplyr::transmute(GLT, UMMPs, f_start = start, f_end = end, rule = "No group or 2+ groups")
+
+# Rule 2: small group
+# Earlier group stays in a DIFFERENT group (any earlier stay, not only the previous one)
+prev_other = stays %>%
+  dplyr::filter(stay_type == "group") %>%
+  dplyr::select(GLT, stay_prev = stay, Group_prev = Group, end_prev = end)
+
+# next GROUP stay of each individual
+grp_next = stays %>%                       
+  dplyr::filter(stay_type == "group") %>%
+  dplyr::arrange(GLT, stay) %>%
+  dplyr::group_by(GLT) %>%
+  dplyr::mutate(next_Group = dplyr::lead(Group), next_start = dplyr::lead(start)) %>%
+  dplyr::ungroup() %>%
+  dplyr::select(GLT, stay, next_Group, next_start)
+
+# Dates at which individuals are in groups
+grp_stay_dates = obs %>%
+  dplyr::filter(state == "group") %>%
+  dplyr::select(GLT, Group, DateObs) %>%
+  dplyr::inner_join(
+    stays %>% dplyr::filter(stay_type == "group") %>% dplyr::select(GLT, stay, Group, UMMPs, start, end),
+    by = dplyr::join_by(GLT, Group, dplyr::between(DateObs, start, end))) %>%
+  dplyr::left_join(grp_size, by = c("Group", "DateObs"))
+
+# Rule: parallel dispersal
+sat_2 = grp_stay_dates %>%
+  dplyr::group_by(GLT, stay, Group, UMMPs, start, end) %>%
+  dplyr::summarise(
+    # Last time in a group > N individuals
+    last_big = if (any(size > small_group_max, na.rm = TRUE)) max(DateObs[which(size > small_group_max)]) else as.Date(NA),
+    # Start of the small-group
+    f_start  = min(DateObs[is.na(last_big) | DateObs > last_big]),
+    size_end = size[which.max(DateObs)],
+    .groups = "drop") %>%
+  # (ii) still small on its last record
+  dplyr::filter(size_end <= small_group_max) %>%    
+  # small since its first record in the parallel dispersal unit
+  dplyr::filter(!require_small_from_start | is.na(last_big)) %>%     
+  # (i) seen before in another group
+  dplyr::inner_join(prev_other, by = "GLT", relationship = "many-to-many") %>%
+  dplyr::filter(stay_prev < stay, Group_prev != Group) %>%
+  dplyr::group_by(GLT, stay, Group, UMMPs, end, f_start) %>%
+  # last other group before the parallel dispersal unit
+  dplyr::summarise(prev_Group = Group_prev[which.max(end_prev)], 
+                   prev_end   = max(end_prev), .groups = "drop") %>%
+  # (iii) group never monitored again
+  dplyr::inner_join(group_last, by = "Group") %>%
+  dplyr::filter(group_last_date <= end) %>%
+  # (iv) alive in another group afterwards
+  dplyr::inner_join(grp_next, by = c("GLT", "stay")) %>%
+  dplyr::filter(!is.na(next_Group), next_Group != Group) %>%
+  dplyr::left_join(age_lookup, by = c("GLT", "end" = "DateObs")) %>%
+  dplyr::transmute(GLT, UMMPs, f_start, f_end = next_start, rule = "Parallel dispersal")
+
+
+# Rule: Absent from a monitored group, back in the same group in < N days
+sat_3 = obs %>%
+  dplyr::arrange(GLT, DateObs, ObsOrder) %>%
+  dplyr::group_by(GLT) %>%
+  dplyr::mutate(d_next = dplyr::lead(DateObs), g_next = dplyr::lead(Group)) %>%
+  dplyr::ungroup() %>%
+  dplyr::filter(state == "group", !is.na(g_next), Group == g_next,
+                as.numeric(d_next - DateObs) >= min_gap_days,
+                as.numeric(d_next - DateObs) <  return_max_days) %>%
+  # Monitoring dates of the group strictly between the two records of the individual
+  dplyr::inner_join(dplyr::distinct(grp_dates, Group, monitored_date = DateObs),
+                    by = dplyr::join_by(Group, DateObs < monitored_date, d_next > monitored_date),
+                    relationship = "many-to-many") %>%
+  dplyr::group_by(GLT, Group, UMMPs, DateObs, d_next) %>%
+  dplyr::summarise(n_mon = dplyr::n(), .groups = "drop") %>%
+  # the group WAS monitored without it
+  dplyr::filter(n_mon >= min_followups) %>%
+  dplyr::left_join(age_lookup, by = c("GLT", "DateObs")) %>%
+  dplyr::transmute(GLT, UMMPs, f_start = DateObs, f_end = d_next, rule = "Absent <12 months and back")
+
+# 4. disp_andressa SAT, only if alive afterwards
+sat_disp = disp_andressa %>%
+  dplyr::filter(Disp_result %in% "SAT") %>%
+  dplyr::rename(Group = From_Group) %>% 
+  dplyr::distinct(GLT, Group, Disp_date)
+
+first_after = sat_disp %>%
+  dplyr::inner_join(dplyr::select(obs, GLT, DateObs),  # obs = alive records only
+                    by = dplyr::join_by(GLT, Disp_date < DateObs)) %>%
+  dplyr::group_by(GLT, Disp_date) %>%
+  dplyr::summarise(first_after = min(DateObs), .groups = "drop")
+
+sat_4 = sat_disp %>%
+  dplyr::inner_join(first_after, by = c("GLT", "Disp_date")) %>% # inner join = alive afterwards
+  dplyr::left_join(grp_ummp, by = "Group") %>%
+  dplyr::transmute(GLT, UMMPs, f_start = Disp_date,
+                   f_end = pmin(first_after, Disp_date + max_sat_days),
+                   rule = "Disp. Andressa")
+
+# SAT records NOT counted (never recorded alive afterwards, or not in obs)
+dplyr::anti_join(sat_disp, first_after, by = c("GLT", "Disp_date"))
+
+# REUNITE
+sat_periods = dplyr::bind_rows(sat_1, sat_2, sat_3, sat_4) %>%
+  dplyr::left_join(dplyr::select(ind, GLT, SexOK), by = "GLT") %>%
+  dplyr::filter(!is.na(UMMPs), !is.na(f_start), !is.na(f_end), f_end >= f_start)
+
+dplyr::count(sat_periods, rule)
 
 #### Newly formed groups ------
 # A group is flagged as new if, at first observation:
@@ -1410,6 +1580,13 @@ write.xlsx(as.data.frame(stays2),
            col.names=T,
            row.names=F)
 
+#### Satellites (table) -----
+write.xlsx(as.data.frame(sat_periods),
+           file=here::here("outputs","data","dispersal","sat_periods.xlsx"),
+           sheetName = "Sheet1",
+           col.names=T,
+           row.names=F)
+
 #### Group flux (table) -----
 write.xlsx(as.data.frame(group_flux),
            file=here::here("outputs","data","dispersal","Group_flux.xlsx"),
@@ -1440,3 +1617,4 @@ sf::st_write(
   layer = "disp_lines",
   delete_dsn = TRUE
 )
+
