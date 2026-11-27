@@ -1878,7 +1878,7 @@ compo_gs = compo_gs %>% dplyr::select(-c(compo_found, prev_source))
 obs_patch = obs %>%
   dplyr::filter(!is.na(UMMPs), !is.na(DateObs)) %>%
   dplyr::transmute(
-    UMMPs = as.character(UMMPs), Group, GLT, DateObs,
+    UMMPs = as.character(UMMPs), Group, GLT, DateObs, SexOK, IdadeOK,
     Season_start = season_start_of(lubridate::year(DateObs), lubridate::month(DateObs))) %>%
   dplyr::distinct()
 
@@ -1886,8 +1886,11 @@ patch_year = obs_patch %>%
   dplyr::group_by(UMMPs, Season_start) %>%
   dplyr::summarise(
     n_glt_patch = dplyr::n_distinct(GLT[!is.na(GLT) & !GLT %in% bad]),  # identified animals only
+    n_adult_M_patch = dplyr::n_distinct(GLT[!is.na(GLT) & !GLT %in% bad & SexOK %in% "M" & IdadeOK %in% c("SA","AD")]),
+    n_adult_F_patch = dplyr::n_distinct(GLT[!is.na(GLT) & !GLT %in% bad & SexOK %in% "F" & IdadeOK %in% c("SA","AD")]),
     n_groups_patch = dplyr::n_distinct(Group),
-    n_obs_dates = dplyr::n_distinct(DateObs),      # monitoring effort, to check the counts
+    sex_ratio_patch = dplyr::if_else(n_adult_F_patch > 0, round(n_adult_M_patch / n_adult_F_patch, 2), NA_real_),
+    effort_ummp = dplyr::n_distinct(DateObs), # sampling effort of the UMMP: distinct observation dates per Season_start
     .groups = "drop")
 
 # Previous year (t-1) for lambda; only valid if the patch was monitored in t-1
@@ -1903,6 +1906,12 @@ patch_gs = patch_year %>%
                             round(n_glt_patch / n_glt_prev, 2), NA_real_)) %>%
   dplyr::select(-n_glt_prev)
 
+# Sampling effort of the groups
+effort_group = obs %>%
+  dplyr::transmute(Group, DateObs,
+                   Season_start = season_start_of(lubridate::year(DateObs), lubridate::month(DateObs))) %>%
+  dplyr::distinct() %>%
+  dplyr::count(Group, Season_start, name = "effort_group")
 
 #### 4. Floaters: satellites at mating +/- 1 month ------
 # Count distinct individuals in a satellite period (sat_periods, from the dispersal script)
@@ -1936,6 +1945,8 @@ gs = gs %>%
   dplyr::left_join(compo_gs, by = "row_id", relationship = "one-to-one") %>%
   # PATCH POP SIZE (yearly, by patch and season start)
   dplyr::left_join(patch_gs, by = c("UMMPs", "Season_start"), relationship = "many-to-one") %>%
+  # SAMPLING EFFORT OF THE GROUP
+  dplyr::left_join(effort_group, by = c("Group", "Season_start"), relationship = "many-to-one") %>%
   # FLOATERS
   dplyr::left_join(floaters_gs, by = "row_id", relationship = "one-to-one") %>%
   
@@ -1982,14 +1993,33 @@ repro_final = gs %>%
     dplyr::starts_with("n_floaters"), dplyr::starts_with("dens_floaters"),
     # patch
     dplyr::any_of(c("area_km2", "shape", "enn_m", "dPC", "IQH", "IQHS", 
-                    "n_glt_patch", "n_groups_patch",
+                    "n_glt_patch", "n_adult_M_patch", "n_adult_F_patch", "sex_ratio_patch",
+                    "n_groups_patch",
                     "dens_glt", "dens_groups", 
-                    "lambda")),
+                    "lambda",
+                    "effort_group", "effort_ummp")),
     dplyr::any_of(c("n_days_supp_food", "n_months_supp_food", "mean_days.month_supp", "mean_days.year_supp"))) %>%
   dplyr::arrange(Group, Season_start, season_type)
 
-
-#### 7. Export ------
+#### 7. Add other variables -----
+repro_final = repro_final %>% 
+  # Mutate the mating system as a categorical variable
+  dplyr::mutate(ms = dplyr::case_when(
+    n_repro_females == 1 ~ "Monogamy",
+    n_repro_females > 1 ~ "Polygamy",
+    TRUE ~ NA
+  ),
+  # Sex-bias in the group
+  group_bias = dplyr::case_when(n_males > n_females ~ "male-biased",
+                          n_males < n_females ~ "female-biased",
+                          n_males == n_females ~ "balanced")) %>% 
+  # Mutate a binary MS variable with 0 = monogamy, 1 = polygamy
+  dplyr::mutate(ms_binary = dplyr::case_when(
+    n_repro_females == 1 ~ 0,
+    n_repro_females > 1 ~ 1
+  ))
+  
+#### 8. Export ------
 # Female-level: one row = one reproductive event of a female
 repro_females_export = repro_events %>%
   dplyr::select(Group, Season, season_type, Season_start, Year, GLT, Status, status_in_grp,
